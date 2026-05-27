@@ -1,0 +1,68 @@
+**Three list terminators with different guarantees. `Stream.toList()` (Java 16+) is unmodifiable but null-tolerant — usually what you want. `Collectors.toList()` returns a mutable `ArrayList`. `Collectors.toUnmodifiableList()` is unmodifiable and null-hostile.**
+
+## Side-by-side
+
+| | `Stream.toList()` | `Collectors.toList()` | `Collectors.toUnmodifiableList()` |
+|---|---|---|---|
+| Available since | Java 16 | Java 8 | Java 10 |
+| Result mutable? | No (UOE) | Yes (`ArrayList`) | No (UOE) |
+| Concrete type | Unspecified, often immutable list | `ArrayList` | Immutable list (same family as `List.of`) |
+| Nulls allowed? | Yes | Yes | No (NPE on encountering null) |
+| Performance | Best (no intermediate `ArrayList` always) | Allocates ArrayList | Allocates ArrayList, then copies |
+
+## Code
+
+```java
+List<String> a = Stream.of("a", "b", "c").toList();
+// unmodifiable, null-tolerant — usually correct
+
+List<String> b = Stream.of("a", "b", "c").collect(Collectors.toList());
+// returns ArrayList — mutable, allows further .add()
+
+List<String> c = Stream.of("a", "b", "c")
+    .collect(Collectors.toUnmodifiableList());
+// immutable, null-hostile (would NPE if stream contained null)
+```
+
+## The Stream.toList() upgrade
+
+Before Java 16, the idiomatic terminator was `.collect(Collectors.toList())`. Two problems:
+
+1. The doc said "the returned `List` is not required to be modifiable" — but in practice it always was an `ArrayList`, so callers learned to assume mutability. Changing the implementation would break a lot of code.
+2. Verbose for what should be the most common terminal operation.
+
+`Stream.toList()` fixes both: short syntax, *and* it's explicit about being unmodifiable. It's the modern default.
+
+## Null tolerance — the key differentiator
+
+```java
+List<String> withNull = Stream.of("a", null, "c").toList();
+// works fine — contains [a, null, c]
+
+List<String> oops = Stream.of("a", null, "c")
+    .collect(Collectors.toUnmodifiableList());
+// NullPointerException
+```
+
+`toUnmodifiableList` delegates to `List.of`-family internals, which are null-hostile. `Stream.toList` doesn't have that restriction. If your stream might contain `null`, prefer `Stream.toList()`.
+
+## When to use each
+
+- **`Stream.toList()`** — your default. Unmodifiable, null-tolerant, concise.
+- **`Collectors.toList()`** — only when you genuinely need a mutable `ArrayList` to add to afterwards.
+- **`Collectors.toUnmodifiableList()`** — when you want to enforce no-nulls at collection time (defensive against upstream bugs).
+
+## Related: toSet and toMap
+
+```java
+Set<String> s = stream.collect(Collectors.toUnmodifiableSet());
+Map<K, V> m = stream.collect(Collectors.toUnmodifiableMap(K::extract, V::extract));
+```
+
+No `Stream.toSet()` exists yet (as of Java 25). `Collectors.toUnmodifiableSet/Map` are still the right tools for those.
+
+<Callout kind="tip" title="Migrate confidently">
+`Collectors.toList()` → `Stream.toList()` is safe **only if** you don't subsequently mutate the result. If grepping a codebase finds `.collect(toList()).add(...)`, leave those alone.
+</Callout>
+
+<ProbeNote>Watch for "is `Stream.toList()` guaranteed to return an immutable list or just an unmodifiable one?" — the spec says it returns an unmodifiable List; in practice on current JDKs it returns an instance backed by an array with no separate mutable source. Treat it as immutable for all practical purposes.</ProbeNote>

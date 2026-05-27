@@ -1,0 +1,51 @@
+Power-of-two capacity lets `HashMap` replace a modulo with a single bitwise AND, and lets resize move entries with one bit test instead of rehashing.
+
+## The index calculation
+
+To map a 32-bit hash into a table of length `n`, the obvious choice is `hash % n`. But modulo on a general integer is slow and signed-aware. If `n` is a power of two, the equivalent calculation is:
+
+```java
+int index = (n - 1) & hash;
+```
+
+When `n = 16`, `n - 1 = 0b1111`, so the AND keeps the low four bits of `hash` — exactly the right range `0..15`. This is just one cheap AND instruction.
+
+## The resize trick
+
+When the table doubles from `oldCap` to `2 * oldCap`, each entry's new index depends only on one extra bit of the hash: the bit corresponding to `oldCap`.
+
+```java
+if ((e.hash & oldCap) == 0) {
+    // stays at index i
+} else {
+    // moves to index i + oldCap
+}
+```
+
+This works only because the new mask is `(2*oldCap - 1)`, which is exactly the old mask plus one new high bit. So each old bucket splits into two chains during resize — no rehash, no modulo, no shuffling across distant indices.
+
+<Diagram caption="Resize 16 -> 32 splits each bucket in two">{`oldCap = 16  mask = 0b01111
+newCap = 32  mask = 0b11111
+                       ^
+                       this new bit decides:
+                       0 -> stays at i
+                       1 -> moves to i + 16`}</Diagram>
+
+## What if you pass a non-power-of-two capacity?
+
+`HashMap` rounds it up. The constructor calls `tableSizeFor`, which uses bit-twiddling to find the next power of two:
+
+```java
+static final int tableSizeFor(int cap) {
+    int n = -1 >>> Integer.numberOfLeadingZeros(cap - 1);
+    return (n < 0) ? 1 : (n >= MAXIMUM_CAPACITY) ? MAXIMUM_CAPACITY : n + 1;
+}
+```
+
+Pass `new HashMap<>(17)` and you get a table of length 32, not 17.
+
+<Callout kind="info" title="Trade-off">
+The cost is that the index only uses the low log2(n) bits of the hash. If `hashCode()` only varies in its high bits, all keys collide in one bucket — which is exactly why the spreader function exists.
+</Callout>
+
+<ProbeNote>This is really testing whether you understand the mechanics of `&` vs `%`, and whether you can explain the resize bit trick. Anyone can say "for speed"; the depth shows in the resize and the spreader connection.</ProbeNote>

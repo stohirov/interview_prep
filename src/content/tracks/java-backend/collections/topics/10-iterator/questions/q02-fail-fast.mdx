@@ -1,0 +1,57 @@
+**Fail-fast iterators throw `ConcurrentModificationException` (CME) as soon as they detect structural modification during iteration. Fail-safe iterators tolerate concurrent modification by either iterating a snapshot or being weakly consistent.**
+
+## Fail-fast
+
+Most JDK collections — `ArrayList`, `LinkedList`, `HashMap`, `HashSet`, `TreeMap` — produce fail-fast iterators. They track a `modCount` and throw CME if any structural change is detected between iterator construction and the next operation.
+
+```java
+List<Integer> list = new ArrayList<>(List.of(1, 2, 3));
+for (Integer i : list) {
+    if (i == 2) list.remove(i);   // CME on next iteration
+}
+```
+
+The fix is `iterator.remove()` or `list.removeIf(...)`.
+
+## Fail-safe
+
+Two flavors:
+
+**Snapshot** — `CopyOnWriteArrayList`, `CopyOnWriteArraySet`. The iterator holds a reference to the backing array at the moment it was created. All mutations replace the array; the iterator keeps reading the old one. Cost: every write copies the array.
+
+```java
+List<String> log = new CopyOnWriteArrayList<>(List.of("a", "b"));
+Iterator<String> it = log.iterator();
+log.add("c");                       // safe
+while (it.hasNext()) System.out.println(it.next()); // a, b — NOT c
+```
+
+**Weakly consistent** — `ConcurrentHashMap`, `ConcurrentSkipListMap`, `ConcurrentLinkedQueue`. The iterator:
+- Never throws CME.
+- Reflects state at *some point* at or after iterator construction.
+- May see modifications made after construction (may, not will).
+- Is guaranteed not to traverse an element twice.
+
+## Comparison
+
+| Property              | Fail-fast              | Snapshot (COW)      | Weakly consistent      |
+|-----------------------|------------------------|---------------------|------------------------|
+| Throws CME            | yes (best-effort)      | no                  | no                     |
+| Sees concurrent writes| no — explodes          | no — frozen view    | maybe                  |
+| Memory cost           | low                    | full copy per write | low                    |
+| Thread-safe?          | no                     | yes                 | yes                    |
+
+## Best-effort, not a guarantee
+
+<Callout kind="warn" title="CME is not a synchronization tool">
+The Javadoc is explicit: *"Fail-fast behavior cannot be guaranteed... it would be wrong to write a program that depended on this exception for its correctness."* It's a debugging aid — a missed `modCount` increment or a write-then-read race can let modifications slip past undetected. Use proper synchronization or concurrent collections instead.
+</Callout>
+
+## When to pick which
+
+- Single-threaded mutation during iteration → use `Iterator.remove()` or `removeIf()`.
+- Many readers, few writers → `CopyOnWriteArrayList`.
+- Concurrent map access → `ConcurrentHashMap`.
+- Need atomicity across reads? → external lock or `compute`/`merge`.
+
+<ProbeNote>Follow-up: "Can a single-threaded program throw CME?" Yes — fail-fast triggers on *any* structural change between iterator construction and next operation, threads or not. The classic `for (T t : c) c.remove(t)` is the textbook trap.</ProbeNote>

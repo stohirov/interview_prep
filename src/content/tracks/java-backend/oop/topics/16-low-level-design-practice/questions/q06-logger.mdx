@@ -1,0 +1,201 @@
+A logger LLD round is a stealth design-patterns interview: every component of a real logger (log4j, SLF4J, Logback) maps directly to a GoF pattern, and the interviewer wants to see you name them. Levels and pluggable appenders are the headline; the patterns are the substance.
+
+## Requirements
+
+- Multiple levels: TRACE, DEBUG, INFO, WARN, ERROR.
+- A logger has a level threshold; messages below the threshold are dropped.
+- Pluggable **appenders** (where the log goes): Console, File, Network, etc.
+- Loggers are typically obtained by name (often the class name) and form a hierarchy: `com.acme.Foo` inherits config from `com.acme` from `com` from the root.
+- Thread-safe.
+- Out of scope: structured logging, async batching specifics (mention but don't implement).
+
+## Class diagram
+
+<Diagram caption="Logger entities and the patterns they embody">{`
+   LogManager (Singleton / DI)
+       |
+       v
+    Logger ("com.acme.Foo")        -- inherits level + appenders from parent
+       |       \\
+       |        \\__ Logger ("com.acme")  -> Logger ("com")  -> Logger (root)
+       v
+   List<Appender>  (Strategy / pluggable output sinks)
+       |
+       +-- ConsoleAppender
+       +-- FileAppender (with Formatter — Strategy)
+       +-- NetworkAppender (async with bounded queue)
+
+   LogEvent (Value object: level, timestamp, thread, message, throwable)
+`}</Diagram>
+
+## Core types
+
+```java
+public enum LogLevel {
+    TRACE(0), DEBUG(1), INFO(2), WARN(3), ERROR(4);
+    private final int rank;
+    LogLevel(int r) { this.rank = r; }
+    public boolean atLeast(LogLevel other) { return this.rank >= other.rank; }
+}
+
+public record LogEvent(
+    Instant at,
+    String thread,
+    String loggerName,
+    LogLevel level,
+    String message,
+    Throwable error
+) {}
+
+public interface Appender {
+    void append(LogEvent event);
+}
+
+public interface Formatter {
+    String format(LogEvent event);
+}
+```
+
+`LogEvent` as a `record` is the modern touch — immutable, equals/hashCode for free, friendly to async pipelines.
+
+## The Logger
+
+```java
+public final class Logger {
+    private final String name;
+    private final Logger parent;          // null for root
+    private LogLevel level;               // null means inherit
+    private final List<Appender> appenders = new CopyOnWriteArrayList<>();
+    private boolean additive = true;      // also forward to parent's appenders
+
+    Logger(String name, Logger parent, LogLevel level) {
+        this.name = name; this.parent = parent; this.level = level;
+    }
+
+    public void log(LogLevel lvl, String msg) { log(lvl, msg, null); }
+
+    public void log(LogLevel lvl, String msg, Throwable t) {
+        if (!isEnabled(lvl)) return; // cheap check first
+        LogEvent event = new LogEvent(Instant.now(), Thread.currentThread().getName(),
+                                       name, lvl, msg, t);
+        callAppenders(event);
+    }
+
+    public boolean isEnabled(LogLevel lvl) {
+        LogLevel effective = effectiveLevel();
+        return lvl.atLeast(effective);
+    }
+
+    private LogLevel effectiveLevel() {
+        if (level != null) return level;
+        return parent != null ? parent.effectiveLevel() : LogLevel.INFO;
+    }
+
+    private void callAppenders(LogEvent event) {
+        for (Appender a : appenders) {
+            try { a.append(event); } catch (RuntimeException ex) { /* never throw from log */ }
+        }
+        if (additive && parent != null) parent.callAppenders(event);
+    }
+
+    public void addAppender(Appender a) { appenders.add(a); }
+    public void setLevel(LogLevel l) { this.level = l; }
+}
+```
+
+Two design beats worth flagging:
+
+- **`isEnabled` short-circuit before building the `LogEvent`**. Allocating `Instant`, looking up the thread name, and constructing a record is cheap-ish but not free — when a logger is configured at WARN, every debug call should cost almost nothing.
+- **Swallow exceptions inside the appender loop**. A failing FileAppender (disk full) must not crash the application's request thread.
+
+## The LogManager
+
+```java
+public final class LogManager {
+    private static final LogManager INSTANCE = new LogManager();
+    public static LogManager get() { return INSTANCE; }
+
+    private final Map<String, Logger> loggers = new ConcurrentHashMap<>();
+    private final Logger root = new Logger("ROOT", null, LogLevel.INFO);
+
+    public Logger getLogger(String name) {
+        return loggers.computeIfAbsent(name, n -> {
+            String parentName = n.contains(".") ? n.substring(0, n.lastIndexOf('.')) : null;
+            Logger parent = parentName == null ? root : getLogger(parentName);
+            return new Logger(n, parent, null); // inherits level from parent
+        });
+    }
+
+    public Logger root() { return root; }
+}
+```
+
+Loggers are obtained by dotted name; `getLogger` recursively materializes parents. Inheritance gives you Logback-style "set log level once at `com.acme`, everything beneath inherits."
+
+## Two appenders
+
+```java
+public final class ConsoleAppender implements Appender {
+    private final Formatter formatter;
+    public ConsoleAppender(Formatter f) { this.formatter = f; }
+    public void append(LogEvent e) { System.out.println(formatter.format(e)); }
+}
+
+public final class AsyncFileAppender implements Appender, AutoCloseable {
+    private final BlockingQueue<LogEvent> queue = new ArrayBlockingQueue<>(10_000);
+    private final Thread worker;
+    private final Formatter formatter;
+    private final BufferedWriter writer;
+    private volatile boolean running = true;
+
+    public AsyncFileAppender(Path path, Formatter f) throws IOException {
+        this.formatter = f;
+        this.writer = Files.newBufferedWriter(path, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        this.worker = new Thread(this::drain, "log-writer");
+        this.worker.setDaemon(true);
+        this.worker.start();
+    }
+
+    public void append(LogEvent e) {
+        if (!queue.offer(e)) {/* drop on overflow — or block; design choice */}
+    }
+
+    private void drain() {
+        while (running || !queue.isEmpty()) {
+            try {
+                LogEvent e = queue.poll(1, TimeUnit.SECONDS);
+                if (e != null) { writer.write(formatter.format(e)); writer.newLine(); }
+            } catch (Exception ex) { /* log to stderr */ }
+        }
+    }
+
+    public void close() throws Exception { running = false; worker.join(); writer.close(); }
+}
+```
+
+## Patterns at every layer
+
+| Component | Pattern | Reason |
+|---|---|---|
+| `LogManager` | Singleton (or DI-managed) | One source of truth for logger registry |
+| `Appender` | Strategy | Output destination is swappable per logger |
+| `Formatter` | Strategy | Format (plain, JSON, key-value) is independent of where it's written |
+| Level inheritance | Chain of Responsibility (kind of) | Each logger asks its parent if not configured |
+| Async file appender | Producer/Consumer + Bounded Buffer | Decouples log producers from disk I/O |
+| `LogEvent` | Value object (record) | Immutable, safe to hand to async consumers |
+| Level filtering | Could be CoR (filter chain) or Observer | Each appender can have its own threshold and ignore lower events |
+
+## Trade-offs to volunteer
+
+- **Sync vs async appenders**: sync is simple but ties request latency to disk I/O. Async needs a bounded queue and a drop/block policy.
+- **Drop-on-overflow vs block**: production loggers default to drop with a counter — blocking can take down the application if disk hangs.
+- **Per-thread MDC** (mapped diagnostic context) for request IDs — `ThreadLocal` traditionally, `ScopedValue` for virtual-thread era.
+- **Don't reinvent**: name SLF4J + Logback as the production answer. The interview is checking your *thinking*, not asking you to ship a new logger.
+
+## Extension questions
+
+- "How would you propagate a request ID into every log line?" → MDC / `ScopedValue`.
+- "How do you reconfigure log levels at runtime without restart?" → JMX, admin endpoint, or file-watcher on a config file.
+- "How would this look with virtual threads?" → producer thread per virtual thread is fine; a single async writer thread is still the right consumer.
+
+<ProbeNote>Two things the interviewer wants to hear: (1) the inheritance hierarchy with effective-level lookup — that's what real loggers do; (2) Appender as Strategy and the producer/consumer pattern for async writes. Bonus credit for `isEnabled` short-circuit *before* building the LogEvent, and for citing SLF4J/Logback as what you'd actually use in production.</ProbeNote>

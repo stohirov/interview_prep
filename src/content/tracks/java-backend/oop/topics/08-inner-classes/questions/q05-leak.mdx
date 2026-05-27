@@ -1,0 +1,103 @@
+**A non-static inner class holds a hidden reference to its enclosing instance via the synthetic `this$0` field — any time the inner instance outlives its logical scope (posted to a handler, stored in a static collection, used as a listener), it keeps the entire enclosing object reachable.** This is the most famous Android memory leak, the textbook Swing `EventListener` leak, and a regular interview question for any role that has dealt with GUI or long-running JVMs.
+
+## The minimal example
+
+```java
+class HeavyService {
+    private final byte[] cache = new byte[1024 * 1024 * 100];   // 100 MB
+
+    public Runnable scheduleHeartbeat(ScheduledExecutorService ex) {
+        return ex.scheduleAtFixedRate(new Runnable() {           // anonymous inner
+            @Override public void run() { /* pings something, never touches cache */ }
+        }, 0, 1, TimeUnit.SECONDS).get();
+    }
+}
+
+new HeavyService().scheduleHeartbeat(globalExecutor);
+// `HeavyService` is unreachable from your code — but the executor holds the Runnable,
+// the Runnable's this$0 holds the HeavyService, and so the 100 MB sticks forever.
+```
+
+You never use `cache` from the Runnable. You may not even *know* the Runnable secretly references its enclosing instance. But javac inserted `this$0`, and the GC respects it.
+
+## The Android Handler classic
+
+The most-cited real-world version, from the Android Lint rule docs:
+
+```java
+public class MainActivity extends Activity {
+    private final Handler handler = new Handler() {              // non-static inner
+        @Override public void handleMessage(Message msg) { ... }
+    };
+
+    @Override protected void onCreate(Bundle b) {
+        super.onCreate(b);
+        handler.postDelayed(this::doSomething, 60_000);          // 60-second delay
+    }
+}
+
+// User rotates the screen at 5 seconds. Activity is "destroyed."
+// But the message queue still holds a Message holding the Handler holding the
+// Activity (via this$0). The Activity — and its inflated View tree, bitmaps,
+// and database cursors — cannot be GC'd until the 60-second post fires.
+```
+
+Multiply by a few rotations and the app OOMs.
+
+## Why the GC can't help
+
+The GC marks anything reachable from a GC root. The executor's task queue is a GC root (or transitively reachable from one). The task is a Runnable. The Runnable's `this$0` is the `HeavyService`. The cache is a field of `HeavyService`. All five hops are real strong references, indistinguishable from intentional ones. The GC does its job perfectly — the bug is in the developer's mental model.
+
+## The fixes
+
+### 1. Make the nested class `static`
+
+```java
+private static class Heartbeat implements Runnable {
+    @Override public void run() { ... }
+}
+ex.scheduleAtFixedRate(new Heartbeat(), 0, 1, SECONDS);
+```
+
+No `this$0`, no enclosing reference, no leak. This is Effective Java Item 24 in production form.
+
+### 2. Use a static class plus a WeakReference
+
+```java
+private static class SafeHandler extends Handler {
+    private final WeakReference<MainActivity> ref;
+    SafeHandler(MainActivity a) { this.ref = new WeakReference<>(a); }
+    @Override public void handleMessage(Message msg) {
+        MainActivity a = ref.get();
+        if (a != null) { ... }
+    }
+}
+```
+
+The Activity can now be GC'd once your code stops referencing it; the handler tolerates the loss.
+
+### 3. Use a lambda — but only when it doesn't capture `this`
+
+```java
+ex.scheduleAtFixedRate(() -> System.out.println("tick"), 0, 1, SECONDS);  // safe
+ex.scheduleAtFixedRate(() -> this.tick(),                  0, 1, SECONDS); // leaks
+```
+
+A non-capturing lambda has no enclosing reference. A `this::method` reference or a lambda that uses an instance field *does* capture `this` — same leak shape as an anonymous class.
+
+### 4. Deregister explicitly
+
+For listener patterns (Swing `addActionListener`, observer callbacks), explicitly call the matching `removeActionListener` when the source goes out of scope. Profilers regularly flag dangling listeners as leak suspects.
+
+## Detecting the bug
+
+- **Heap dump + Eclipse MAT** — look for "dominator tree" rooted at your supposedly-dead class. The path to GC root will show `this$0` if it's an inner-class leak.
+- **JFR** — `Old Object Sample` event tracks long-lived allocations.
+- **LeakCanary (Android)** — purpose-built for this exact bug.
+- **Static analysis** — SpotBugs `SIC_INNER_SHOULD_BE_STATIC`, Android Lint `HandlerLeak`.
+
+<Callout kind="warn" title="The default mistake">
+Most JVM developers go years not knowing that `new Runnable() { ... }` inside an instance method silently captures the enclosing object. This is the *single* most common explanation in postmortems titled "why did our service slowly OOM over 24 hours."
+</Callout>
+
+<ProbeNote>The interviewer wants the `this$0` synthetic field, a real scenario (the Android Handler is the canonical one), and the fix hierarchy: static nested class first, weak reference second, explicit deregistration third. Naming Effective Java Item 24 or LeakCanary lands as senior signal.</ProbeNote>

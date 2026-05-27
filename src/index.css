@@ -1,0 +1,92 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light dark;
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+  ::selection {
+    @apply bg-brand-500/30;
+  }
+}
+
+@layer components {
+  .shiki {
+    @apply rounded-lg p-4 overflow-x-auto text-sm leading-relaxed my-4 border border-slate-200 dark:border-slate-800;
+  }
+
+  html.dark .shiki,
+  html.dark .shiki span {
+    color: var(--shiki-dark) !important;
+    background-color: var(--shiki-dark-bg) !important;
+    font-style: var(--shiki-dark-font-style) !important;
+    font-weight: var(--shiki-dark-font-weight) !important;
+    text-decoration: var(--shiki-dark-text-decoration) !important;
+  }
+
+  .prose-content {
+    @apply leading-relaxed;
+  }
+  .prose-content h1 {
+    @apply text-3xl font-semibold mt-8 mb-4 text-slate-900 dark:text-slate-50;
+  }
+  .prose-content h2 {
+    @apply text-2xl font-semibold mt-7 mb-3 text-slate-900 dark:text-slate-50;
+  }
+  .prose-content h3 {
+    @apply text-xl font-semibold mt-6 mb-2 text-slate-900 dark:text-slate-50;
+  }
+  .prose-content p {
+    @apply my-3 text-slate-700 dark:text-slate-300;
+  }
+  .prose-content ul {
+    @apply list-disc pl-6 my-3 text-slate-700 dark:text-slate-300 space-y-1;
+  }
+  .prose-content ol {
+    @apply list-decimal pl-6 my-3 text-slate-700 dark:text-slate-300 space-y-1;
+  }
+  .prose-content code:not(.shiki code) {
+    @apply px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-brand-700 dark:text-brand-100 text-[0.9em] font-mono;
+  }
+  .prose-content a {
+    @apply text-brand-600 dark:text-brand-100 underline underline-offset-2 hover:text-brand-700 dark:hover:text-brand-50;
+  }
+  .prose-content blockquote {
+    @apply border-l-4 border-brand-500/40 pl-4 italic text-slate-600 dark:text-slate-400 my-4;
+  }
+  .prose-content table {
+    @apply w-full my-4 text-sm border-collapse;
+  }
+  .prose-content th {
+    @apply text-left font-semibold border-b border-slate-200 dark:border-slate-700 px-3 py-2 bg-slate-100 dark:bg-slate-800;
+  }
+  .prose-content td {
+    @apply px-3 py-2 border-b border-slate-200 dark:border-slate-800 align-top;
+  }
+  .prose-content strong {
+    @apply text-slate-900 dark:text-slate-100 font-semibold;
+  }
+}
+
+@media print {
+  .no-print { display: none !important; }
+  body { background: white !important; color: black !important; }
+  .shiki { border: 1px solid #ccc !important; }
+  a { color: black !important; text-decoration: underline !important; }
+  .page-break { page-break-before: always; }
+  aside, header, footer { display: none !important; }
+  main { max-width: 100% !important; padding: 0 !important; }
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { @apply bg-slate-300 dark:bg-slate-700 rounded; }
+::-webkit-scrollbar-thumb:hover { @apply bg-slate-400 dark:bg-slate-600; }

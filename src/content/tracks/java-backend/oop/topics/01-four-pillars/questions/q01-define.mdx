@@ -1,0 +1,57 @@
+**Each pillar reduces to one sentence plus one line of code.** The trick is that the four sentences must not collapse into each other — if your "abstraction" sentence sounds identical to your "encapsulation" sentence, the interviewer will pull on that thread.
+
+## Encapsulation
+
+*Bundle state with the methods that operate on it, and expose only what callers need to depend on.*
+
+```java
+public final class Counter {
+    private int value;                          // state hidden
+    public void increment() { value++; }        // controlled mutation
+    public int value()      { return value; }   // controlled read
+}
+```
+
+Callers cannot set `value` to `-42` and break the invariant "monotonically non-decreasing."
+
+## Inheritance
+
+*A subclass reuses and specializes a superclass's fields and methods, expressing an `is-a` relationship.*
+
+```java
+public class Animal { public String describe() { return "an animal"; } }
+public class Dog extends Animal {
+    @Override public String describe() { return "a dog"; }   // specialized
+}
+```
+
+A `Dog` *is an* `Animal` — anywhere `Animal` is expected, `Dog` substitutes.
+
+## Polymorphism
+
+*One reference type can hold objects of many runtime types, and the same call dispatches to whichever concrete method the runtime object provides.*
+
+```java
+Animal a = new Dog();
+System.out.println(a.describe());   // prints "a dog" — runtime dispatch
+```
+
+The compile-time type is `Animal`; the runtime type is `Dog`; the JVM picks the `Dog` override.
+
+## Abstraction
+
+*Define the contract — what a type does — without committing to how it does it.*
+
+```java
+public interface PaymentGateway {
+    Receipt charge(Money amount, Card card);   // what, not how
+}
+```
+
+`StripeGateway` and `MockGateway` both satisfy the contract; callers code to the interface and never against a vendor SDK.
+
+<Callout kind="tip" title="One-sentence test">
+If you swap any two definitions, does the sentence still feel true? If "encapsulation = hide what callers don't need" and "abstraction = hide what callers don't need" both feel right, you've conflated them. Abstraction is about *designing* the surface; encapsulation is about *protecting* the internals.
+</Callout>
+
+<ProbeNote>The interviewer is checking that you have four distinct mental models, not one foggy one. Strong candidates pair each definition with a verb: encapsulate *protects*, inherit *reuses*, polymorphism *dispatches*, abstraction *contracts*. Weak ones say "abstraction is hiding details" and "encapsulation is hiding details" and then can't recover.</ProbeNote>

@@ -1,0 +1,60 @@
+**`instanceof` allows subclass instances to be `equals`-equal to superclass instances (flexible, but breaks symmetry the moment a subclass adds state); `getClass()` enforces same-exact-class on both sides (rigid, but always contract-correct).** Effective Java sides with `instanceof` because in practice you should not be inheriting from instantiable value classes anyway — but the trade-off is real and worth understanding.
+
+## The two idioms side by side
+
+```java
+// instanceof — Liskov-friendly
+@Override public boolean equals(Object o) {
+    if (!(o instanceof Point p)) return false;
+    return p.x == x && p.y == y;
+}
+
+// getClass — exact-class only
+@Override public boolean equals(Object o) {
+    if (o == null || getClass() != o.getClass()) return false;
+    Point p = (Point) o;
+    return p.x == x && p.y == y;
+}
+```
+
+## What `instanceof` buys you
+
+- A `Point` and a same-coordinate `ImmutablePoint extends Point` can be `equals`. Useful if you have wrapper subclasses (synchronized wrapper, logging wrapper) that should be interchangeable with the base.
+- It respects **Liskov substitution**: any `Point` (including subclass instances) is treated as a `Point`.
+- It is the idiom the JDK uses for its own value types — `String`, `Integer`, etc.
+
+## What `instanceof` costs you
+
+The instant a subclass adds a state-bearing field, you get the symmetric-equals trap (see q03). `Point.equals(coloredPoint)` returns `true`, `coloredPoint.equals(point)` returns `false`. The fix is to forbid that kind of subclassing — make the class `final`.
+
+## What `getClass()` buys you
+
+- Symmetry is unconditional: `a.equals(b) == b.equals(a)` because both reject any class mismatch.
+- Subclasses can freely add state without breaking the parent's contract.
+
+## What `getClass()` costs you
+
+- It **violates Liskov**: `Sub` is supposedly an `Animal`, but `animal.equals(sub)` returns `false` even when all `Animal` state matches. You cannot transparently substitute subclasses.
+- It interacts badly with proxies. Hibernate generates `CGLIB`/`ByteBuddy` subclasses for lazy entities, and `getClass()`-based equals will say a managed entity is *not* equal to its detached `new` form — a real production bug that the Hibernate docs warn about.
+
+## The decision matrix
+
+| Situation | Use |
+|---|---|
+| Class is `final` (Effective Java's preferred shape for value types) | `instanceof` — there are no subclasses to worry about |
+| Class is `sealed` and no subclass adds state | `instanceof` |
+| Class is open for extension and subclasses may add state | `getClass()`, but consider re-designing |
+| You use a proxying framework (Hibernate, Spring AOP) | `instanceof` — proxies are subclasses |
+| You're writing a `record` | Neither — it's generated, uses `instanceof` style under the hood |
+
+## Effective Java's verdict
+
+> "The right way to combine these is to use composition, not inheritance. Use `instanceof`, and forbid the subclassing problem with `final`."
+
+In other words: the `instanceof` vs `getClass()` debate is *resolved* by avoiding the situation that creates the dilemma. Make value classes `final` (or records) and `instanceof` is always correct.
+
+<Callout kind="warn" title="Hibernate war story">
+Pre-modern Hibernate produced a million-bug-report stream of "`entity.equals(loadedEntity)` returns false." Cause: developers wrote `getClass()`-based equals; Hibernate returned a subclass proxy; types didn't match. The fix everyone learns the hard way: use `instanceof` for any class an ORM may proxy.
+</Callout>
+
+<ProbeNote>The interviewer wants you to articulate both sides, explain that the *real* answer is "make the class final and use instanceof," and ideally mention the Hibernate proxy gotcha — that's the senior-engineering signal.</ProbeNote>

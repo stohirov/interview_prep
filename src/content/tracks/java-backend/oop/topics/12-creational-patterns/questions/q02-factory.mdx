@@ -1,0 +1,118 @@
+**Factory Method creates one product through a method that subclasses override; Abstract Factory creates a *family* of related products through a separate factory object.** The distinguishing axis is whether the variation is along one product type (Factory Method) or across multiple coordinated product types (Abstract Factory). Confuse them at your peril — they look similar in code but solve different design problems.
+
+## Factory Method — one product, subclass decides
+
+The pattern: a base class defines a method that returns a product. Subclasses override the method to return their flavor of the product.
+
+```java
+public abstract class Logger {
+    public final void log(String msg) {
+        Formatter f = createFormatter();         // factory method
+        System.out.println(f.format(msg));
+    }
+    protected abstract Formatter createFormatter();
+}
+
+public class JsonLogger extends Logger {
+    @Override protected Formatter createFormatter() { return new JsonFormatter(); }
+}
+public class TextLogger extends Logger {
+    @Override protected Formatter createFormatter() { return new TextFormatter(); }
+}
+```
+
+The base class's algorithm (`log`) is fixed. The *type of one collaborator* (the formatter) is decided by the subclass. Classic Template Method + Factory Method combo.
+
+**When to use:**
+
+- A framework defines a workflow but lets clients plug in the concrete type.
+- The product type varies along a single axis you can express as a class hierarchy.
+
+**Java JDK examples:**
+
+- `Collection.iterator()` — every collection overrides to return its own iterator type.
+- `URLStreamHandlerFactory.createURLStreamHandler(String protocol)`.
+
+## Abstract Factory — a family of products
+
+The pattern: an interface declares methods to create *several* related products. Each concrete factory implementation produces a coordinated set.
+
+```java
+public interface UiFactory {
+    Button createButton();
+    Menu   createMenu();
+    Window createWindow();
+}
+
+public class MacUiFactory implements UiFactory {
+    public Button createButton() { return new MacButton(); }
+    public Menu   createMenu()   { return new MacMenu(); }
+    public Window createWindow() { return new MacWindow(); }
+}
+public class WindowsUiFactory implements UiFactory {
+    public Button createButton() { return new WinButton(); }
+    public Menu   createMenu()   { return new WinMenu(); }
+    public Window createWindow() { return new WinWindow(); }
+}
+
+// Client
+public class App {
+    private final UiFactory ui;
+    public App(UiFactory ui) { this.ui = ui; }
+    public void render() {
+        ui.createWindow().add(ui.createMenu());
+        ui.createWindow().add(ui.createButton());
+        // Guaranteed: all Mac or all Windows — can never mix
+    }
+}
+```
+
+The *family* invariant is the point. `App` can never accidentally pair a `MacButton` with a `WinWindow` — the factory enforces consistency.
+
+**When to use:**
+
+- Multiple product types must vary *together*.
+- Cross-cutting variations (look-and-feel themes, database flavors, cloud providers).
+
+**Java JDK examples:**
+
+- `DocumentBuilderFactory` + `DocumentBuilder` + `Document` — though it's also a static-factory style.
+- `javax.xml.transform.TransformerFactory` and its product `Transformer`.
+
+## The structural diagram
+
+<Diagram caption="Factory Method vs Abstract Factory">{`Factory Method:                    Abstract Factory:
+
+  Logger                              UiFactory
+    | createFormatter()                | createButton()
+    |                                  | createMenu()
+   /+\\                                | createWindow()
+ JsonL TextL                          /+\\
+   |     |                          MacUiF WinUiF
+  JsonF  TextF                       /|\\   /|\\
+                                  MacButton, MacMenu, ...`}</Diagram>
+
+## How to choose
+
+Ask: **does the variation cross multiple product types that must stay consistent?**
+
+- Yes → Abstract Factory. You need the family invariant.
+- No, just one product type varying → Factory Method (or a static factory method if subclassing is overkill).
+
+## A modern twist
+
+Both patterns predate generics and lambdas. In modern Java, a `Supplier<T>` parameter often replaces Factory Method for the single-product case:
+
+```java
+public class Logger {
+    private final Supplier<Formatter> formatterFactory;
+    public Logger(Supplier<Formatter> f) { this.formatterFactory = f; }
+    public void log(String msg) { System.out.println(formatterFactory.get().format(msg)); }
+}
+
+new Logger(JsonFormatter::new).log("hi");
+```
+
+No subclass needed; the "factory" is a method reference. Abstract Factory still pays off when there are multiple coordinated products.
+
+<ProbeNote>The interviewer wants the one-line distinguisher: "method = one product subclass decides; abstract = family of products coordinated by a factory object". Bonus points for naming a JDK example of each and for noting that `Supplier<T>` collapses the simple cases in modern Java.</ProbeNote>

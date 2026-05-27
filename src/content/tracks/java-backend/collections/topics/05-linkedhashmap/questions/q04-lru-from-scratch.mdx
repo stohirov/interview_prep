@@ -1,0 +1,113 @@
+Combine a `HashMap<K, Node>` for O(1) lookup with a custom doubly-linked list for O(1) reorder and eviction. The hash map points to nodes; the list maintains recency order via dummy head/tail sentinels that simplify edge cases.
+
+## The full class
+
+```java
+public final class LruCache<K, V> {
+
+    private static final class Node<K, V> {
+        K key;
+        V value;
+        Node<K, V> prev, next;
+
+        Node(K key, V value) {
+            this.key = key;
+            this.value = value;
+        }
+    }
+
+    private final int capacity;
+    private final Map<K, Node<K, V>> index;
+    private final Node<K, V> head; // sentinel before MRU
+    private final Node<K, V> tail; // sentinel after LRU
+
+    public LruCache(int capacity) {
+        if (capacity <= 0) throw new IllegalArgumentException("capacity must be > 0");
+        this.capacity = capacity;
+        this.index = new HashMap<>(capacity * 4 / 3 + 1);
+        this.head = new Node<>(null, null);
+        this.tail = new Node<>(null, null);
+        head.next = tail;
+        tail.prev = head;
+    }
+
+    public V get(K key) {
+        Node<K, V> node = index.get(key);
+        if (node == null) return null;
+        moveToFront(node);
+        return node.value;
+    }
+
+    public void put(K key, V value) {
+        Node<K, V> existing = index.get(key);
+        if (existing != null) {
+            existing.value = value;
+            moveToFront(existing);
+            return;
+        }
+        Node<K, V> node = new Node<>(key, value);
+        index.put(key, node);
+        addToFront(node);
+        if (index.size() > capacity) {
+            Node<K, V> lru = tail.prev;
+            unlink(lru);
+            index.remove(lru.key);
+        }
+    }
+
+    public int size() { return index.size(); }
+
+    // --- list operations: all O(1) ---
+
+    private void addToFront(Node<K, V> node) {
+        node.prev = head;
+        node.next = head.next;
+        head.next.prev = node;
+        head.next = node;
+    }
+
+    private void unlink(Node<K, V> node) {
+        node.prev.next = node.next;
+        node.next.prev = node.prev;
+        node.prev = node.next = null;
+    }
+
+    private void moveToFront(Node<K, V> node) {
+        unlink(node);
+        addToFront(node);
+    }
+}
+```
+
+## Why sentinel nodes
+
+The dummy `head` and `tail` mean every real node always has non-null `prev` and `next`. No null checks in `unlink`, no special "is this the only node" case in `addToFront`. The cost is two extra `Node` allocations at construction time — well worth it for cleaner code and zero branching in the hot path.
+
+<Diagram caption="Layout: hash map points into a doubly-linked list">{`index:  k1 -> nodeA
+        k2 -> nodeB
+        k3 -> nodeC
+
+list:  head <-> nodeC <-> nodeA <-> nodeB <-> tail
+                ^                       ^
+                MRU                     LRU`}</Diagram>
+
+## Complexity
+
+<ComplexityTable rows={[
+  {op: "get", best: "O(1)", average: "O(1)", worst: "O(1)", note: "hash lookup + 6 pointer writes"},
+  {op: "put (new)", best: "O(1)", average: "O(1)", worst: "O(1)", note: "may evict LRU; still O(1)"},
+  {op: "put (existing)", best: "O(1)", average: "O(1)", worst: "O(1)", note: "value swap + move-to-front"},
+  {op: "size", best: "O(1)", average: "O(1)", worst: "O(1)", note: "delegates to HashMap.size"}
+]} />
+
+## Variations interviewers ask about
+
+- **Thread safety**: wrap with `ReentrantLock` or a `synchronized` block. (Lock-free LRU is hard — for production, use Caffeine.)
+- **TTL eviction**: store a timestamp on each node, lazily check on `get`, or use a `DelayQueue`.
+- **LFU instead of LRU**: track frequency counts, maintain a frequency-to-list-of-keys structure. Different problem; not a tweak.
+
+<Callout kind="info" title="Why HashMap, not your own table?">
+The interviewer cares that you know `HashMap` is O(1) and that the *structural* trick is the doubly-linked list. Re-implementing the hash table from scratch wastes time and risks bugs.
+</Callout>
+
+<ProbeNote>Two patterns make-or-break here: (1) the hash map values are *nodes*, not raw values, so you can locate the list position in O(1); (2) the doubly-linked list with sentinels makes every operation O(1) with no edge-case branching. Forgetting either turns the answer into O(n).</ProbeNote>

@@ -1,0 +1,58 @@
+**The remaining real differences are state, constructors, and multiple inheritance — every other contrast people cite (abstract methods, partial implementations, default methods) has been blurred since Java 8.** A clean answer enumerates the differences in a table, then closes with a "when to use" rule.
+
+## Side-by-side
+
+| Aspect                       | Abstract class                                  | Interface                                              |
+|------------------------------|-------------------------------------------------|--------------------------------------------------------|
+| Instance state (fields)      | Yes                                             | No (only `public static final` constants)              |
+| Constructors                 | Yes                                             | No                                                     |
+| Method bodies                | Concrete or abstract methods                    | `abstract`, `default`, `static`, `private` (J9+)       |
+| Access modifiers             | public / protected / package / private          | public only on abstract/default; private on helpers    |
+| Inheritance per class        | One abstract class can be extended              | Many interfaces can be implemented                     |
+| Inheritance of state         | Yes (fields)                                    | No                                                     |
+| Constructor of subtype calls | `super(...)` to the abstract class              | No constructor to call on an interface                 |
+| Can be instantiated          | No (must be subclassed)                         | No (must be implemented)                               |
+| Designed for                 | "is-a" + shared state                           | Capability contract                                    |
+| Evolution                    | Add a method = breaking change                  | Add a `default` method = source-compatible             |
+
+## What still tips the choice
+
+```java
+// Abstract class — partial implementation + state
+public abstract class HttpServer {
+    private final int port;                          // shared state
+    protected HttpServer(int port) { this.port = port; }
+    public final void start() { bind(port); accept(); }   // template method
+    protected abstract void accept();                // hook
+}
+
+// Interface — capability the implementer mixes in
+public interface MetricsPublisher {
+    void publish(String name, double value);
+    default void publishCount(String name) { publish(name, 1.0); }
+}
+
+public final class NettyServer
+        extends HttpServer
+        implements MetricsPublisher, AutoCloseable {     // multiple capabilities
+    public NettyServer(int port) { super(port); }
+    @Override protected void accept()                    { /* ... */ }
+    @Override public    void publish(String n, double v) { /* ... */ }
+    @Override public    void close()                     { /* ... */ }
+}
+```
+
+`HttpServer` *owns* port state and enforces a startup sequence — that's an abstract class. `MetricsPublisher` is a sideways capability — that's an interface. `NettyServer` combines them.
+
+## When to use which
+
+- **Abstract class** when you need (a) shared instance fields, (b) a constructor that enforces invariants on every subtype, or (c) a strict "is-a" hierarchy with partial implementation.
+- **Interface** for everything else — capabilities, contracts, multiple-inheritance-friendly designs, library evolution.
+
+If you can't decide, lean interface. You can always introduce an abstract `AbstractFoo` *skeletal implementation* alongside the interface (the JCF pattern — `List` + `AbstractList`). That gives implementers a choice: extend the skeletal class for convenience, or implement the interface fresh.
+
+<Callout kind="tip" title="Skeletal implementation pattern">
+`AbstractList`, `AbstractMap`, `AbstractSet` are the textbook examples. The interface defines the contract; the abstract class supplies the boilerplate so concrete implementations only override the primitive operations.
+</Callout>
+
+<ProbeNote>The interviewer wants the comparison table on your lips and the decision rubric at the end. Strong candidates volunteer that Java 8 changed the calculus by adding default methods, and name the skeletal-implementation pattern as the way to get the best of both. Weak answers list outdated differences ("interfaces can't have methods with bodies") that haven't been true since 2014.</ProbeNote>

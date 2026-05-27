@@ -1,0 +1,103 @@
+**Record patterns** (JEP 440, finalized Java 21) let you destructure a record's components directly inside a pattern. Combined with pattern-matching `switch`, you go from "test type, then call accessors" to "destructure straight into local variables" — and the patterns nest, so you can pull apart records inside records in one expression.
+
+## A flat record pattern
+
+```java
+public record Point(int x, int y) {}
+
+String describe(Object o) {
+    return switch (o) {
+        case Point(int x, int y) -> "point at " + x + "," + y;
+        default -> "not a point";
+    };
+}
+```
+
+The pattern `Point(int x, int y)` matches any `Point` and binds its components to fresh locals `x` and `y`. No `p.x()`, no `p.y()`. The component names in the pattern can be anything you like — they're new bindings, not references to the record's component names.
+
+## Type inference with `var`
+
+You don't have to spell out component types if the record's declared types are unambiguous:
+
+```java
+case Point(var x, var y) -> "point at " + x + "," + y;
+```
+
+`var` infers the declared component type (`int` here). Useful when the type is verbose; explicit when you want documentation.
+
+## Nested record patterns
+
+The payoff scales with depth. Given:
+
+```java
+public record Address(String street, String city) {}
+public record User(String name, Address address) {}
+```
+
+You can destructure both levels in one go:
+
+```java
+String cityOf(User u) {
+    return switch (u) {
+        case User(var name, Address(var street, var city)) -> city;
+    };
+}
+```
+
+The pre-pattern equivalent was `u.address().city()`. With deeply nested records — a typical event-sourcing or DDD model — the saving is substantial *and* you get the destructured names as named variables, which is much friendlier to read than a chain of accessors.
+
+## Combine with sealed dispatch
+
+The killer combination is sealed interface + records + record patterns in an exhaustive switch:
+
+```java
+public sealed interface Event permits Login, Logout, Purchase {}
+public record Login(String user, Instant at) implements Event {}
+public record Logout(String user, Instant at) implements Event {}
+public record Purchase(String user, BigDecimal amount, Instant at) implements Event {}
+
+String summarize(Event e) {
+    return switch (e) {
+        case Login(var user, var at)             -> user + " logged in at " + at;
+        case Logout(var user, var at)            -> user + " logged out at " + at;
+        case Purchase(var user, var amt, var at) -> user + " bought " + amt + " at " + at;
+    };
+}
+```
+
+Three lines of logic. No accessors. Compile-time exhaustiveness from the seal. Adding `Signup` to the seal turns this into a compile error and tells you exactly which case to add — the safety net is the whole point.
+
+## Guards still apply
+
+You can attach a `when` guard to a record pattern:
+
+```java
+String describe(Event e) {
+    return switch (e) {
+        case Purchase(var u, var a, var t) when a.compareTo(BigDecimal.valueOf(1000)) > 0
+            -> "big purchase by " + u;
+        case Purchase(var u, var a, var t)
+            -> "purchase by " + u;
+        case Login l  -> "login";
+        case Logout l -> "logout";
+    };
+}
+```
+
+Order matters when guards are involved — the compiler picks the first matching arm, just like `instanceof` chains.
+
+## What record patterns don't (yet) let you do
+
+- **Partial matches** of the form "match a Point but I only need x." You must bind every component (use `var _` once unnamed patterns finalize — they're preview in Java 25).
+- **Custom deconstruction** for non-record classes. Records work because their structure is transparent; classes need to opt in (JEP for general deconstruction patterns is in progress).
+- **Renaming during destructure** — bindings are just names; you can't rename components or reorder them.
+
+<Callout kind="tip" title="When deep destructuring is overkill">
+For one-off use, `p.x()` is fine. Record patterns earn their keep in switches over sealed hierarchies and in deeply nested data — exactly where the boilerplate of accessor chains was painful before.
+</Callout>
+
+## The arc
+
+Record patterns are the third piece — records gave you the carrier, sealed gave you the closed dispatch, and record patterns gave you the deconstruction. Together they make Java a credible language for the algebraic-data-type modeling style that used to require Kotlin, Scala, or Rust.
+
+<ProbeNote>The interviewer wants to see (1) the basic destructuring syntax `case Point(int x, int y) ->`, (2) the nested form pulling apart records-inside-records, and (3) how it combines with sealed interfaces for exhaustive, accessor-free dispatch. Naming JEP 440 / Java 21 as the finalization milestone signals you've followed the feature through its preview cycle.</ProbeNote>

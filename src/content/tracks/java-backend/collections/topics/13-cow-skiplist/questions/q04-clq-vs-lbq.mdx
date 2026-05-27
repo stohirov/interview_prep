@@ -1,0 +1,92 @@
+**`ConcurrentLinkedQueue` is a lock-free, unbounded, non-blocking FIFO based on the Michael & Scott algorithm. `LinkedBlockingQueue` uses two `ReentrantLock`s and supports blocking `put`/`take` plus optional capacity bounds. Pick CLQ for max throughput; pick LBQ when you need backpressure or producer-consumer coordination.**
+
+## Side-by-side
+
+| | `ConcurrentLinkedQueue` | `LinkedBlockingQueue` |
+|---|---|---|
+| Algorithm | Lock-free (CAS on `next` pointer) | Two `ReentrantLock`s (head, tail) |
+| Bounded | No (always unbounded) | Optional (`new LinkedBlockingQueue(cap)`) |
+| Blocking ops | None — `poll` returns `null` when empty | `put`, `take`, `offer(t,u)`, `poll(t,u)` |
+| `size()` | O(n), approximate | O(1), exact |
+| Throughput | Higher under heavy contention | Lower (lock acquisition) |
+| Memory overhead | Lower (no lock objects, no Condition queues) | Higher (locks + two Conditions) |
+| Implements | `Queue` | `BlockingQueue` |
+
+## When to use ConcurrentLinkedQueue
+
+```java
+ConcurrentLinkedQueue<Event> q = new ConcurrentLinkedQueue<>();
+
+// Producer (never blocks)
+q.offer(event);
+
+// Consumer poll loop
+while (running) {
+    Event e = q.poll();           // null if empty
+    if (e == null) {
+        Thread.yield();           // or do other work
+        continue;
+    }
+    process(e);
+}
+```
+
+Right when:
+- You have many producers and many consumers contending hard.
+- Consumers can do other useful work when the queue is empty.
+- You don't need a hard upper bound on queue size.
+
+`poll()` returns `null` instead of blocking — *you* decide what to do (spin, yield, do other work, sleep).
+
+## When to use LinkedBlockingQueue
+
+```java
+BlockingQueue<Event> q = new LinkedBlockingQueue<>(10_000);   // bounded
+
+// Producer (blocks if full → backpressure)
+q.put(event);
+
+// Consumer (blocks if empty)
+Event e = q.take();
+process(e);
+```
+
+Right when:
+- You need **backpressure** — a slow consumer should force producers to wait, not OOM your heap.
+- Your consumers genuinely have nothing else to do; blocking is cheaper than polling.
+- You want bounded memory.
+
+`LinkedBlockingQueue` uses separate locks for head (`take`) and tail (`put`), so producers and consumers don't contend with each other — only multiple producers (or multiple consumers) contend.
+
+## The `size()` trap
+
+```java
+ConcurrentLinkedQueue<Integer> q = new ConcurrentLinkedQueue<>();
+// q.size() walks every node — O(n) AND not necessarily accurate
+// under concurrent modification. Don't call it in a hot loop.
+if (q.isEmpty()) { ... }   // O(1), prefer this
+```
+
+`LinkedBlockingQueue` maintains an `AtomicInteger count` so `size()` is O(1) and exact at the call instant.
+
+## Lock-free internals (quick sketch)
+
+CLQ's `offer` does roughly:
+
+```
+do:
+  tail = read tail pointer
+  next = tail.next
+  if next == null:
+    if CAS(tail.next, null, newNode): success, CAS(tail, oldTail, newNode); return
+  else:
+    CAS(tail, oldTail, next)  // help advance lagging tail
+```
+
+The "help advance" trick is what makes the Michael & Scott algorithm progress under contention without locks.
+
+<Callout kind="tip" title="Default ExecutorService queue">
+`Executors.newFixedThreadPool(n)` uses an *unbounded* `LinkedBlockingQueue`. That's a memory leak waiting to happen if your producers outpace the pool. Always size queues explicitly in production.
+</Callout>
+
+<ProbeNote>Common follow-up: "Why does CLQ.size() walk the list?" — Because maintaining an atomic counter would require an additional CAS on every `offer`/`poll`, which would defeat the lock-free speed advantage. The trade-off is intentional.</ProbeNote>

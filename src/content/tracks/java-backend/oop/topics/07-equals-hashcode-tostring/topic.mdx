@@ -1,0 +1,28 @@
+**Every Java object inherits `equals`, `hashCode`, and `toString` from `Object`, and the default implementations are almost never what you want for value types.** The Object contract is the *single* most heavily tested OOP topic in middle and senior interviews because it sits at the intersection of inheritance, collections, and immutability. Get it wrong and your data silently disappears from `HashMap`s — get it right by reaching for `record` whenever you can.
+
+## The defaults
+
+`Object.equals` is reference identity (`this == other`), `Object.hashCode` is a JVM-assigned identity hash, and `Object.toString` returns `ClassName@hexHash`. These are correct for objects whose identity *is* their meaning (think `Thread` or `JFrame`) and wrong for value types where two distinct instances with the same data should compare equal (think `Money`, `Email`, `Coordinate`).
+
+## The contracts in one breath
+
+- `equals` must be **reflexive, symmetric, transitive, consistent**, and `null`-safe (returns false, never throws).
+- `hashCode` must be **consistent** for unchanging state, and **equal objects must hash to the same value** — unequal objects *may* collide but ideally shouldn't.
+- `toString` has no formal contract beyond "non-null", but practical conventions exist for human vs machine readers.
+
+## The inheritance trap
+
+The hardest part is not stating the contract — it's preserving it across an inheritance hierarchy. The classic `Point` / `ColoredPoint` example breaks symmetry the moment you try to make a `Point` equal a same-coordinate `ColoredPoint`. Effective Java's prescription: **prefer composition over inheritance for value types**, or close the type with `final`.
+
+## Records to the rescue
+
+Java 16+ records auto-generate all three methods from the component list, satisfy the contracts by construction, and prevent the inheritance trap because records are implicitly `final` and cannot extend other records.
+
+```java
+public record Money(long cents, String currency) {}
+// equals, hashCode, toString — all generated, all contract-correct.
+```
+
+For 95% of value types in modern Java this is the only line you need. The hand-written cases — `instanceof` vs `getClass()`, `clone()`'s brokenness, machine-parseable `toString` — only arise when you can't use records or you're maintaining pre-Java-16 code.
+
+The questions below cover the contracts in detail, the symmetric-equals trap, the `instanceof` debate, and why `clone()` is the JDK's most broken method.

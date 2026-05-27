@@ -1,0 +1,25 @@
+**Structural patterns** all answer the same question in different ways: *how do you assemble objects so a class gains a new capability without extending it?* The five canonical members — Adapter, Decorator, Proxy, Facade, Composite — each compose collaborators rather than inherit from them. The payoff is exactly what *Effective Java* Item 18 sells you on: behavior you can add, remove, or replace at runtime without touching the wrapped type.
+
+## The five at a glance
+
+| Pattern | Wraps to... | Interface shape | Real-world example |
+|---|---|---|---|
+| Adapter | translate an incompatible interface | `Target` differs from `Adaptee` | `Arrays.asList`, `InputStreamReader` |
+| Decorator | layer responsibilities on the same interface | wrapper *is-a* component | `BufferedInputStream`, Servlet filters |
+| Proxy | gate access to a single target | proxy *is-a* target | Hibernate lazy entities, Spring AOP |
+| Facade | hide a tangled subsystem behind one entry | new, simpler interface | `javax.faces.context.FacesContext` |
+| Composite | treat a tree of objects uniformly | leaf + container share `Component` | Swing components, file systems |
+
+## Shared mental model
+
+Every structural pattern is some flavor of *delegation with intent*. The wrapper holds a reference (or several) and forwards calls — but the *why* differs. Adapter forwards because the caller speaks a different dialect. Decorator forwards because it wants the wrapped behavior plus extra. Proxy forwards because something must happen *around* the call. Facade forwards to many objects because the caller shouldn't know they exist. Composite forwards to children because the operation is recursive by nature.
+
+## When inheritance was the wrong answer
+
+Most legacy codebases have one or two `XxxExWithFoo extends XxxEx extends Xxx` chains where every level adds a flag, a counter, or a logging line. That chain is brittle: it forces every variant into a single rigid hierarchy, and you can't combine "buffered" and "encrypted" without writing `BufferedEncryptedStream` by hand. The Decorator answer composes them at runtime: `new Encrypted(new Buffered(raw))`.
+
+<Callout kind="tip" title="Decorator vs subclass: the order test">
+If your variants need to combine in arbitrary order at runtime (logging + caching + retry), inheritance produces a combinatorial explosion. Decorators stack them with `O(n)` classes instead of `O(2^n)`.
+</Callout>
+
+The cost of all five patterns is the same: an extra indirection on every call and one more class to read. The benefit is decoupling — and once you've maintained a fragile inheritance tree for a year, you stop minding the indirection.

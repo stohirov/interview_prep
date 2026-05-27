@@ -1,0 +1,62 @@
+**The order is: parent statics, child statics (once per classloader); then per `new`: super-chain to `Object`, instance initializers, constructor body — recursing down the hierarchy.** Most candidates get half of it. The way to nail this in an interview is to step through a concrete two-class hierarchy and predict every print statement before running it.
+
+## The canonical demo
+
+```java
+class Parent {
+    static  { System.out.println("1 parent static block"); }
+    static  String ps = log("2 parent static field");
+            String pi = log("5 parent instance field");
+    { System.out.println("6 parent instance block"); }
+
+    Parent() { System.out.println("7 parent ctor"); }
+
+    static String log(String s) { System.out.println(s); return s; }
+}
+
+class Child extends Parent {
+    static  { System.out.println("3 child static block"); }
+    static  String cs = Parent.log("4 child static field");
+            String ci = Parent.log("8 child instance field");
+    { System.out.println("9 child instance block"); }
+
+    Child() { System.out.println("10 child ctor"); }
+}
+
+public class Demo {
+    public static void main(String[] a) { new Child(); }
+}
+```
+
+## Output (exactly in this order)
+
+```
+1 parent static block
+2 parent static field
+3 child static block
+4 child static field
+5 parent instance field
+6 parent instance block
+7 parent ctor
+8 child instance field
+9 child instance block
+10 child ctor
+```
+
+## Why this order
+
+1. **Lines 1-2** — Touching `Child` for the first time forces `Parent` to initialize first (a subclass can't be initialized before its supertypes). Parent's static field initializer and `static { }` block run in source order.
+2. **Lines 3-4** — Then `Child`'s static phase runs, again in source order.
+3. **Lines 5-7** — `new Child()` calls `super()` first. Inside `Parent`, instance field initializers and instance blocks run in source order, *then* the constructor body.
+4. **Lines 8-10** — Control returns to `Child`'s constructor: its instance initializers and blocks run, then its body.
+
+## The two often-forgotten rules
+
+- **Static phase happens at most once per classloader.** A second `new Child()` skips steps 1-4 entirely.
+- **Field initializers and instance blocks are merged in source order**, not "all fields then all blocks." If you swap their order in source, the print order swaps too.
+
+<Callout kind="tip" title="Interview trick">
+If the interviewer adds a static reference like `Child.cs` *before* the `new`, the static phase still happens just once — at the first active use. Don't double-count it.
+</Callout>
+
+<ProbeNote>This is a senior-level question because the trap isn't memorizing the order — it's reasoning about *why* it must be that order (a subclass field initializer can reference `super` state, so super must finish first). Strong candidates predict the output without running it and explain each transition. Weak ones recite "static, instance, constructor" without ordering parent vs child.</ProbeNote>

@@ -1,0 +1,38 @@
+Iteration in Java is built on a small hierarchy of interfaces: `Iterable<T>` is the contract for "things you can loop over", `Iterator<T>` is the cursor that does the looping, `ListIterator<T>` adds bidirectional movement and mutation, and `Spliterator<T>` is the splittable iterator that powers parallel streams.
+
+## Why four interfaces?
+
+Separating `Iterable` from `Collection` matters. Not every iterable thing has `size()`, `contains()`, or `add()` — think `java.nio.file.Path` (iterates path segments), `DirectoryStream`, or a custom infinite sequence. Pulling the for-each contract into its own interface lets any type opt into `for (T t : x)` without paying for the full `Collection` API.
+
+## The contract chain
+
+```
+Iterable<T>                       // for-each
+  iterator() -> Iterator<T>
+  spliterator() -> Spliterator<T> // default
+
+Iterator<T>                       // forward cursor
+  hasNext(), next(), remove()
+
+ListIterator<T> extends Iterator  // List only
+  hasPrevious(), previous(), add(e), set(e), nextIndex()
+
+Spliterator<T>                    // splittable
+  tryAdvance(), trySplit(), estimateSize(), characteristics()
+```
+
+## Fail-fast vs fail-safe
+
+Most JDK collection iterators are **fail-fast**: they snapshot a `modCount` field at creation and throw `ConcurrentModificationException` on the next operation if the underlying collection was structurally modified. This is a best-effort bug detector, not a thread-safety contract.
+
+**Fail-safe** iterators come in two flavors:
+- *Snapshot* (`CopyOnWriteArrayList`): iterate a frozen copy of the backing array.
+- *Weakly consistent* (`ConcurrentHashMap`, `ConcurrentSkipListMap`): never throw CME, reflect some state during traversal, may miss concurrent additions.
+
+## Spliterator and parallelism
+
+A `Spliterator` splits its source into two halves via `trySplit()`. The fork-join framework recursively splits down to a threshold, processes leaves in parallel, then combines. Characteristics like `SIZED`, `SUBSIZED`, `ORDERED`, and `IMMUTABLE` let the stream pipeline pick optimal strategies (e.g. `ArrayList` returns a `SIZED | SUBSIZED | ORDERED` spliterator that splits in O(1)).
+
+<Callout kind="tip" title="Use Iterator.remove(), not Collection.remove()">
+During iteration, only `iterator.remove()` is safe for mutating fail-fast collections. Calling `list.remove(x)` inside a for-each loop triggers `ConcurrentModificationException`.
+</Callout>

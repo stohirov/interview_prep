@@ -1,0 +1,65 @@
+**`TreeMap` is a red-black tree with no thread safety — sharing it across threads needs external locking. `ConcurrentSkipListMap` is a lock-free skip list designed for concurrent access from the ground up, and it's the JDK's only concurrent `NavigableMap`.**
+
+## Side-by-side
+
+| | `TreeMap` | `ConcurrentSkipListMap` |
+|---|---|---|
+| Thread-safe | No | Yes (lock-free) |
+| Data structure | Red-black tree | Probabilistic skip list |
+| Lookup / insert | O(log n) guaranteed | O(log n) expected |
+| Iterator | Fail-fast | Weakly consistent |
+| Null keys | Allowed if comparator permits | **Not allowed** (NPE) |
+| Implements | `NavigableMap`, `SortedMap` | `ConcurrentNavigableMap`, `NavigableMap` |
+| Atomic ops | None | `putIfAbsent`, `replace`, `compute`, etc. |
+| Memory | Compact (one node per entry) | Multi-level — extra pointers per level |
+
+## Making `TreeMap` "concurrent" — and why it's not great
+
+```java
+SortedMap<String, Integer> sm =
+    Collections.synchronizedSortedMap(new TreeMap<>());
+
+sm.put("k", 1);                   // synchronized on the wrapper
+Integer v = sm.get("k");          // synchronized
+
+// Iteration STILL requires manual synchronization
+synchronized (sm) {
+    for (var e : sm.entrySet()) { ... }
+}
+```
+
+Every operation serializes on a single monitor — there's no concurrency, just thread safety. And the iteration gotcha is easy to forget: the per-method `synchronized` doesn't span `hasNext()` and `next()`.
+
+## ConcurrentSkipListMap — what you actually want
+
+```java
+ConcurrentNavigableMap<Long, Order> orders = new ConcurrentSkipListMap<>();
+
+orders.put(System.nanoTime(), order);                      // lock-free
+Map.Entry<Long, Order> oldest = orders.firstEntry();       // O(log n)
+NavigableMap<Long, Order> recent =
+    orders.tailMap(cutoff, true);                          // live view
+
+orders.compute(key, (k, v) -> v == null ? new Order() : v.bumped()); // atomic
+```
+
+You get:
+- **Concurrent reads and writes** with no global lock.
+- **Weakly consistent iteration** — never throws `CME`, no manual sync needed.
+- **Atomic compound operations** (`putIfAbsent`, `compute`, `merge`).
+- **Range views** (`subMap`, `headMap`, `tailMap`) that are themselves thread-safe.
+
+## Why skip list, not a concurrent tree?
+
+Balanced trees are hard to make lock-free — rebalancing touches many nodes atomically. Skip lists rebalance probabilistically (random level on insert), so writes only update a small number of forward pointers, each via CAS. This keeps the lock-free implementation tractable.
+
+## Cost summary
+
+<ComplexityTable rows={[
+  {op: "get / put / remove", best: "O(log n)", average: "O(log n)", worst: "O(n)", note: "worst is unlikely"},
+  {op: "firstKey / lastKey", best: "O(1)", average: "O(log n)", worst: "O(log n)", note: "skip-list traversal"},
+  {op: "subMap / headMap / tailMap", best: "O(1)", average: "O(1)", worst: "O(1)", note: "live view, no copy"},
+  {op: "size", best: "O(n)", average: "O(n)", worst: "O(n)", note: "must traverse"}
+]} />
+
+<ProbeNote>If asked "why not just lock a TreeMap with a `ReadWriteLock`?" — that works, but you lose iterator weak consistency, atomic compound ops, and live range views. Plus you pay lock contention that a skip list avoids entirely.</ProbeNote>

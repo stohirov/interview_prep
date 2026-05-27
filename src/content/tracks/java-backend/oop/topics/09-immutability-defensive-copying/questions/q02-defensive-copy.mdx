@@ -1,0 +1,77 @@
+**Both directions leak the same reference.** If you skip the constructor copy, the caller can mutate your state from outside. If you skip the accessor copy, anyone who *calls* a getter can mutate your state. The class is immutable only if it owns its mutable components exclusively at every boundary.
+
+## The constructor attack (TOCTOU)
+
+Without an inbound copy, the caller still holds the `Date` they passed in:
+
+```java
+public Period(Date start, Date end) {
+    if (start.after(end)) throw new IllegalArgumentException();
+    this.start = start;   // BUG: stored reference is shared
+    this.end   = end;
+}
+
+// Attack:
+Date start = new Date();
+Date end   = new Date();
+Period p   = new Period(start, end);
+end.setYear(78);          // p.end just changed
+```
+
+Even adding validation doesn't save you — there's a **Time-Of-Check-To-Time-Of-Use** window. With concurrency it's even worse:
+
+```java
+public Period(Date start, Date end) {
+    if (start.after(end)) throw new IllegalArgumentException();
+    // <-- another thread mutates start to be AFTER end here
+    this.start = start;
+    this.end   = end;
+}
+```
+
+The correct order is **copy first, validate the copy**:
+
+```java
+public Period(Date start, Date end) {
+    this.start = new Date(start.getTime());
+    this.end   = new Date(end.getTime());
+    if (this.start.after(this.end)) throw new IllegalArgumentException();
+}
+```
+
+## The accessor attack
+
+Without an outbound copy, every caller of `start()` gets the live field:
+
+```java
+public Date start() { return start; }  // BUG: leaks the field
+
+Period p = new Period(s, e);
+p.start().setYear(78);                 // p mutated through the getter
+```
+
+The fix: return a fresh `Date` from a clone of the stored value.
+
+```java
+public Date start() { return new Date(start.getTime()); }
+```
+
+<Callout kind="warn" title="Don't use clone() on mutable subclassable types">
+`Date` is non-final, so a subclass could override `clone()` to return a shared instance. `new Date(start.getTime())` is the paranoid version. For `final` types or arrays, `clone()` is fine.
+</Callout>
+
+## The clean exit
+
+Both copies disappear if you use immutable types from the start:
+
+```java
+public record Period(Instant start, Instant end) {
+    public Period {
+        if (start.isAfter(end)) throw new IllegalArgumentException();
+    }
+}
+```
+
+`Instant` is immutable, so there is nothing to defend against.
+
+<ProbeNote>The probe is "what could go wrong if you skipped one of them?" — they want a concrete attack scenario, not the rule restated. Bonus points for mentioning the validate-after-copy ordering and the concurrency angle.</ProbeNote>

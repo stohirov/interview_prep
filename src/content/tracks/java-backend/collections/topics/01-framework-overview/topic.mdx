@@ -1,0 +1,32 @@
+The **Java Collections Framework** (JCF) is the unifying set of interfaces, abstract base classes, and concrete implementations under `java.util` that model groups of objects. It was introduced in Java 1.2 to replace the ad-hoc legacy types (`Vector`, `Hashtable`, `Stack`, `Enumeration`) with a coherent, polymorphic API. Understanding its shape is essential because almost every interviewer will probe it as a proxy for whether you actually read the JDK or just memorized cheat-sheets.
+
+## The Two Root Hierarchies
+
+The framework has **two separate roots**: `Iterable` and `Map`. Everything that yields elements one-at-a-time descends from `Iterable` (via `Collection`): `List`, `Set`, `Queue`, `Deque`. Maps live in a parallel tree because their unit is the key-value `Entry`, not a single element — making `Map` a `Collection` would force an incoherent `add(E)` contract.
+
+```java
+// Iterable -> Collection -> List/Set/Queue
+// Map (separate root) -> SortedMap -> NavigableMap
+List<String> names = new ArrayList<>();
+Map<String, Integer> ages = new HashMap<>();
+```
+
+## Interfaces, Abstract Bases, Implementations
+
+The framework uses a layered design:
+
+- **Interfaces** define the contract (`List`, `Set`, `Map`).
+- **Abstract classes** (`AbstractList`, `AbstractSet`, `AbstractMap`) provide skeletal implementations so concrete types only override what differs.
+- **Concrete classes** (`ArrayList`, `HashMap`, `TreeSet`) supply the actual data structure.
+
+This separation is why you should program against interfaces — `List<T> xs = new ArrayList<>()` — and swap implementations freely.
+
+## Optional Operations & Utility Classes
+
+To avoid an explosion of interfaces (mutable, immutable, fixed-size, etc.), the JCF uses **optional operations**: methods documented to throw `UnsupportedOperationException` for views that cannot support them. The `Collections` utility class supplies polymorphic algorithms (`sort`, `binarySearch`, `unmodifiableList`) and the `Arrays` class bridges arrays to the framework.
+
+## What Modern Java Added
+
+Java 5 brought generics, Java 8 added `Stream`, `removeIf`, and default methods, and Java 9 introduced the immutable factory methods (`List.of`, `Map.of`, `Set.of`) that are now the idiomatic way to build small, structurally-shared collections.
+
+Let's drill into the precise edges where interviewers love to push.

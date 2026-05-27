@@ -1,0 +1,50 @@
+`TreeMap` is a `NavigableMap` backed by a **red-black tree**. It keeps entries sorted — either by the keys' natural order or by a `Comparator` you supply — and offers a rich navigation API (`floorKey`, `ceilingKey`, `subMap`, `descendingMap`, …) at O(log n) per operation.
+
+## Why a red-black tree
+
+A red-black tree is a self-balancing binary search tree that guarantees the longest root-to-leaf path is at most twice the shortest. That gives you:
+
+- **O(log n)** worst-case for `get`, `put`, `remove`, `containsKey`.
+- **In-order traversal** in sorted order in O(n).
+- **Range and neighbour queries** in O(log n) via tree navigation.
+
+Trade-offs versus `HashMap`: every operation is logarithmic (no O(1) fast path), keys must be comparable, and per-node memory is higher (parent, left, right, color). What you buy is *ordered* access.
+
+## The ordering
+
+Order is chosen at construction:
+
+```java
+// Natural order (keys must implement Comparable)
+var m1 = new TreeMap<String, Integer>();
+
+// Custom comparator
+var m2 = new TreeMap<String, Integer>(Comparator.reverseOrder());
+var m3 = new TreeMap<Customer, Order>(
+    Comparator.comparing(Customer::tier).thenComparing(Customer::id));
+```
+
+The comparator (or `Comparable.compareTo`) is the *sole* definition of key equality inside the map — not `equals`. Two keys with `compareTo == 0` are treated as the same key, even if `equals` says otherwise. This is the source of the famous `BigDecimal` pitfall (separate question).
+
+## The navigation API
+
+`NavigableMap` extends `SortedMap` with neighbour lookups:
+
+| Method | Returns |
+| --- | --- |
+| `firstKey()` / `lastKey()` | smallest / largest |
+| `floorKey(k)` | largest key ≤ k |
+| `ceilingKey(k)` | smallest key ≥ k |
+| `lowerKey(k)` | largest key strictly `< k` |
+| `higherKey(k)` | smallest key strictly `> k` |
+| `subMap(lo, hi)` | view over `[lo, hi)` |
+| `headMap(hi)` / `tailMap(lo)` | views with one open end |
+| `descendingMap()` | reverse-order view |
+
+All views are **live** — modifications in the view reflect into the backing map, within the view's range.
+
+<Callout kind="tip" title="Reach for TreeMap when">
+You need range queries (time windows, score brackets), or you need iteration to be deterministic and *sorted*, or you need a "nearest match" lookup. For plain key-value lookup, `HashMap` is faster.
+</Callout>
+
+For sorted concurrent access, see `ConcurrentSkipListMap` — same navigation API, lock-free, but with worse constant factors than `TreeMap`.

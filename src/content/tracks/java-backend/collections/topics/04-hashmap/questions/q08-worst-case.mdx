@@ -1,0 +1,40 @@
+Since Java 8, `HashMap.get` is **O(log n)** in the worst case, thanks to the red-black tree fallback. Before Java 8 it was O(n), because a degenerate bucket was a linked list.
+
+## The complexity table
+
+<ComplexityTable rows={[
+  {op: "get / containsKey (avg)", best: "O(1)", average: "O(1)", worst: "O(log n)", note: "Tree fallback when bucket >= 8 and table >= 64"},
+  {op: "put (avg)", best: "O(1)", average: "O(1)", worst: "O(log n)", note: "Amortised; resize adds O(n) occasionally"},
+  {op: "remove", best: "O(1)", average: "O(1)", worst: "O(log n)", note: "Same as get"},
+  {op: "iteration", best: "O(n + cap)", average: "O(n + cap)", worst: "O(n + cap)", note: "Walks every bucket slot, occupied or not"}
+]} />
+
+## Why O(log n), not O(log k)?
+
+If a single bucket holds all n entries and is treeified, lookup is O(log n) — the size of that one bucket equals the size of the map. In practice this happens only if every key collides on its hash, which requires either adversarial input or a broken `hashCode()`.
+
+## Why it matters
+
+The pre-Java-8 worst case (O(n) per lookup) made `HashMap` vulnerable to **hash-flooding DoS attacks**: an attacker submits keys engineered to collide, and what should be O(1) lookups become O(n), turning a single endpoint into a CPU sink. Web servers using user-supplied keys (form params, JSON keys) were the typical target.
+
+```java
+// Pathological case: every key collides
+record Bad(int x) {
+    @Override public int hashCode() { return 0; }
+}
+Map<Bad, Integer> m = new HashMap<>();
+for (int i = 0; i < 10_000; i++) m.put(new Bad(i), i);
+// Pre-Java-8: linear chain of 10000 -> get is O(n)
+// Java 8+: red-black tree -> get is O(log n)
+```
+
+## Caveats
+
+- The tree only forms once both thresholds are met (chain ≥ 8 and capacity ≥ 64). Below that, the bucket is still a linked list — but at that scale O(8) is fine.
+- Tree ordering uses `hashCode` first; if hashes also tie, it tries `Comparable.compareTo` on the keys. If keys aren't `Comparable`, the tree falls back to identity-based tie-breaking, which means `get` still has to walk subtrees comparing with `equals`. Still bounded, just slower in the constant factor.
+
+<Callout kind="info" title="Compare HashTable / pre-Java-8 HashMap">
+Both had O(n) worst-case `get`. Hashtable still does, since it was never updated. If you can choose, prefer `ConcurrentHashMap` (which also has tree fallback) over `Hashtable`.
+</Callout>
+
+<ProbeNote>The interviewer is probing whether you know about the Java 8 redesign. Saying "O(1) average, O(n) worst case" is the old answer. Modern answer: O(log n) worst case, and you can explain *why* (red-black trees) and *when* (treeify thresholds).</ProbeNote>

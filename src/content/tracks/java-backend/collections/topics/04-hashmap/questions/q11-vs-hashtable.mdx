@@ -1,0 +1,44 @@
+`Hashtable` is a legacy, fully synchronised, null-hostile map from Java 1.0; `HashMap` is the modern, unsynchronised, null-friendly Java 1.2 Collections Framework implementation. In new code you should use `HashMap` (single-threaded) or `ConcurrentHashMap` (multi-threaded) — never `Hashtable`.
+
+## Side-by-side
+
+| Aspect              | `HashMap` (1.2+)               | `Hashtable` (1.0)                |
+| ------------------- | ------------------------------ | -------------------------------- |
+| Synchronisation     | None                           | Every method `synchronized`      |
+| Null keys           | One allowed                    | NullPointerException             |
+| Null values         | Allowed                        | NullPointerException             |
+| Iteration           | `Iterator` (fail-fast)         | `Enumeration` (legacy) + `Iterator` |
+| Bucket layout       | Power-of-two, tree fallback    | Prime-size table, linked list only |
+| Initial capacity    | 16                             | 11                               |
+| Load factor         | 0.75                           | 0.75                             |
+| Hierarchy           | extends `AbstractMap`          | extends `Dictionary`             |
+| Performance         | Faster (no lock)               | Slower (coarse lock contention)  |
+
+## Why Hashtable is obsolete
+
+`Hashtable` wraps every method in `synchronized`. Reads, writes, even `size()` — all take the same monitor. Under any real concurrent load, threads serialise on that single lock, and you lose all the parallelism a modern CPU offers. `ConcurrentHashMap` solved this in Java 5 with lock striping (and in Java 8 with a CAS + synchronized-bin design), so there's no scenario where `Hashtable` is the right choice.
+
+```java
+// Don't do this
+Map<String, Integer> bad = new Hashtable<>();
+
+// Do this if you need thread safety
+Map<String, Integer> good = new ConcurrentHashMap<>();
+
+// Or this if single-threaded
+Map<String, Integer> simple = new HashMap<>();
+```
+
+## Why null was rejected
+
+When `Hashtable` was designed (1995), the convention was that `get(key) == null` *meant* the key was absent — there was no `containsKey`. Allowing null values would have broken that. `HashMap` later added `containsKey`, so it could safely permit nulls. `ConcurrentHashMap` kept the null ban for a different reason: in concurrent code, you can't atomically do "check then get", so allowing null values would create unfixable race conditions in user code.
+
+## What about `Properties`?
+
+`Properties` extends `Hashtable<Object, Object>`, which means it inherits the synchronisation and null-hostility. It's another legacy API; modern code uses `Map<String, String>` plus `java.nio.file.Files.readString` or a configuration library.
+
+<Callout kind="warn" title="Don't accept Hashtable as 'thread-safe HashMap'">
+Some interview answers treat `Hashtable` as a legitimate concurrency primitive. It isn't — it's an artefact. The right answer is `ConcurrentHashMap` (or `Collections.synchronizedMap` for very small or read-mostly cases).
+</Callout>
+
+<ProbeNote>The interviewer is checking that you (a) know the historical context, (b) recognise `Hashtable` as obsolete rather than just "synchronized HashMap", and (c) reach for `ConcurrentHashMap` instead. Bonus: mention `Properties` extending `Hashtable` as a related legacy quirk.</ProbeNote>

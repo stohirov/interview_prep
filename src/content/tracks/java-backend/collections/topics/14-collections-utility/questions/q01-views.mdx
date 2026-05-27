@@ -1,0 +1,68 @@
+**Three different things often confused: unmodifiable is a read-only *view* over a mutable collection; immutable means truly cannot change; synchronized wraps every method in a lock but does nothing for iteration.**
+
+## Unmodifiable — a read-only view
+
+```java
+List<String> live = new ArrayList<>(List.of("a", "b"));
+List<String> view = Collections.unmodifiableList(live);
+
+view.add("c");      // UnsupportedOperationException
+live.add("c");      // works — and `view` now contains it too!
+System.out.println(view); // [a, b, c]
+```
+
+`unmodifiableList` is a thin wrapper. Mutators throw; reads delegate. The backing list is still alive and mutable through any other reference — the view is *not* a snapshot.
+
+Use when you want to hand out a collection without letting callers mutate it through *that reference*, but you (the owner) still need to update it.
+
+## Immutable — truly cannot change
+
+```java
+List<String> immutable = List.of("a", "b");
+
+immutable.add("c");           // UnsupportedOperationException
+// There is no other reference that can mutate it — there's nothing to mutate.
+```
+
+`List.of`, `Set.of`, `Map.of` (Java 9+) produce genuinely immutable collections. No backing mutable structure exists. They are also:
+- **Null-hostile** — `List.of("a", null)` throws NPE.
+- **Structurally shared-friendly** — safe to share across threads, safe as map keys, safe to cache.
+- **Sometimes specialized** — small sizes have compact internal representations.
+
+`List.copyOf(collection)` is the canonical "give me an immutable snapshot of whatever you have."
+
+## Synchronized — locked per call, NOT during iteration
+
+```java
+List<String> sync = Collections.synchronizedList(new ArrayList<>());
+sync.add("a");        // synchronized — fine
+String s = sync.get(0); // synchronized — fine
+
+// Iteration is NOT safe by default:
+for (String x : sync) {        // hasNext() and next() not jointly atomic
+    System.out.println(x);     // another thread could mutate between them → CME
+}
+
+// Required pattern:
+synchronized (sync) {
+    for (String x : sync) {
+        System.out.println(x);
+    }
+}
+```
+
+Every method on the wrapper is `synchronized` on the wrapper itself. But the `for-each` loop calls `iterator()`, then `hasNext()`, then `next()` as separate method calls — concurrent mutation between them still triggers `ConcurrentModificationException`. You must lock around the whole iteration.
+
+## Quick summary
+
+| | Mutators | Backing collection mutates? | Thread-safe? |
+|---|---|---|---|
+| `unmodifiableList(x)` | throw UOE | Yes, visible through view | No |
+| `List.of(...)` / `List.copyOf(x)` | throw UOE | N/A — no backing | Yes (truly immutable) |
+| `synchronizedList(x)` | allowed | Yes | Per-call yes, iteration no |
+
+<Callout kind="warn" title="unmodifiableList(List.of(...)) is pointless">
+Wrapping an already-immutable list in `unmodifiableList` adds an indirection for zero benefit. If you need immutable, just use `List.of` or `List.copyOf`.
+</Callout>
+
+<ProbeNote>Expect a follow-up: "How would you defensively return an immutable copy from a getter?" — `return List.copyOf(this.items);` snapshots the current contents and gives the caller something that can never change.</ProbeNote>

@@ -1,0 +1,72 @@
+**Java 7's CHM was 16 segments, each a mini-HashMap with its own `ReentrantLock` — concurrency capped at 16 writers. Java 8 dropped segments entirely: writes use CAS for empty buckets and `synchronized` on the bucket head for collisions, giving per-bucket granularity.**
+
+## Java 7: segments
+
+```
+ConcurrentHashMap
+  Segment[]  (default 16, fixed at construction)
+    each Segment extends ReentrantLock
+    each Segment holds its own HashEntry[] table
+```
+
+A write computed `seg = segments[hash >>> segmentShift]`, called `seg.lock()`, did the put, unlocked. Reads were lock-free via volatile reads on table slots.
+
+**Trade-offs:**
+- Per-segment overhead — each segment is a full sub-map, lots of memory.
+- Concurrency level was a constructor parameter, fixed for life of the map.
+- Two threads writing to different buckets in the *same* segment still serialized.
+- `size()` had to lock all segments (eventually) to get a coherent count.
+
+## Java 8+: node-level locking
+
+```
+ConcurrentHashMap
+  Node[] table     (single shared, resizable)
+```
+
+Write path:
+1. Compute bucket index.
+2. If the slot is `null`, use CAS to install a new `Node`. **No locking at all** in the uncontended case.
+3. If the slot is non-null, `synchronized (head)` and walk the list / tree.
+4. After inserting, check if the bucket length crossed `TREEIFY_THRESHOLD` (8) — if so and `table.length >= MIN_TREEIFY_CAPACITY` (64), convert to a red-black tree. Otherwise resize.
+
+Read path:
+- `get(k)` does a plain volatile read of the slot, walks the list/tree, never locks.
+
+## Why this is faster
+
+- **Effective parallelism = bucket count, not segment count.** A 64-bucket table allows 64 concurrent writers (one per bucket).
+- **Empty-bucket inserts are lock-free** via CAS — common in growing maps.
+- **No segment object overhead** — pure `Node` array.
+- **Resizing is concurrent** — multiple threads transfer buckets in parallel.
+
+## Tree fallback
+
+When too many keys hash to the same bucket (8+ collisions in a sufficiently large table), the list is replaced by a red-black tree. Worst-case lookup goes from O(n) to O(log n) — a DoS mitigation against adversarial hash collisions. Reverts to a list if it shrinks below `UNTREEIFY_THRESHOLD` (6).
+
+## Diagram
+
+<Diagram caption="Java 8 CHM bucket states">{`
+table:  [0]  [1]  [2]  [3]  [4]  [5]
+         |    |    |    |    |    |
+        null Node  TreeBin Node Node null
+              |       |     |    |
+              N       RB    N    N
+                     tree   |    |
+                            N    N (>= 8 -> treeify)
+`}</Diagram>
+
+## Common follow-ups
+
+| Question                              | Answer                                                              |
+|---------------------------------------|---------------------------------------------------------------------|
+| Why drop segments?                    | Better granularity, less memory, simpler resize.                    |
+| What's `MIN_TREEIFY_CAPACITY`?        | 64 — below that, resize instead of treeifying.                      |
+| Can `get` see a partial put?          | No — `Node.val` is `volatile`; reader sees old or new value, not torn. |
+| Is `compute` lock-free?               | No — it holds the bucket head's `synchronized` for the whole lambda.|
+
+<Callout kind="warn" title="Pre-Java 8 trivia">
+You'll still see `new ConcurrentHashMap<>(16, 0.75f, 4)` in old code — the `concurrencyLevel` argument is the third constructor parameter. In Java 8+ it's just a hint used to size the initial table; segments don't exist anymore.
+</Callout>
+
+<ProbeNote>Probe: "If two threads `put` to the same bucket simultaneously in Java 8, what happens?" One acquires `synchronized (head)`, the other waits. The CAS-fast-path only fires when the bucket is empty (slot is `null`). Once any node lives there, collisions take the lock.</ProbeNote>

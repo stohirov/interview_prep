@@ -1,0 +1,56 @@
+**`Iterator` is a one-way cursor for any `Collection`. `ListIterator` is a richer cursor available only for `List` — bidirectional, index-aware, and able to insert and replace elements during traversal.**
+
+## API comparison
+
+| Capability                | `Iterator` | `ListIterator` |
+|---------------------------|------------|----------------|
+| `hasNext()` / `next()`    | yes        | yes            |
+| `remove()`                | yes        | yes            |
+| `hasPrevious()` / `previous()` | no    | yes            |
+| `nextIndex()` / `previousIndex()` | no | yes           |
+| `add(E)`                  | no         | yes            |
+| `set(E)`                  | no         | yes            |
+| Available on              | any `Collection` | `List` only |
+
+## Why the asymmetry?
+
+`Iterator` is the lowest-common-denominator contract for **any** collection — `Set`, `Queue`, custom iterables. Sets and queues have no notion of "previous" element or "index of position N", so those operations would be meaningless. `ListIterator` lives on `List` because lists are positional by definition.
+
+## Code
+
+```java
+List<String> names = new ArrayList<>(List.of("Ada", "Bob", "Cy"));
+
+// Iterator: forward + remove
+Iterator<String> it = names.iterator();
+while (it.hasNext()) {
+    if (it.next().startsWith("B")) it.remove();
+}
+
+// ListIterator: replace in place + insert
+ListIterator<String> lit = names.listIterator();
+while (lit.hasNext()) {
+    int idx = lit.nextIndex();
+    String s = lit.next();
+    lit.set(s.toUpperCase());          // replace
+    if (idx == 0) lit.add("ZERO");     // inserts AFTER cursor
+}
+
+// Start from end
+ListIterator<String> back = names.listIterator(names.size());
+while (back.hasPrevious()) {
+    System.out.println(back.previous());
+}
+```
+
+## Pitfalls
+
+- `set(E)` and `remove()` operate on the element returned by the **most recent** `next()` or `previous()`. Call them twice in a row and you get `IllegalStateException`.
+- `add(E)` inserts at the cursor position — the new element is *not* returned by a subsequent `next()`, but `previous()` will see it.
+- On a `LinkedList`, `ListIterator` is the only efficient way to mutate mid-list — `list.get(i)` is O(n) each call.
+
+<Callout kind="tip" title="Modern alternative">
+For pure traversal, prefer `forEach(Consumer)` or streams. Reach for `ListIterator` when you genuinely need bidirectional movement or in-place mutation during traversal.
+</Callout>
+
+<ProbeNote>Interviewers often follow up with "could you implement `ListIterator` for a `Set`?" — answer: no, sets are unordered, there's no "previous". This is a good test of whether you understand *why* the interface split exists, not just *that* it does.</ProbeNote>

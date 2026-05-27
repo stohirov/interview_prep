@@ -1,0 +1,55 @@
+`Queue<E>` exposes each operation **twice**: one method that **throws** on failure and one that **returns a special value** (`false` for add-style operations, `null` for remove/inspect). Knowing which pair to use prevents both swallowed errors and unwanted exceptions.
+
+## The six-method matrix
+
+| Operation | Throws on failure | Returns special value | Failure case |
+| --- | --- | --- | --- |
+| **Insert** at tail | `add(e)` | `offer(e)` | Capacity-bounded queue is full |
+| **Remove** from head | `remove()` | `poll()` | Queue is empty |
+| **Inspect** head | `element()` | `peek()` | Queue is empty |
+
+- `add` throws `IllegalStateException` (specifically `Queue full`); `offer` returns `false`.
+- `remove` and `element` throw `NoSuchElementException`; `poll` and `peek` return `null`.
+
+## When to use which
+
+- **Bounded queue, expected to fail** (back-pressure, optional insertion) — use `offer`/`poll`/`peek`. You handle the special value explicitly.
+- **Unbounded queue, failure is unexpected** (sentinel return would mask a bug) — use `add`/`remove`/`element`. The exception is the right signal.
+
+## Deque doubles the matrix
+
+`Deque` adds the same six methods for the *other* end, prefixed with `First`/`Last`:
+
+| End | Insert (throw / return) | Remove (throw / return) | Inspect (throw / return) |
+| --- | --- | --- | --- |
+| Head | `addFirst` / `offerFirst` | `removeFirst` / `pollFirst` | `getFirst` / `peekFirst` |
+| Tail | `addLast` / `offerLast` | `removeLast` / `pollLast` | `getLast` / `peekLast` |
+
+The single-ended `add`/`offer`/`remove`/`poll`/`element`/`peek` map to the **tail** for insert and the **head** for remove/inspect (FIFO semantics).
+
+## Deque also has stack methods
+
+`push(e)` is equivalent to `addFirst(e)`. `pop()` is `removeFirst()`. `peek()` is `peekFirst()`. So:
+
+```java
+Deque<Integer> stack = new ArrayDeque<>();
+stack.push(1);   // [1]
+stack.push(2);   // [2, 1]
+stack.pop();     // returns 2, leaves [1]
+```
+
+## The `null` trap
+
+`poll`/`peek` returning `null` is fine when null is not a valid element. **But you cannot store `null` in `ArrayDeque`, `PriorityQueue`, or `ConcurrentLinkedQueue` in the first place** — they reject null inserts precisely so `poll() == null` unambiguously means "empty." `LinkedList` allows null elements, which then breaks this contract: a `null` from `poll()` could mean "empty" *or* "a real null is at the head." Yet another reason to prefer `ArrayDeque`.
+
+```java
+Queue<String> bad = new LinkedList<>();
+bad.offer(null);
+bad.poll(); // returns null — but is the queue empty or did you just remove the null?
+```
+
+<Callout kind="tip" title="Default to offer/poll/peek">
+For most code, `offer`/`poll`/`peek` are safer. The exception signals only happen on programmer error (e.g., calling `remove` on a known-empty queue), and you'd rather a `null`-check than an unwound stack.
+</Callout>
+
+<ProbeNote>Probe: "Why does add throw IllegalStateException specifically?" (To match the Collection.add contract, which says add returns true if the collection changed — there's no clean way to say "I can't accept this element right now" without exception in that signature.) "Is there a blocking version?" (Yes, in BlockingQueue: `put` (blocks on full) and `take` (blocks on empty), plus `offer(e, timeout, unit)` and `poll(timeout, unit)`.)</ProbeNote>

@@ -1,0 +1,39 @@
+**Polymorphism in practice means writing code against an abstract type and letting the JVM pick the right implementation at runtime.** That single mechanism — dynamic dispatch — is what turns inheritance from a code-reuse trick into the engine of open/closed design. Every time you call a method on an interface reference and get behavior you couldn't have predicted at compile time, you are riding the same `invokevirtual` / `invokeinterface` rails that the JDK has used since 1995.
+
+## Reference type vs runtime type
+
+Two types are in play for every object reference. The **reference type** (also called the *static type* or *declared type*) is what the compiler sees — it gates which methods you are *allowed* to call. The **runtime type** is what `new` actually created — it decides which override actually runs.
+
+```java
+Animal a = new Dog();        // reference type Animal, runtime type Dog
+a.speak();                   // compiler checks Animal.speak() exists
+                             // JVM dispatches to Dog.speak()
+// a.fetch();                // compile error — fetch is not on Animal
+```
+
+The compiler is conservative; the JVM is honest about what the object actually is.
+
+## Dynamic dispatch in one sentence
+
+For instance methods, the bytecode `invokevirtual` (for class methods) or `invokeinterface` (for interface methods) looks up the target via the receiver's **vtable** / **itable**, which is part of the runtime class metadata. The slot is determined at class-load time; the lookup at call time is O(1) for `invokevirtual` and a hash lookup for `invokeinterface` — both aggressively inline-cached by HotSpot.
+
+## Refactor `if (x instanceof ...)` chains
+
+The smell every senior reviewer flags:
+
+```java
+double total(Payment p) {
+    if (p instanceof Card c)        return c.amount() * 1.029;
+    else if (p instanceof Bank b)   return b.amount() + 0.30;
+    else if (p instanceof Crypto x) return x.amount() * 0.005;
+    throw new IllegalStateException();
+}
+```
+
+Every new payment method forces you to crack open this method. Polymorphism flips control: each `Payment` knows its own fee, and `total` becomes a one-liner that calls `p.fee()`. Open for extension, closed for modification.
+
+## Where pattern matching for `switch` fits
+
+Java 21's pattern matching for `switch` over **sealed** hierarchies gives you exhaustive case analysis with destructuring — perfect for closed data (AST nodes, protocol messages). It complements rather than replaces polymorphism: virtual methods stay best when the type set is *open for extension*, switches win when the set is *closed and you operate from outside*. Pick by who owns the behavior, not by syntax preference.
+
+The next questions drill into the bytecode, the trade-offs, and the refactors that come up in interviews.

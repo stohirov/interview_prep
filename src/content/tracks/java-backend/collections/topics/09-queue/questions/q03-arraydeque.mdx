@@ -1,0 +1,72 @@
+`ArrayDeque` is a **resizable circular buffer** with two index pointers (`head` and `tail`) and a size that is always a **power of two**. Operations on either end use bitmask arithmetic (`index & (capacity - 1)`) instead of modulo, making `addFirst`, `addLast`, `pollFirst`, and `pollLast` all O(1) amortized.
+
+## The data structure
+
+```java
+public class ArrayDeque<E> {
+    transient Object[] elements;  // length is power of two
+    transient int head;           // index of first element (or 0 if empty)
+    transient int tail;           // index where the next element would go
+    // size() == (tail - head) & (elements.length - 1)
+}
+```
+
+`head` and `tail` move independently; when one reaches the end of the array, it wraps to index 0. The buffer is full when `head == tail` after an insert, which triggers a resize (double capacity).
+
+<Diagram caption="ArrayDeque circular buffer layout">{`capacity = 8 (power of two)
+elements: [ E, F, _, _, _, A, B, C, D ]
+                ^         ^
+              tail      head
+
+addLast(G): writes G at index 2, tail moves to 3
+elements: [ E, F, G, _, _, A, B, C, D ]
+                   ^         ^
+                 tail      head
+
+pollFirst(): reads A at index 5, head moves to 6
+returns A, deque is now: B, C, D, E, F, G`}</Diagram>
+
+## Why power-of-two capacity
+
+To wrap an index from N back to 0 you'd normally write `i % capacity`. But `%` is slow on integer dividers. If `capacity` is a power of two, `i % capacity == i & (capacity - 1)` — a single bitwise AND. ArrayDeque hardcodes powers of two so every index computation is a bitmask.
+
+```java
+private static int inc(int i, int modulus) {
+    if (++i >= modulus) i = 0;
+    return i;
+}
+// fast-path equivalent for power-of-two modulus:
+// i = (i + 1) & (modulus - 1);
+```
+
+## Resize policy
+
+When the buffer is full, ArrayDeque allocates a new array of **double** capacity and copies elements so that `head` is at index 0 and `tail` is at index `size`. This is O(n) but amortizes to O(1) per insertion.
+
+The initial default capacity is 16. You can pre-size with `new ArrayDeque<>(expectedSize)` — the constructor rounds up to the next power of two.
+
+## Why not LinkedList?
+
+`LinkedList` also implements `Deque`. Both offer O(1) addFirst/addLast/removeFirst/removeLast. But:
+
+- `LinkedList` allocates a `Node` object per element (24+ bytes of overhead each, plus GC pressure).
+- `LinkedList` nodes are scattered across the heap — terrible cache locality.
+- `ArrayDeque` stores elements contiguously in an `Object[]` — cache-friendly.
+- `ArrayDeque` requires power-of-two capacity (small memory overhead) but no per-element overhead.
+
+Microbenchmarks consistently show `ArrayDeque` is 2-4x faster than `LinkedList` for both queue and stack workloads. The JDK Javadoc explicitly recommends `ArrayDeque` over `LinkedList` for stack and queue use.
+
+## Limitations
+
+- **Not thread-safe** — wrap with `Collections.synchronizedDeque` or use `ConcurrentLinkedDeque`/`LinkedBlockingDeque`.
+- **Doesn't allow null** — null elements would conflict with the "empty slot" sentinel; rejected with NPE.
+- **Iterator is fail-fast** — concurrent modification during iteration throws `ConcurrentModificationException`.
+
+<ComplexityTable rows={[
+  {op: "addFirst / addLast / offerFirst / offerLast", best: "O(1)", average: "O(1)", worst: "O(n) on resize", note: "Amortized O(1)"},
+  {op: "pollFirst / pollLast / peekFirst / peekLast", best: "O(1)", average: "O(1)", worst: "O(1)", note: "Index arithmetic"},
+  {op: "contains / remove(Object)", best: "O(n)", average: "O(n)", worst: "O(n)", note: "Linear scan"},
+  {op: "size", best: "O(1)", average: "O(1)", worst: "O(1)", note: "Computed from head/tail"}
+]} />
+
+<ProbeNote>Probe: "What happens if you try to addFirst when head wraps to tail?" (Buffer is full; resize doubles capacity and re-aligns head to 0.) "Why does LinkedList exist if ArrayDeque is strictly better?" (Historical — LinkedList predates ArrayDeque, was retrofitted to implement Deque in Java 6. Some legacy code depends on its List+Deque dual nature.) "Can you index into an ArrayDeque?" (No — it's not a List. For indexed deque access, you'd need ArrayList — but ArrayList has O(n) addFirst.)</ProbeNote>

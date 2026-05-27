@@ -1,0 +1,86 @@
+**Java 9 added private interface methods to let `default` methods share helper logic without leaking that helper to implementers as part of the public contract.** Before Java 9 the only way to deduplicate code between two default methods was a `static` package-private helper or a copy-paste — both ugly.
+
+## The problem before Java 9
+
+```java
+public interface Logger {
+    default void info(String msg)  { write("INFO",  msg); }
+    default void warn(String msg)  { write("WARN",  msg); }
+    default void error(String msg) { write("ERROR", msg); }
+
+    // Java 8: this had to be a public abstract method (forced on implementers),
+    // a public default (visible to callers — pollutes the contract),
+    // or a static method in a sibling utility class.
+    void write(String level, String msg);
+}
+```
+
+Every implementer had to provide `write` even though it was an internal helper. Worse, the helper became part of the public surface: any external caller could invoke `logger.write("HACK", "...")`.
+
+## Java 9: private helpers
+
+```java
+public interface Logger {
+    default void info(String msg)  { write("INFO",  msg); }
+    default void warn(String msg)  { write("WARN",  msg); }
+    default void error(String msg) { write("ERROR", msg); }
+
+    private void write(String level, String msg) {
+        System.out.println("[" + Instant.now() + "] " + level + " " + msg);
+    }
+}
+```
+
+Now `write` is:
+
+- Invisible to implementers — they don't need to implement it.
+- Invisible to callers — `logger.write(...)` doesn't compile from outside the interface.
+- Shared by all default methods inside the interface.
+
+It's the missing piece that made default methods usable for nontrivial logic.
+
+## Private *static* helpers
+
+You can also write `private static` helpers when the logic doesn't need `this`:
+
+```java
+public interface Validator<T> {
+    boolean isValid(T value);
+
+    default Validator<T> and(Validator<T> other) {
+        return v -> isValid(v) && other.isValid(v);
+    }
+
+    default Validator<T> or(Validator<T> other) {
+        return v -> isValid(v) || other.isValid(v);
+    }
+
+    private static <T> Validator<T> combine(
+            Validator<T> a, Validator<T> b, BinaryOperator<Boolean> op) {
+        return v -> op.apply(a.isValid(v), b.isValid(v));
+    }
+}
+```
+
+`combine` is a pure helper with no receiver. Private and static are independent modifiers on interface methods.
+
+## Why not just put the helpers in an abstract class?
+
+You could — but you'd lose what interfaces give you:
+
+- Multiple inheritance (implementers can mix in many interfaces, extend at most one abstract class).
+- The ability to evolve an interface in a binary-compatible way for already-shipped implementers.
+
+Private interface methods complete the toolkit: defaults give *visible* shared behavior; private methods give *invisible* shared mechanism.
+
+<Callout kind="info" title="Visibility recap">
+| Modifier              | Inherited? | Visible to outside callers? |
+|-----------------------|------------|-----------------------------|
+| `public abstract`     | Yes        | Yes                         |
+| `public default`      | Yes        | Yes                         |
+| `public static`       | No         | Yes (via interface name)    |
+| `private`             | No         | No                          |
+| `private static`      | No         | No                          |
+</Callout>
+
+<ProbeNote>The interviewer is gauging whether you understand interface evolution beyond the headline default-method feature. Strong answers explicitly name the motivation — "deduplicate code between defaults without polluting the contract" — and cite the visibility table. Weaker answers describe the feature without articulating the problem it solves.</ProbeNote>

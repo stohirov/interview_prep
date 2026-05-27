@@ -1,0 +1,96 @@
+**If a constructor throws, no reference to the partially-built object is returned, so under normal use the object is unreachable and gets garbage-collected — but resources acquired before the throw still leak, and a `this`-leak before the throw can let an attacker resurrect the half-built instance.** The Java security folklore around the "finalizer attack" is the famous edge case.
+
+## The normal case: object is garbage
+
+```java
+class Connection {
+    public Connection(String url) {
+        if (url == null) throw new IllegalArgumentException();
+        // ...
+    }
+}
+
+try { var c = new Connection(null); }
+catch (IllegalArgumentException e) { /* c is never assigned */ }
+```
+
+Because `new` is atomic — either it returns a reference or it throws — `c` was never bound. No method can observe the half-built object; the JVM reclaims it on the next GC cycle.
+
+## The leak case: resources
+
+If your constructor acquires a resource and then a later step throws, the resource leaks:
+
+```java
+class FileSync {
+    private final FileInputStream  in;
+    private final FileOutputStream out;
+
+    public FileSync(Path src, Path dst) throws IOException {
+        this.in  = new FileInputStream(src.toFile());           // opens FD
+        this.out = new FileOutputStream(dst.toFile());          // may throw
+        // if 'out' throws, 'in' is open and unreachable -> FD leak
+    }
+}
+```
+
+Two fixes:
+
+```java
+// Option A: try/catch in the constructor, close on failure
+public FileSync(Path src, Path dst) throws IOException {
+    FileInputStream tmpIn = new FileInputStream(src.toFile());
+    try {
+        this.out = new FileOutputStream(dst.toFile());
+    } catch (IOException e) {
+        tmpIn.close();
+        throw e;
+    }
+    this.in = tmpIn;
+}
+
+// Option B: static factory + try-with-resources
+```
+
+## The `this`-leak hazard
+
+Anything that publishes `this` before the constructor finishes is dangerous:
+
+```java
+class Listener {
+    public Listener(EventBus bus) {
+        bus.register(this);             // escape!
+        // if a later line throws here,
+        // bus still holds a reference to a half-built Listener
+    }
+}
+```
+
+Even if the constructor throws, `bus` still has the reference — the object is *not* garbage. Any subsequent method call sees fields in unexpected states.
+
+## The finalizer attack (historical)
+
+Before Java made it harder, an attacker could subclass a sensitive class, override `finalize()`, and trigger a partial construction:
+
+```java
+class Account {
+    public Account() {
+        if (!securityCheck()) throw new SecurityException();
+    }
+}
+
+class Evil extends Account {
+    static Evil stolen;
+    @Override protected void finalize() { stolen = this; }
+}
+
+try { new Evil(); } catch (SecurityException e) { /* ignored */ }
+System.gc();        // Evil.finalize runs, stolen now references a half-built Account
+```
+
+Mitigation: declare the class `final`, declare a `final` finalizer that does nothing in the parent, or — best — don't use finalizers. Java 9 deprecated them; Java 18 fully sealed off `Object.finalize()` from being called on objects whose constructor threw.
+
+<Callout kind="warn" title="Practical rule">
+Make sensitive classes `final`, validate arguments before acquiring resources, never publish `this` from a constructor, and prefer static factory methods if construction logic is complex.
+</Callout>
+
+<ProbeNote>This is a senior question because it spans memory model, security, and resource hygiene. Strong candidates volunteer the resource-leak case and at least mention the finalizer attack; weaker ones just say "the object isn't created." Naming `final` and "no `this` leak" as the defenses signals depth.</ProbeNote>

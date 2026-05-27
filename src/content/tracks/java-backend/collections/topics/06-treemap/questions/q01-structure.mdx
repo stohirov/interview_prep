@@ -1,0 +1,59 @@
+`TreeMap` is backed by a **red-black tree** — a self-balancing binary search tree where every node carries a `RED` or `BLACK` color bit. The balance invariants bound the longest root-to-leaf path at no more than twice the shortest, guaranteeing O(log n) operations.
+
+## The node
+
+Inside `java.util.TreeMap`:
+
+```java
+static final class Entry<K,V> implements Map.Entry<K,V> {
+    K key;
+    V value;
+    Entry<K,V> left;
+    Entry<K,V> right;
+    Entry<K,V> parent;
+    boolean color = BLACK;
+    // ...
+}
+```
+
+Each entry has three child/parent pointers and a one-bit color flag. Compared to `HashMap.Node` (which has `hash`, `key`, `value`, `next`), the per-entry memory footprint is larger.
+
+## The red-black invariants
+
+1. Every node is RED or BLACK.
+2. The root is BLACK.
+3. Every leaf (the conceptual `null` children) is BLACK.
+4. A RED node's children are both BLACK (no two REDs in a row).
+5. Every path from a node to its descendant leaves contains the same number of BLACK nodes (the "black height").
+
+The combination of (4) and (5) keeps the tree approximately balanced: the longest path can be at most twice the shortest. That bound, combined with the recursive height bound of a balanced BST, gives the O(log n) guarantee.
+
+## Why red-black, not AVL?
+
+AVL trees keep stricter balance (heights of children differ by at most 1), giving slightly faster lookups but slower inserts/deletes due to more rotations. Red-black trees relax balance just enough that mutations are cheaper, which works well for general-purpose maps where reads and writes are mixed.
+
+Other tree structures in the Java ecosystem:
+
+- **`TreeSet`** wraps a `TreeMap` (values are a constant). Same red-black tree.
+- **`HashMap` treeified buckets** also use red-black trees, but with `TreeNode`s tied into the bucket's chain — a different code path tuned for very small trees.
+- **`ConcurrentSkipListMap`** uses a probabilistic skip list instead — different structure, same `NavigableMap` API, lock-free.
+
+## What you actually see
+
+You won't observe rotations or recoloring directly — they're internal mechanics that keep the API contract. What you observe is:
+
+- O(log n) per operation.
+- In-order iteration produces sorted output.
+- The map's structural integrity even after many inserts and deletes.
+
+<Diagram caption="A small red-black tree (B = black, R = red)">{`         (B) 50
+        /      \\
+    (R) 30     (R) 70
+     /   \\    /   \\
+   (B)20 (B)40(B)60 (B)80`}</Diagram>
+
+<Callout kind="info" title="Black height matters for the bound">
+The "twice the shortest path" bound comes from the fact that every path has the same *black height*, and reds can at worst double the path length. That's the intuition behind the O(log n) guarantee.
+</Callout>
+
+<ProbeNote>Saying "red-black tree" gets you in the door. Naming the invariants — especially the black-height rule that drives the balance bound — shows you understand *why* it's O(log n) and not just that it is.</ProbeNote>

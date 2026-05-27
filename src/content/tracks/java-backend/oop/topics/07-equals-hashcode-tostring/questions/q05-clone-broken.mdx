@@ -1,0 +1,87 @@
+**`Object.clone()` is broken because `Cloneable` is a marker interface that magically changes the behavior of a protected method on `Object`, bypasses constructors, and forces every subclass author to play a brittle game of casts, exception handling, and deep-copy plumbing.** The modern replacements are a **copy constructor** or a **static copy factory** — both ordinary, type-safe, and inheritable.
+
+## What's wrong, item by item
+
+### 1. `Cloneable` doesn't declare `clone()`
+
+```java
+public interface Cloneable {}    // empty marker
+```
+
+`Cloneable` declares no methods. The contract is "if a class implements me, `Object.clone()` returns a field-by-field shallow copy; otherwise it throws `CloneNotSupportedException`." This is the only place in the JDK where an interface changes the behavior of a method defined on a superclass — pure side-channel polymorphism.
+
+### 2. `clone()` is `protected` on `Object`
+
+```java
+public class Foo implements Cloneable {
+    @Override public Foo clone() {            // must re-declare to make public
+        try { return (Foo) super.clone(); }   // must cast — super returns Object
+        catch (CloneNotSupportedException e) { throw new AssertionError(e); }
+    }
+}
+```
+
+To make `clone()` actually callable, every class must re-declare it with widened access *and* swallow a checked exception that can never actually be thrown (because the class implements `Cloneable`). This is pure ceremony that the language can't help you with.
+
+### 3. It bypasses constructors
+
+`Object.clone()` is implemented via JVM intrinsics that allocate the new object and copy fields directly — your constructor never runs. This means:
+
+- `final` fields can be reassigned (well, set initially) by `clone` even if your constructor enforces invariants — clone never sees them.
+- Validation in the constructor is skipped.
+- Subclasses that rely on constructor side effects (registering listeners, etc.) silently break.
+
+### 4. Shallow copy by default — deep copy is on you
+
+```java
+public class Stack implements Cloneable {
+    private Object[] elements;
+    @Override public Stack clone() {
+        try {
+            Stack s = (Stack) super.clone();
+            s.elements = elements.clone();    // must remember every mutable field
+            return s;
+        } catch (...) { ... }
+    }
+}
+```
+
+Forget one mutable field and the clone shares state with the original — silent aliasing bug. Every refactor that adds a field is a chance to forget the corresponding `clone` update.
+
+### 5. The contract is unenforceable
+
+`Object.clone`'s spec says "x.clone() != x and x.clone().getClass() == x.getClass() and x.clone().equals(x)" — but the compiler does not check any of this. A misbehaving subclass can violate all three, and there is no language mechanism to catch it.
+
+## The replacements
+
+### Copy constructor
+
+```java
+public final class Yum {
+    private final List<String> items;
+    public Yum(List<String> items) { this.items = List.copyOf(items); }
+    public Yum(Yum other)          { this(other.items); }   // copy constructor
+}
+```
+
+Type-safe. Runs the real constructor. No checked exception. Inherited and customized by subclasses naturally.
+
+### Static copy factory
+
+```java
+public static Yum copyOf(Yum y) { return new Yum(y); }
+```
+
+All the benefits of a copy constructor, plus a *name* that documents the intent, plus the freedom to return a cached instance for immutable inputs (`Collections.singletonList`, `List.of`, etc.).
+
+## Where you still see `clone()`
+
+- **Arrays** — `array.clone()` is the idiomatic way to copy an array and it actually works well because arrays are simple and the language already handles them specially.
+- **Legacy JDK types** — `ArrayList`, `HashMap`, `Date`, `Calendar` all implement `Cloneable`. Avoid these clone methods in new code; use copy constructors or factories.
+- **Frameworks that pre-date Java 5** — sometimes you have to call into them. Just don't propagate the pattern.
+
+<Callout kind="warn" title="Records and clone()">
+Records don't implement `Cloneable` and the language deliberately did not extend `clone` to them. Use a copy constructor or `with`-style helper: `new Money(other.cents(), other.currency())`. Or define a `with` method per component if you need partial updates.
+</Callout>
+
+<ProbeNote>The interviewer wants the senior synthesis: `Cloneable` is a marker that mutates a protected superclass method, `clone()` skips constructors and silently leaves shallow copies, and the replacement is a copy constructor or a static factory. Quoting Joshua Bloch's "Cloneable: an unusable interface" line lands well.</ProbeNote>

@@ -1,0 +1,64 @@
+**Inheritance is correct when the subclass is genuinely a more-specific kind of the superclass AND you control both ends or the superclass was designed for it.** That rules out most ad-hoc reuse but still leaves several large categories where inheritance is the right tool — interface implementation, intentional class hierarchies, sealed types, and frameworks that require it.
+
+## The four green-light scenarios
+
+### 1. Interface inheritance
+
+`class MyList<E> implements List<E>` is always fine. You're inheriting a *contract*, not implementation. No fragile-base problem because there's no base implementation to be fragile about.
+
+```java
+public class CopyOnWriteList<E> implements List<E> {
+    // no extends — just promises to honor the List contract
+}
+```
+
+### 2. True is-a within a package you own
+
+When both superclass and subclass live in the same module and the superclass is explicitly designed for extension (`AbstractList`, `AbstractMap`, `AbstractCollection`), inheritance is exactly what those classes were built for. Their javadoc spells out the self-use pattern: "to implement an unmodifiable list, override `get(int)` and `size()`".
+
+```java
+public class RangeList extends AbstractList<Integer> {
+    private final int from, to;
+    public RangeList(int from, int to) { this.from = from; this.to = to; }
+    @Override public Integer get(int i) { return from + i; }
+    @Override public int size()         { return to - from; }
+}
+```
+
+### 3. Sealed hierarchies
+
+A `sealed interface Shape permits Circle, Square, Triangle` is a closed inheritance hierarchy. The superclass author knows every subtype because the compiler enforces it. There's no fragile-base problem because there's no surprise subclass — adding a new shape is a deliberate edit to `permits`.
+
+```java
+sealed interface Shape permits Circle, Square, Triangle {
+    double area();
+}
+record Circle(double r) implements Shape {
+    @Override public double area() { return Math.PI * r * r; }
+}
+```
+
+This is the modern Java preferred shape for what would have been an `enum-with-behavior` or visitor pattern in older code.
+
+### 4. Frameworks that require it
+
+Sometimes the framework dictates: `extends Thread`, `extends HttpServlet`, `extends JpaRepository`, JUnit's `extends TestCase` (legacy). You don't have a choice — pay the inheritance tax because the framework is wired around it. Modern frameworks (Spring, JUnit 5) deliberately reduced this by preferring composition or annotations.
+
+## The hard cases — judgment calls
+
+- **DTO/entity hierarchies in JPA** — `@MappedSuperclass`, `SINGLE_TABLE`, `JOINED` inheritance strategies. Use sparingly; flat is usually easier to evolve.
+- **Generic algorithm templates** — Template Method pattern (`AbstractHandler.handle()` calls `doProcess()`). Fine if the algorithm is genuinely stable and the hook points are documented.
+
+## The disqualifying questions
+
+If you can't answer "yes" to all of these, don't inherit:
+
+1. Is this *truly* an is-a relationship (every subclass instance is substitutable for the superclass)?
+2. Do I control the superclass, or was it explicitly designed for extension?
+3. Are the superclass's self-use patterns documented?
+
+<Callout kind="info" title="Composition first, inheritance with intent">
+Use the rule "compose by default, extend deliberately". When you extend, leave a comment explaining *why* — future-you will thank you when the superclass evolves.
+</Callout>
+
+<ProbeNote>The interviewer wants to hear that composition is the default and inheritance is justified, not the other way around. Listing the green-light scenarios (interface, designed-for-extension, sealed, framework-mandated) shows you've internalized the rule rather than just dismissing inheritance.</ProbeNote>

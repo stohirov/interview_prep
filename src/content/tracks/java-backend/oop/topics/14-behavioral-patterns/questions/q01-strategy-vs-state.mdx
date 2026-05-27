@@ -1,0 +1,78 @@
+Both patterns swap behavior at runtime by holding a reference to an interface and delegating to it. The difference is **who triggers the swap and why**: in Strategy the *client* picks the algorithm and the object never changes it; in State the *object itself* transitions through a defined lifecycle in response to events.
+
+## The one-line distinction
+
+- **Strategy**: "I want to sort this list — pick one." The strategy is a parameter; the holder doesn't care which.
+- **State**: "I'm a connection that's currently `Idle`; if I receive `connect()`, I transition to `Connecting`." The state is internal lifecycle.
+
+## State pattern — a vending machine
+
+```java
+public sealed interface MachineState permits Idle, HasCoin, Dispensing {
+    MachineState insertCoin();
+    MachineState selectItem();
+}
+
+public final class VendingMachine {
+    private MachineState state = new Idle();
+    public void insertCoin() { state = state.insertCoin(); }
+    public void selectItem() { state = state.selectItem(); }
+}
+
+public final class Idle implements MachineState {
+    public MachineState insertCoin() { return new HasCoin(); }
+    public MachineState selectItem() { throw new IllegalStateException("insert coin first"); }
+}
+
+public final class HasCoin implements MachineState {
+    public MachineState insertCoin() { throw new IllegalStateException("coin already inserted"); }
+    public MachineState selectItem() { dispense(); return new Dispensing(); }
+    private void dispense() { /* drop item */ }
+}
+
+public final class Dispensing implements MachineState {
+    public MachineState insertCoin() { throw new IllegalStateException("busy"); }
+    public MachineState selectItem() { throw new IllegalStateException("busy"); }
+}
+```
+
+The vending machine doesn't choose what state it's in — events drive transitions. Each state knows what's legal and what comes next. Notice how `selectItem` would have been a sprawling `if (hasCoin && !dispensing && !empty)` in a procedural version; the State pattern moves that branching into the type system.
+
+## Strategy pattern — pick the algorithm
+
+```java
+public interface SortStrategy<T> {
+    void sort(List<T> data);
+}
+
+public class Sorter<T> {
+    private final SortStrategy<T> strategy;
+    public Sorter(SortStrategy<T> s) { this.strategy = s; }
+    public void run(List<T> data) { strategy.sort(data); }
+}
+
+new Sorter<>(new QuickSort<>()).run(items);
+new Sorter<>(new MergeSort<>()).run(items); // caller's choice
+```
+
+`Sorter` doesn't transition from `QuickSort` to `MergeSort` on its own. The caller picks once. The two algorithms don't even know about each other.
+
+## Side-by-side
+
+| Aspect | Strategy | State |
+|---|---|---|
+| Who chooses? | Client | The object itself, via events |
+| When does it change? | Usually never after construction | Continuously, as the object lives |
+| Do variants know about each other? | No, independent | Yes — each state knows the next states |
+| Typical count | 2–5 swappable algorithms | Fixed states of a lifecycle |
+| Example | `Comparator`, retry policy | Connection state, order status |
+
+## Why interviewers ask this
+
+Because the *structure* — interface + concrete implementations + holder with a reference — is identical. Only the intent and the transition rules differ. Naming both patterns and articulating "client picks vs object transitions" is the senior-level answer.
+
+<Callout kind="info" title="When State degenerates into Strategy">
+If your states never reference each other and the caller is the one assigning them, you've actually built Strategy. Genuine State requires the lifecycle — `Idle -> HasCoin -> Dispensing -> Idle` — encoded somewhere, usually by each state returning the next.
+</Callout>
+
+<ProbeNote>The interviewer wants the intent split (client-picks vs object-transitions), one concrete example of each, and ideally the observation that the structural code is the same. Bonus: pointing out that State can be modeled as a `sealed interface` so the compiler enforces exhaustive handling.</ProbeNote>

@@ -1,0 +1,60 @@
+**Overriding applies to instance methods and uses dynamic dispatch (runtime type wins); hiding applies to static methods and uses static dispatch (declared type wins).** The difference disappears in source code — both look like a subclass declaring a method with the same signature — but the bytecode and the runtime behavior differ.
+
+## Side-by-side demo
+
+```java
+class Parent {
+    public        String instance() { return "Parent instance"; }
+    public static String staticOne()  { return "Parent static";   }
+}
+
+class Child extends Parent {
+    @Override public String instance() { return "Child instance"; }   // overrides
+    public  static String staticOne()  { return "Child static";   }   // hides
+}
+
+public class Demo {
+    public static void main(String[] args) {
+        Parent p = new Child();
+        System.out.println(p.instance());    // "Child instance"  <-- override
+        System.out.println(p.staticOne());   // "Parent static"   <-- hiding
+    }
+}
+```
+
+The declared type is `Parent`. The runtime object is a `Child`.
+
+- `instance()` is dispatched via `invokevirtual` on the object → `Child.instance()`.
+- `staticOne()` is dispatched via `invokestatic` against the declared type → `Parent.staticOne()`. The runtime class never enters the lookup.
+
+## Why hiding feels like a mistake
+
+Hiding rarely does what programmers intend. Most engineers reading `Child.staticOne()` assume it'll be called when they hold a `Parent` reference to a `Child`. It won't. *Effective Java* item 17 effectively says: avoid hiding because it surprises readers.
+
+The compiler **does not let you put `@Override` on a static method** — that alone tells you the language doesn't consider it overriding:
+
+```java
+class Child extends Parent {
+    @Override public static String staticOne() { return "child"; }
+    // compile error: static method cannot be annotated with @Override
+}
+```
+
+## A subtler trap: hiding can change the access level
+
+Because hiding is a fresh declaration (not a true override), you can technically declare the subclass static method with stricter or different `throws`. With true overriding, narrowing access is a compile error.
+
+## The mental rule
+
+| Member kind | Subclass declaration with same signature does | Dispatch |
+|-------------|-----------------------------------------------|----------|
+| instance    | overrides                                     | runtime type |
+| `static`    | hides                                         | declared type |
+| `private`   | unrelated new method (not even hidden — invisible to subclass) | n/a |
+| `final`     | compile error                                 | n/a |
+
+<Callout kind="tip" title="Practical advice">
+Don't write subclass static methods that re-declare a parent's static method. If you genuinely need polymorphic behavior, make it an instance method. If you don't, use a different name to signal that no polymorphism is happening.
+</Callout>
+
+<ProbeNote>This is a classic gotcha question. The interviewer wants you to (1) predict the output correctly, (2) name the JVM bytecodes that explain it (`invokevirtual` vs `invokestatic`), and (3) volunteer that `@Override` is not allowed on statics. Bonus: explain *why* — static methods belong to the class, not the instance, so there's no receiver to dispatch on.</ProbeNote>

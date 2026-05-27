@@ -1,0 +1,81 @@
+**They're related but not the same.** DIP is a *design principle* about the direction of dependencies — high-level policy modules shouldn't depend on low-level mechanism modules; both should depend on abstractions. DI (Dependency Injection) is a *technique* for wiring up those abstractions at runtime — passing dependencies in via constructors, setters, or fields rather than instantiating them internally. You can apply DIP without a DI framework, and you can use a DI framework while still violating DIP.
+
+## DIP — the design rule
+
+Robert Martin's formulation:
+
+1. High-level modules should not depend on low-level modules. Both should depend on abstractions.
+2. Abstractions should not depend on details. Details should depend on abstractions.
+
+The high-level `OrderService` shouldn't import a low-level `MySqlOrderRepository`. Both should depend on an `OrderRepository` interface. Compile-time dependencies point *toward* the abstraction.
+
+```java
+// Violation
+public class OrderService {
+    private final MySqlOrderRepository repo = new MySqlOrderRepository();
+    public void place(Order o) { repo.save(o); }
+}
+
+// DIP-compliant — abstraction in the middle
+public interface OrderRepository {
+    void save(Order o);
+}
+public class MySqlOrderRepository implements OrderRepository { /* ... */ }
+
+public class OrderService {
+    private final OrderRepository repo;
+    public OrderService(OrderRepository repo) { this.repo = repo; }
+    public void place(Order o) { repo.save(o); }
+}
+```
+
+The `OrderService.java` file no longer imports `MySqlOrderRepository`. Test it with an in-memory fake. Switch to Postgres without recompiling the service.
+
+## DI — the wiring technique
+
+DI is *how* the `OrderRepository` instance reaches the `OrderService` constructor. Three flavors:
+
+- **Constructor injection** (preferred): `new OrderService(new MySqlOrderRepository(dataSource))`.
+- **Setter injection**: `service.setRepository(repo)` after construction. Mutable, but useful for optional dependencies.
+- **Field injection** (Spring `@Autowired` on a field): convenient, hides dependencies, hard to test without the container. Generally discouraged in new code.
+
+DI can be done **by hand**:
+
+```java
+public class Main {
+    public static void main(String[] args) {
+        var ds   = HikariDataSource.from(env());
+        var repo = new MySqlOrderRepository(ds);
+        var svc  = new OrderService(repo);
+        new HttpServer(svc).start();
+    }
+}
+```
+
+Or by a **framework** (Spring, Guice, Dagger, Micronaut) that builds the graph from annotations. The framework is a convenience — it doesn't make your code more DIP-compliant. A Spring app with `OrderService` directly instantiating `MySqlOrderRepository` violates DIP just as much as a non-Spring one.
+
+## The relationship
+
+<Diagram caption="DIP and DI are orthogonal">{`              DI yes                 DI no
+            +-----------+         +-----------+
+   DIP yes  | Spring app|         | Main wires|
+            | with iface|         |  by hand  |
+            +-----------+         +-----------+
+   DIP no   | Spring app|         | Service   |
+            | hardcoded |         | does 'new'|
+            +-----------+         +-----------+`}</Diagram>
+
+- **DIP yes + DI yes:** the common "production" case — abstraction at the boundary, framework wires it.
+- **DIP yes + DI no:** small CLI, lambda function, or main-method app — abstractions in the design, hand-wired in `main`.
+- **DIP no + DI yes:** Spring app where services `new` their dependencies internally — the framework can't help.
+- **DIP no + DI no:** the legacy pile everyone fears.
+
+## A common interview confusion
+
+"We use Spring, so we follow DIP." Not necessarily. The Spring container handles object creation, but DIP is about whether your high-level code *imports* low-level types. If `OrderService.java`'s import list contains concrete adapters, the dependency direction is wrong regardless of who calls `new`.
+
+<Callout kind="info" title="Modern Java without a DI framework">
+Java's pattern-matching and records work nicely with hand-rolled DI. For small services, a `main` method that constructs the graph is clearer than a Spring config. The DIP doesn't care which approach you choose.
+</Callout>
+
+<ProbeNote>The interviewer is checking whether you understand the *direction of dependencies* (the D in SOLID) as distinct from the *mechanism of providing them* (DI). A clean answer: DIP is about who depends on whom at compile time; DI is about who creates and passes the instances at runtime. They often appear together, but they solve different problems.</ProbeNote>

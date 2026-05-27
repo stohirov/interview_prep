@@ -1,0 +1,49 @@
+Choose `TreeMap` when you need **ordered iteration**, **range queries**, **nearest-match lookups**, or a **deterministic key order** in output. Otherwise stick with `HashMap` — it's faster (O(1) vs O(log n)) and uses less memory per entry.
+
+## The decision matrix
+
+<ComplexityTable rows={[
+  {op: "get / put / remove", best: "HashMap: O(1) avg", average: "HashMap wins", worst: "TreeMap: O(log n)", note: "Plain key lookup -> HashMap"},
+  {op: "iterate in key order", best: "TreeMap: O(n)", average: "TreeMap wins", worst: "HashMap: O(n log n) (sort)", note: "Sorted output -> TreeMap"},
+  {op: "range query [a, b)", best: "TreeMap: O(log n + k)", average: "TreeMap wins", worst: "HashMap: O(n)", note: "TreeMap.subMap is built for this"},
+  {op: "nearest-match (floor/ceiling)", best: "TreeMap: O(log n)", average: "TreeMap wins", worst: "HashMap: O(n)", note: "HashMap has no equivalent"},
+  {op: "memory per entry", best: "HashMap: smaller", average: "HashMap wins", worst: "TreeMap: parent/left/right/color", note: "Tree entries are heavier"}
+]} />
+
+## Pick TreeMap when…
+
+- **You need deterministic iteration order**. Logs, reports, JSON serialisation where consumers expect sorted keys. `LinkedHashMap` is an alternative if you want *insertion* order; `TreeMap` is the choice for *natural* or *custom* order.
+- **You query by range or proximity**. Time series, leaderboards, pricing tiers, IP ranges, geometric intervals. The `subMap`, `floorEntry`, and `ceilingEntry` methods are O(log n) and have no `HashMap` analogue.
+- **You need to find the largest/smallest key quickly**. `firstKey`/`lastKey` are O(log n) (root-to-leaf descent). On a `HashMap`, the equivalent is an O(n) scan.
+- **You want a sorted output without explicitly sorting**. `treeMap.keySet()` is already sorted; you save the `O(n log n)` sort step.
+
+## Stick with HashMap when…
+
+- **You only do lookups by exact key**. The constant-factor difference is real — `HashMap` is often 5-10x faster per operation in tight loops.
+- **Keys don't have a natural order** (or you don't want to define one). `TreeMap` requires either `Comparable` keys or a `Comparator`. `HashMap` only needs `hashCode`/`equals`.
+- **You're optimising memory**. `TreeMap.Entry` carries `parent`, `left`, `right`, `color` — three pointers and a boolean per entry, plus less array packing. For millions of entries, `HashMap` wins by a comfortable margin.
+
+## A worked example
+
+```java
+// HashMap: O(n log n) to print in sorted order
+Map<String, Integer> hm = new HashMap<>();
+hm.put("banana", 2); hm.put("apple", 5); hm.put("cherry", 1);
+hm.entrySet().stream()
+    .sorted(Map.Entry.comparingByKey())
+    .forEach(e -> System.out.println(e.getKey() + "=" + e.getValue()));
+
+// TreeMap: O(n) — already sorted
+Map<String, Integer> tm = new TreeMap<>(hm);
+tm.forEach((k, v) -> System.out.println(k + "=" + v));
+```
+
+## What about ConcurrentSkipListMap?
+
+If you want `TreeMap` semantics in a concurrent setting, use `ConcurrentSkipListMap`. It implements the full `NavigableMap` API, is lock-free, and offers comparable O(log n) performance — at the cost of higher per-operation constants than `TreeMap`.
+
+<Callout kind="tip" title="Hybrid trick">
+For "mostly lookup, occasional sorted dump", use a `HashMap` and only build a `TreeMap` (or sort) when the dump is requested. Don't pay the log-factor cost on every read if reads dominate.
+</Callout>
+
+<ProbeNote>The interviewer is checking that you choose data structures based on access patterns, not by reflex. Answers like "always use TreeMap if order ever matters" are weaker than "TreeMap when range/proximity queries dominate; HashMap when point lookups dominate and order is occasional".</ProbeNote>

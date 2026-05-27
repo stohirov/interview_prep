@@ -1,0 +1,121 @@
+**Prototype creates new objects by copying an existing instance** instead of constructing from scratch. In Java, the language-blessed mechanism — `Cloneable` + `Object.clone()` — is broken (Bloch Item 13: "an extralinguistic mechanism"), so the modern toolkit is four alternatives: copy constructors, copy factories, manual deep copy, and serialization-based deep copy. Records collapse the easy case to almost nothing.
+
+## Why `clone()` is considered broken
+
+Brief rundown of the sins (full treatment in topic 07's `q05`):
+
+- `Cloneable` is a marker interface that doesn't declare `clone()` — `Object.clone()` is `protected`, you have to override and re-publish.
+- `clone()` doesn't call any constructor — fields initialized by constructors are bypassed.
+- The default behavior is a *shallow* copy — mutable fields are shared, defeating the point.
+- It interacts terribly with `final` fields — you can't assign `final` in `clone()`.
+- The return type was `Object` until Java 5 (covariant returns rescued it slightly).
+
+## Alternative 1 — Copy constructor
+
+```java
+public final class Customer {
+    private final String name;
+    private final List<Address> addresses;
+
+    public Customer(String name, List<Address> addresses) {
+        this.name = name;
+        this.addresses = List.copyOf(addresses);
+    }
+
+    // copy constructor — explicit, no marker interfaces
+    public Customer(Customer other) {
+        this.name = other.name;
+        this.addresses = other.addresses.stream()
+            .map(Address::new)              // deep copy
+            .toList();
+    }
+}
+
+Customer original = ...;
+Customer dup = new Customer(original);
+```
+
+Type-safe, no `Cloneable`, no `CloneNotSupportedException`. You control depth explicitly. Recommended for normal classes.
+
+## Alternative 2 — Copy factory
+
+A static method with a descriptive name:
+
+```java
+public static Customer copyOf(Customer src) {
+    return new Customer(src);   // delegates to copy constructor or constructs fresh
+}
+```
+
+This is the JDK idiom for collections: `List.copyOf`, `Set.copyOf`, `Map.copyOf`. Reads better at call sites and gives you room to return a cached instance or a subclass.
+
+## Alternative 3 — Manual deep copy (when needed)
+
+For graphs with mutable nested objects, walk the structure yourself:
+
+```java
+public Order deepCopy() {
+    var items = lineItems.stream().map(LineItem::deepCopy).toList();
+    var addr  = new Address(shippingAddress);
+    return new Order(id, items, addr);
+}
+```
+
+Tedious but predictable. Each nested type provides its own deep-copy method.
+
+## Alternative 4 — Serialization-based deep copy
+
+For arbitrarily deep object graphs where writing manual copy code would be hours of work:
+
+```java
+public static <T extends Serializable> T deepCopy(T obj) throws IOException, ClassNotFoundException {
+    var baos = new ByteArrayOutputStream();
+    try (var oos = new ObjectOutputStream(baos)) { oos.writeObject(obj); }
+    var bais = new ByteArrayInputStream(baos.toByteArray());
+    try (var ois = new ObjectInputStream(bais)) { return (T) ois.readObject(); }
+}
+```
+
+**Costs:**
+
+- Slow — a serialization round trip per copy.
+- Requires every class in the graph to implement `Serializable`.
+- Doesn't deep-copy `transient` fields (they revert to defaults).
+
+**Use only when:**
+
+- The graph is too large to copy by hand.
+- You're in an environment that already uses Java serialization (legacy RMI, etc.).
+- Tests, throwaway scripts, or other non-hot-path code.
+
+For modern alternatives, **Jackson** or **Kryo** can serialize/deserialize for the same effect, often faster and without the `Serializable` requirement:
+
+```java
+ObjectMapper m = new ObjectMapper();
+Order copy = m.readValue(m.writeValueAsBytes(order), Order.class);
+```
+
+## The easy case — records
+
+If the type is a record and all components are immutable, you don't need a clone at all — share the instance:
+
+```java
+public record Point(int x, int y) {}
+
+Point p = new Point(1, 2);
+Point sameAsP = p;          // no copy needed; Point is immutable
+```
+
+If a component is mutable, build a new record with a fresh copy of the component:
+
+```java
+Order o2 = new Order(o.id(), List.copyOf(o.items()), o.address());
+```
+
+Records make Prototype almost vestigial for the simple cases — which is most cases.
+
+<Callout kind="info" title="When Prototype still has value">
+Prototype shines when construction is *expensive* — e.g., a fully-loaded game level, a parsed AST, a deeply pre-populated DTO. Copying is faster than re-constructing. For most CRUD-style code, the pattern is overkill.
+</Callout>
+
+<ProbeNote>The interviewer wants to hear that `clone()` is broken and what to use instead. The senior answer names at least three alternatives (copy constructor, copy factory, serialization), and explains that records often eliminate the need entirely.</ProbeNote>

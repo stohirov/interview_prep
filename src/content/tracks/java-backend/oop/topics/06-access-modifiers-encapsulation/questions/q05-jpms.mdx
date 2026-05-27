@@ -1,0 +1,69 @@
+**The Java Platform Module System (JPMS, Java 9) adds a coarser encapsulation layer above access modifiers: a `module-info.java` declares which packages are `exports`ed, and any non-exported package is invisible to other modules *even if its classes and members are `public`.*** This finally gave the JDK a way to hide internal APIs like `sun.misc.Unsafe` that pre-JPMS leaked through `public` alone.
+
+## The pre-JPMS problem
+
+In Java 1.0 through 8, "public" meant "any classloader in the JVM may see this." The JDK had no language-level way to mark `sun.misc.Unsafe`, `com.sun.*`, or internal `jdk.internal.*` packages as off-limits, even though the team had been warning for two decades that they were not API.
+
+The result: half the high-performance ecosystem (Netty, Hibernate, JCTools, Cassandra...) ended up depending on `Unsafe`. When the JDK team tried to evolve those internals, the ecosystem broke.
+
+## The JPMS model
+
+A module declares its boundaries:
+
+```java
+// in src/main/java/module-info.java
+module com.acme.payments {
+    requires java.sql;                      // I depend on java.sql
+    requires com.acme.crypto;               // ...and on this module
+
+    exports com.acme.payments.api;          // visible to everyone
+    exports com.acme.payments.spi to        // visible only to two friends
+        com.acme.payments.adapter,
+        com.acme.gateway;
+
+    // com.acme.payments.internal is NOT exported
+    // -> its public classes are invisible outside this module
+}
+```
+
+Three new powers:
+
+1. **`exports pkg`** — make a package visible to all other modules.
+2. **`exports pkg to friend1, friend2`** — *qualified* export, visible only to the named modules.
+3. **No export at all** — package is module-internal. Public classes inside are visible only to other code in the same module.
+
+## Strong encapsulation in practice
+
+Try this in JDK 17+ without `--add-opens`:
+
+```java
+Field f = String.class.getDeclaredField("value");
+f.setAccessible(true);     // -> InaccessibleObjectException
+```
+
+`java.lang.String`'s `value` field is `private`, but more importantly, `java.base` does not open `java.lang` for reflection. JPMS blocks reflective access too — not just compile-time access — so library hacks that used to read private JDK internals via reflection now fail by default.
+
+## The escape hatches
+
+Real projects often need to keep working with old libraries; JPMS provides graduated escape hatches you'll see in build files and `java` command lines:
+
+- `--add-exports module/pkg=other` — bypass the export gate for one consumer at runtime.
+- `--add-opens module/pkg=other` — same, but also allow `setAccessible(true)` for reflection.
+- `opens pkg` in `module-info.java` — declare that a package is open to *reflective* access (e.g., for frameworks like Spring or Jackson) without making it a compile-time export.
+
+## How JPMS layers with access modifiers
+
+| Level | Granularity | Enforcement |
+|---|---|---|
+| `private` / package-private / `protected` / `public` | Class member | Compiler + runtime access checks |
+| `exports` (JPMS) | Package across modules | Module layer at class load |
+| `opens` (JPMS) | Reflective access | Module layer for `setAccessible` |
+| Classpath (legacy) | Entire JAR | None — everything is visible |
+
+A class member is visible to an outside caller only if **both** layers permit: the member must be `public`/`protected`/etc. **and** its package must be exported by its module.
+
+<Callout kind="info" title="Why the unnamed module still exists">
+Classes on the classpath (not modularized) live in the *unnamed module*, which `exports` and `requires` everything. This preserves backward compatibility — your Maven app from 2014 still runs. But modular code cannot depend on the unnamed module, which is what nudges libraries toward `module-info.java`.
+</Callout>
+
+<ProbeNote>The interviewer wants to hear three things: (1) JPMS is a layer *above* access modifiers, not a replacement; (2) `exports` (compile/runtime) vs `opens` (reflection) is a meaningful distinction; (3) the motivating example is `sun.misc.Unsafe` and the `jdk.internal` packages that leaked for two decades. Bonus: mention qualified exports for SPI patterns.</ProbeNote>

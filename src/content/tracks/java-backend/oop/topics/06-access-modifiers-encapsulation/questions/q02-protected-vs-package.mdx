@@ -1,0 +1,67 @@
+**`protected` is strictly wider than package-private — it grants the same package access *plus* access to subclasses in other packages.** The common confusion comes from thinking "fewer keywords means narrower"; in Java's grammar, *no keyword* is the narrower of the two.
+
+## The set difference
+
+```text
+package-private = { same package }
+protected       = { same package }  UNION  { subclasses in other packages, via subtype ref }
+```
+
+So `protected` ⊃ package-private. Anything you can do with a package-private member you can also do with a protected one — but not the reverse.
+
+## Why this is counterintuitive
+
+The keyword `protected` *sounds* restrictive — protected from what? — but the protection is from non-subclasses outside the package, not from your inheritors. A protected member is part of your **subclass contract**: you are inviting every future subclass author, anywhere in the world, to depend on this member's name, type, and behavior.
+
+## A concrete example
+
+```java
+// in pkg engine
+public class Engine {
+    protected void warmup() { /* used by subclasses to prep state */ }
+    void calibrate()        { /* package-private — helpers only */ }
+}
+
+// in pkg engine
+class TurboEngine extends Engine {
+    void start() {
+        warmup();      // OK — same package, also subclass
+        calibrate();   // OK — same package
+    }
+}
+
+// in pkg vendor
+public class V8 extends Engine {
+    void start() {
+        warmup();      // OK — protected, through subtype (this)
+        // calibrate();  // ILLEGAL — package-private doesn't cross packages
+    }
+}
+
+// in pkg vendor (unrelated class)
+class Garage {
+    void tune(Engine e) {
+        // e.warmup();   // ILLEGAL — Garage is not a subclass of Engine
+        // e.calibrate();// ILLEGAL — different package
+    }
+}
+```
+
+`TurboEngine` sees both because it's in the same package. `V8` sees only the protected method because it crosses a package boundary but is a subclass. `Garage` sees neither.
+
+## When to prefer which
+
+| Goal | Use |
+|---|---|
+| Helper visible to friends-in-the-package only | package-private |
+| Hook intentionally exposed to subclassers anywhere | `protected` |
+| Implementation detail of one class | `private` |
+| API surface for *anyone* | `public` |
+
+Effective Java's advice: prefer package-private over `protected` because `protected` commits you to a wider audience (every subclass author forever).
+
+<Callout kind="warn" title="Protected fields are a double burden">
+A protected mutable field exposes state to subclasses *and* lets them violate your invariants without going through any method. If you must expose state to subclasses, prefer a `protected` getter over a `protected` field.
+</Callout>
+
+<ProbeNote>The trap is in the framing: the question implies one is "more restrictive" than the other, hoping you say package-private. The right move is to immediately state the set-inclusion relation and demonstrate the cross-package subclass case. Bonus points for noting the subtype-reference rule from JLS §6.6.2.</ProbeNote>

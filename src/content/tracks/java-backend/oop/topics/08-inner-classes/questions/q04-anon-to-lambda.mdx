@@ -1,0 +1,99 @@
+**An anonymous class can become a lambda only if it implements a *functional interface* (exactly one abstract method) and doesn't depend on having its own `this`.** Whenever both conditions hold, the lambda is shorter, often allocation-free, and has the bonus of not capturing the enclosing instance accidentally. When either condition fails, the anonymous class is the only option.
+
+## The clean conversion
+
+```java
+// Anonymous class
+Runnable r1 = new Runnable() {
+    @Override public void run() { System.out.println("hi"); }
+};
+
+// Lambda — same behavior, different bytecode
+Runnable r2 = () -> System.out.println("hi");
+```
+
+`Runnable` has one abstract method (`run`), the body doesn't reference `this`, and there's no per-instance state. Lambda wins.
+
+## When you *can't* convert
+
+### 1. The target type has more than one abstract method
+
+```java
+new MouseAdapter() {              // extends a class with many methods
+    @Override public void mouseClicked(MouseEvent e) { ... }
+};
+```
+
+`MouseAdapter` is an *abstract class*, not a functional interface, and `MouseListener` declares five methods. A lambda can only target a single-abstract-method interface; multi-method classes require the anonymous form (or a switch to a refactored API).
+
+### 2. You need this anonymous instance's own `this`
+
+```java
+JButton b = new JButton("click");
+b.addActionListener(new ActionListener() {
+    @Override public void actionPerformed(ActionEvent e) {
+        b.removeActionListener(this);          // self-removal — needs `this`
+    }
+});
+```
+
+Inside an anonymous class, `this` refers to the anonymous instance itself. Inside a lambda, `this` refers to the **enclosing** class's `this` — lambdas have no `this` of their own. If the body needs to reference the listener it lives in (to deregister itself, store itself in a map, etc.), the conversion fails.
+
+The workaround is awkward: assign first, then reference.
+
+```java
+ActionListener self = new ActionListener[1][0];   // forward-declare a cell
+// ... no, this is genuinely uglier than the anonymous class
+```
+
+For this pattern, the anonymous class is right.
+
+### 3. You need to override `equals`/`hashCode`/`toString`
+
+A lambda's `equals` is identity (no two lambdas are ever equal even with the same body). An anonymous class can override `equals`. If you need value semantics on a callback, you need the anonymous form.
+
+### 4. You need to declare additional methods or instance state
+
+```java
+new Runnable() {
+    private int calls = 0;
+    @Override public void run() { calls++; }
+    int callCount() { return calls; }
+};
+```
+
+A lambda body is just an expression or a block; it can't add fields or auxiliary methods. If you need state visible to the *caller*, you need a class — anonymous, local, or top-level.
+
+## When you *should* convert even if you can
+
+Lambdas are not strictly better in every case. Anonymous classes have a few legitimate edges:
+
+- **Debugger ergonomics** — a stack trace in an anonymous class shows `Outer$1.run` with a real class name; a lambda shows `Outer.lambda$method$0` which some tools render less well.
+- **No surprise capture of `this`** — wait, lambdas *also* capture `this` if the body uses it. The difference is which `this` the keyword refers to inside the body.
+
+The vast majority of single-method callbacks should be lambdas in modern Java. Reserve anonymous classes for the four "can't convert" cases above.
+
+## A subtle gotcha: the `this` change
+
+```java
+class Outer {
+    String name = "outer";
+
+    Runnable anon = new Runnable() {
+        @Override public void run() {
+            System.out.println(this.getClass().getName());  // anonymous class
+        }
+    };
+
+    Runnable lamb = () -> System.out.println(this.getClass().getName());
+    //                                       ^^^^ is Outer.this
+}
+```
+
+If you mechanically rewrite the anonymous version as a lambda, `this` silently changes meaning. Subtle — and the kind of detail interviewers probe.
+
+<Callout kind="info" title="Method references are even shorter">
+When a lambda body is just one method call, prefer a method reference: `System.out::println` instead of `s -> System.out.println(s)`. Same semantics, no parameter ceremony.
+</Callout>
+
+<ProbeNote>The interviewer wants the SAM rule, the `this` semantic difference, and at least one case (self-deregistering listener or multi-method abstract class) where you can't convert. Bonus: note that lambdas can be allocation-free for non-capturing variants because the JVM caches them.</ProbeNote>

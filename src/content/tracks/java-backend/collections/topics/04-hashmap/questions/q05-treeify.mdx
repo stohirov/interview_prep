@@ -1,0 +1,42 @@
+A bucket is converted to a red-black tree when its chain length reaches **8** (`TREEIFY_THRESHOLD`) **and** the table's capacity is at least **64** (`MIN_TREEIFY_CAPACITY`). If the table is smaller than 64, the map resizes instead.
+
+## The two thresholds
+
+```java
+static final int TREEIFY_THRESHOLD     = 8;
+static final int MIN_TREEIFY_CAPACITY  = 64;
+```
+
+The capacity gate matters because in a tiny table, long chains usually mean the table itself is too small, not that the keys are pathological. Doubling the table from 16 to 32 to 64 redistributes those entries cheaply via the `(hash & oldCap)` split, often shrinking the chain back below 8 with no tree overhead.
+
+## The check in `putVal`
+
+After appending a new node, `HashMap` walks the chain and, if `binCount >= TREEIFY_THRESHOLD - 1`, calls `treeifyBin`:
+
+```java
+final void treeifyBin(Node<K,V>[] tab, int hash) {
+    int n;
+    if (tab == null || (n = tab.length) < MIN_TREEIFY_CAPACITY)
+        resize();                       // table too small -> double instead
+    else if (...) {
+        // walk the chain, convert each Node to a TreeNode,
+        // then call TreeNode.treeify on the head to balance into RB-tree
+    }
+}
+```
+
+## Why a red-black tree?
+
+A balanced BST bounds worst-case lookup in a single bucket at O(log k), where k is the bucket size. Combined with average O(1) bucket selection, the worst-case `get` becomes O(log n) overall instead of O(n) — a real defence against hash-collision DoS attacks.
+
+The tree ordering uses key `hashCode` first, and falls back to `compareTo` if keys are `Comparable`. If they're not `Comparable`, the tree uses identity-based tie-breaking — still correct, just slower for lookups that match by `equals`.
+
+## Why not always trees?
+
+`TreeNode` is roughly **2x the size** of a plain `Node` (parent, left, right, prev, red flag). For the common case of well-distributed keys where buckets hold 0 or 1 entries, this overhead would be pure waste. The threshold-based promotion gives you a list's compactness for the common case and a tree's worst-case guarantees for the rare bad-day case.
+
+<Callout kind="info" title="The probability">
+With load factor 0.75 and a good hash, the chance of a bucket reaching 8 entries is about 1 in 10 million per bucket. Treeification is genuinely an emergency exit, not a normal path.
+</Callout>
+
+<ProbeNote>The trap is forgetting the capacity gate — many candidates say "8 entries" and stop there. Mentioning the 64-capacity check, and *why* (small tables should resize, not treeify), shows you understand the design intent.</ProbeNote>

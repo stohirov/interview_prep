@@ -1,0 +1,61 @@
+**No — record immutability is shallow.** The record itself can never re-bind its components (they're final), but if a component's *value* is a mutable object, callers can mutate it through their retained reference or through the auto-generated accessor. You need a compact canonical constructor *and* an accessor override to make it truly immutable.
+
+## The leak
+
+```java
+public record Team(String name, List<String> members) {}
+
+var ml = new ArrayList<>(List.of("Ada", "Linus"));
+var t  = new Team("alpha", ml);
+
+ml.add("Mallory");          // 1. external mutation through retained reference
+t.members().add("Eve");     // 2. external mutation through accessor
+System.out.println(t);      // Team[name=alpha, members=[Ada, Linus, Mallory, Eve]]
+```
+
+The record gave us nothing more than `final` fields. Both `ml` (the constructor argument) and `t.members()` (the accessor return) point to the *same* live `ArrayList`.
+
+## The fix — both ends
+
+Use the **compact canonical constructor** to copy on the way in, and override the **accessor** to copy on the way out:
+
+```java
+public record Team(String name, List<String> members) {
+
+    public Team {                              // compact canonical ctor
+        members = List.copyOf(members);        // copy IN + unmodifiable
+    }
+
+    @Override
+    public List<String> members() {            // accessor override
+        return members;                        // already unmodifiable, safe to return
+    }
+}
+```
+
+`List.copyOf` does double duty: it snapshots the input (so external mutation of `ml` no longer affects us) *and* returns an unmodifiable list (so external mutation through the accessor throws). The accessor override is now strictly redundant — but if you used `new ArrayList<>(members)` instead, you'd need the override to defensively copy on output too.
+
+<Callout kind="info" title="Why no override is needed with List.copyOf">
+`List.copyOf` returns an immutable list. The stored field cannot be mutated by anyone, so returning it directly is safe. You only need the accessor override when you store a mutable container (e.g., a defensive `ArrayList` copy you also intend to use internally).
+</Callout>
+
+## Validation goes here too
+
+The compact constructor is also where validation lives, and it runs *after* the copy so you validate the snapshot, not the caller's original:
+
+```java
+public Team {
+    members = List.copyOf(members);
+    if (members.isEmpty()) throw new IllegalArgumentException("empty team");
+}
+```
+
+## Java 16+ caveat — the canonical accessor still exists
+
+A record automatically generates `public List<String> members()`. Even if you don't override it, you cannot change its visibility or signature — you can only replace the body. That's the override hook you use above.
+
+## When to skip records
+
+If most of your components are mutable (legacy types like `Date`, `StringBuilder`, or large arrays), the boilerplate of compact constructors plus accessor overrides eats the benefit. A plain `final class` with an explicit constructor is often clearer.
+
+<ProbeNote>"Is this record immutable?" with a `List<String>` component is a trap — the candidate either says "yes, records are immutable" (wrong, shallow only) or "no, records aren't really immutable" (also wrong, they *can* be with effort). The right answer names the shallow-vs-deep distinction, the `List.copyOf` fix, and the validate-after-copy order.</ProbeNote>

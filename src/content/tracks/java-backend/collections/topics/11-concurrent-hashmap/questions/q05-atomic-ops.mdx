@@ -1,0 +1,82 @@
+**Use `compute*` / `merge` whenever you'd otherwise do a check-then-act sequence: get-then-put, get-then-modify-then-put, putIfAbsent-then-update. They hold the bucket lock for the whole lambda, making the compound operation atomic without an external lock.**
+
+## The four methods
+
+| Method                              | Behavior                                                                 |
+|-------------------------------------|--------------------------------------------------------------------------|
+| `computeIfAbsent(k, k -> v)`        | If absent, run the function and insert. Returns existing or new value.   |
+| `computeIfPresent(k, (k,v) -> v')`  | If present, run the function with current value. `null` return removes.  |
+| `compute(k, (k,v) -> v')`           | Always run with current value (may be `null`). `null` return removes.    |
+| `merge(k, v, (old, new) -> v')`     | If absent, insert `v`. If present, run merger. `null` return removes.    |
+
+All four are atomic per bucket in `ConcurrentHashMap`.
+
+## Cache (load on miss)
+
+```java
+private final ConcurrentMap<UserId, User> cache = new ConcurrentHashMap<>();
+
+public User get(UserId id) {
+    return cache.computeIfAbsent(id, this::loadFromDb);
+}
+```
+
+The lambda runs **at most once** per missing key — even under concurrent calls. Other threads asking for the same key block on the bucket head until the loader returns. This is the canonical concurrent-cache pattern.
+
+## Counter
+
+```java
+ConcurrentMap<String, Long> counts = new ConcurrentHashMap<>();
+
+// Option A: merge
+counts.merge(event, 1L, Long::sum);
+
+// Option B: compute
+counts.compute(event, (k, v) -> v == null ? 1L : v + 1L);
+
+// Option C (better for very hot counters): LongAdder values
+ConcurrentMap<String, LongAdder> hot = new ConcurrentHashMap<>();
+hot.computeIfAbsent(event, k -> new LongAdder()).increment();
+```
+
+`merge` is the cleanest for "sum into existing". For high-contention single counters, store `LongAdder` values to avoid serialization on the bucket lock.
+
+## Update only if present
+
+```java
+sessions.computeIfPresent(sessionId, (id, sess) -> sess.withLastSeen(now()));
+```
+
+If the session was already evicted, no-op. No risk of resurrecting a removed key.
+
+## Conditional remove
+
+```java
+// Remove if value matches a predicate
+items.compute(key, (k, v) -> (v != null && v.isExpired()) ? null : v);
+
+// Or use the standard atomic 2-arg remove
+items.remove(key, expectedValue);
+```
+
+Returning `null` from `compute`/`computeIfPresent`/`merge` removes the entry atomically.
+
+## Atomicity caveats
+
+- The lambda runs **while holding the bucket's monitor**. Keep it fast, side-effect-light, and never block on I/O or other locks — you'll stall every other thread hashing into that bucket.
+- The function **must not modify the same map** (next question covers why).
+- For `ConcurrentHashMap` specifically, the API contract upgrades the `Map` default's "no atomicity guarantee" to "atomic per bucket". For other concurrent maps, check their javadocs.
+
+## Performance shape
+
+<ComplexityTable rows={[
+  {op: "computeIfAbsent (miss)", best: "O(1)", average: "O(1)", worst: "O(log n) bucket + function cost", note: "function runs once, others block on bucket"},
+  {op: "computeIfAbsent (hit)", best: "O(1)", average: "O(1)", worst: "O(1)", note: "fast path, no lambda call"},
+  {op: "merge", best: "O(1)", average: "O(1)", worst: "O(log n) bucket + merger cost", note: "always touches the bucket"}
+]} />
+
+<Callout kind="tip" title="Fast path for computeIfAbsent">
+`ConcurrentHashMap.computeIfAbsent` has an optimized read-path: if the key is present, it returns without acquiring any lock — just a volatile read. The lambda machinery only kicks in on actual misses. Cheap to call hot.
+</Callout>
+
+<ProbeNote>Probe: "What if my loader function throws?" The entry is *not* inserted; the exception propagates out of `computeIfAbsent`. The bucket lock is released. Next caller will retry the load — beware of retry storms on persistently failing dependencies. Wrap with circuit-breaker logic if needed.</ProbeNote>

@@ -1,0 +1,79 @@
+**Overloading is multiple methods with the same name and different parameter lists in the same class, resolved at compile time by argument types. Overriding is a subclass replacing a parent method with the same signature, resolved at runtime by the object's class.** The first is a naming convenience; the second is the engine of polymorphism.
+
+## Definitions side by side
+
+| Aspect                     | Overloading                                  | Overriding                              |
+|----------------------------|----------------------------------------------|-----------------------------------------|
+| Where it lives             | Same class (or inherited as siblings)        | Subclass replacing parent's method      |
+| What differs               | Parameter list (count or types)              | Nothing — signature must match          |
+| Return type                | Can differ freely                            | Same or covariant                       |
+| Access                     | Independent                                  | Same or wider                           |
+| Resolved at                | Compile time (static dispatch)               | Runtime (dynamic dispatch)              |
+| Polymorphism kind          | Ad-hoc                                       | Subtype                                 |
+| `@Override` valid          | No                                           | Yes — and you should use it             |
+
+## Overloading: compile-time choice
+
+```java
+class Printer {
+    void print(int n)    { System.out.println("int "    + n); }
+    void print(long n)   { System.out.println("long "   + n); }
+    void print(Object o) { System.out.println("Object " + o); }
+}
+
+Printer p = new Printer();
+p.print(42);             // "int 42"     — matches int
+p.print(42L);            // "long 42"    — matches long
+p.print("hello");        // "Object hello"
+Object obj = 42;
+p.print(obj);            // "Object 42"  — declared type is Object
+```
+
+Resolution rules: exact match wins, then widening primitive, then autoboxing, then varargs. The *declared* type of the argument is what the compiler sees.
+
+## Overriding: runtime dispatch
+
+```java
+class Shape  { double area() { return 0; } }
+class Circle extends Shape {
+    final double r;
+    Circle(double r) { this.r = r; }
+    @Override double area() { return Math.PI * r * r; }
+}
+
+Shape s = new Circle(3);
+s.area();                // 28.27... — Circle.area runs, not Shape.area
+```
+
+The compiler emits `invokevirtual Shape.area:()D`. At call time the JVM consults the receiver's vtable; the entry for `area` points to `Circle.area`.
+
+## Combined in one example
+
+```java
+class Parent {
+    void f(int n)    { System.out.println("Parent int"); }
+    void f(Object o) { System.out.println("Parent Object"); }
+}
+
+class Child extends Parent {
+    @Override void f(int n) { System.out.println("Child int"); }
+}
+
+Parent p = new Child();
+p.f(1);             // "Child int"     — overload picked at compile (int), override at runtime
+p.f("x");           // "Parent Object" — overload picked at compile, no Child override exists
+```
+
+Each call: (1) compiler picks the overload, (2) JVM dispatches that overload's slot on the runtime type.
+
+## A common bug from overloading
+
+```java
+List<Integer> xs = new ArrayList<>(List.of(1, 2, 3));
+xs.remove(1);       // calls remove(int index) — removes element at index 1, leaves [1, 3]
+xs.remove(Integer.valueOf(1));   // calls remove(Object) — removes the value 1
+```
+
+Two overloads of `remove` exist on `List`, and an `int` literal silently picks the one that takes an index. Boxing would have been a worse match than no conversion, so the compiler chooses `remove(int)`.
+
+<ProbeNote>Junior candidates know the definitions; senior candidates name the dispatch mechanism (`invokevirtual` vs compile-time selection) and predict mixed-case output. The `List.remove(int)` vs `List.remove(Object)` example is a popular interview demonstration — having it ready signals familiarity with real Java pitfalls.</ProbeNote>

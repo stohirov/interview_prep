@@ -1,0 +1,59 @@
+It XORs the high 16 bits of `hashCode()` into the low 16 bits, so that variation in the high bits still influences the bucket index when the table is small.
+
+## The expression
+
+```java
+static final int hash(Object key) {
+    int h;
+    return (key == null) ? 0 : (h = key.hashCode()) ^ (h >>> 16);
+}
+```
+
+`>>>` is the **unsigned** right shift — it fills with zeros, not the sign bit.
+
+## Why it matters
+
+Bucket index is `(n - 1) & hash`. For a default-sized table `n = 16`, the mask is `0b1111` — only the bottom four bits decide the bucket. If two different keys happen to share their low bits but differ in their high bits, they collide unnecessarily.
+
+Example — without the spreader, these two hashes index to the same bucket:
+
+```java
+int h1 = 0x0000_00A5; // bits ...10100101
+int h2 = 0xDEAD_00A5; // bits ...10100101
+// Both -> index 5 in a 16-bucket table
+```
+
+After the spread:
+
+```java
+h1 ^ (h1 >>> 16) = 0x0000_00A5 ^ 0x0000_0000 = 0x0000_00A5  // index 5
+h2 ^ (h2 >>> 16) = 0xDEAD_00A5 ^ 0x0000_DEAD = 0xDEAD_DE08  // index 8
+```
+
+The high half of the hash now participates in the index.
+
+## Why only one shift?
+
+Earlier Java versions (Java 7) used a more elaborate scramble with four shifts and XORs. Java 8 simplified it because:
+
+1. Trees in collided buckets cap worst-case lookups at O(log n), so a *little* extra collision is tolerable.
+2. One shift+XOR is essentially free — modern CPUs pipeline it past memory loads.
+3. Most real-world `hashCode()` implementations (especially `String`) already mix bits well.
+
+## Real-world impact
+
+Try keys whose hashes differ only in high bits — without the spread, you'd see all of them in one bucket; with it, they distribute.
+
+```java
+record HighBitKey(int x) {
+    @Override public int hashCode() { return x << 16; } // all low bits zero!
+}
+```
+
+Without the spreader, every such key indexes to bucket 0. With it, the high bits get folded down and the keys distribute properly.
+
+<Callout kind="tip" title="Don't try to outsmart it">
+You don't need to "pre-mix" your own `hashCode()`. The map handles spreading. Just return a stable, well-distributed value — `Objects.hash(...)` is fine for most cases.
+</Callout>
+
+<ProbeNote>The interviewer wants to see you understand the asymmetry between a 32-bit hash and a small power-of-two bucket count, and why the high bits would otherwise be wasted. Mentioning that this was simpler than the Java 7 scramble (because trees mitigate worst-case collisions) is a strong signal.</ProbeNote>

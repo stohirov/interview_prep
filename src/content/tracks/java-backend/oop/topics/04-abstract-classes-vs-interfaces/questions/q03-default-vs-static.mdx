@@ -1,0 +1,74 @@
+**A `default` method is an instance method with a body — implementers inherit it and can override it. A `static` method on an interface belongs to the interface itself, is not inherited by implementing classes, and is invoked through the interface name.** Both arrived in Java 8 and they solve different problems: defaults are for *evolving* an interface without breaking implementers; statics are for *grouping* related factory or helper methods with the interface.
+
+## Default methods
+
+```java
+public interface List<E> {
+    boolean add(E e);
+    int     size();
+
+    default boolean isEmpty() {           // ships behavior in the interface
+        return size() == 0;
+    }
+}
+
+public class MyList<E> implements List<E> {
+    @Override public boolean add(E e) { /* ... */ return true; }
+    @Override public int     size()   { return 0; }
+    // isEmpty inherited for free; can be overridden
+}
+
+new MyList<Integer>().isEmpty();          // calls List's default
+```
+
+Each implementer *gets* `isEmpty()` automatically. They can override for efficiency (`LinkedList` does — testing `head == null` is faster than counting).
+
+## Static methods on interfaces
+
+```java
+public interface List<E> {
+    static <E> List<E> of(E... elements) {        // factory
+        return new ImmutableList<>(elements);
+    }
+}
+
+List<String> xs = List.of("a", "b");              // called on the interface
+```
+
+`List.of(...)` is *not* inherited — `MyList.of(...)` doesn't compile. You always qualify with the interface name. This is how the JDK now ships factory methods (`List.of`, `Set.of`, `Map.of`, `Optional.of`, `Stream.of`) without separate `Utility` classes.
+
+## Side-by-side
+
+| Aspect                    | `default` method                    | `static` method                       |
+|---------------------------|-------------------------------------|---------------------------------------|
+| Receiver                  | instance (`this`)                   | none                                  |
+| Inherited by implementers | Yes                                 | No                                    |
+| Overridable               | Yes                                 | No (can be hidden by same-name static elsewhere) |
+| Called via                | `instance.method()`                 | `InterfaceName.method()`              |
+| Bytecode                  | `invokeinterface` with default attribute | `invokestatic`                   |
+| Primary use case          | Backwards-compatible evolution      | Factories, helpers, related utilities |
+
+## Why both exist
+
+- **`default`** was added to let the JDK add methods like `Iterable.forEach`, `Collection.stream`, `Map.compute` *without breaking* the millions of classes implementing those interfaces. Without it, adding even one method to a published interface would shatter the world.
+- **`static`** removed the need for parallel `Utility` classes (`Collections` exists historically; with statics, that level of separation isn't needed for new types). It also makes factories discoverable — `List.of` is right there next to the interface, not in a sibling class.
+
+## A subtle mistake
+
+People sometimes try to "override" a static interface method in an implementer:
+
+```java
+interface I { static String name() { return "I"; } }
+class C implements I { static String name() { return "C"; } }      // unrelated method
+
+I.name();    // "I"
+C.name();    // "C"
+```
+
+This is hiding (same as for class statics, see topic 3 q01), not overriding. The interface static is not polymorphic.
+
+<Callout kind="tip" title="Style guideline">
+Use `default` only for methods that *most* implementers will be happy with — typically expressed in terms of other interface methods. Use `static` for factories and pure helpers that logically belong to the type but don't need an instance.
+</Callout>
+
+<ProbeNote>The interviewer is checking that you know they're distinct features with distinct motivations. Strong answers connect `default` to interface evolution (and cite `Collection.stream` or `Iterable.forEach`) and `static` to factory grouping (citing `List.of`). Bonus points for naming the bytecode difference.</ProbeNote>

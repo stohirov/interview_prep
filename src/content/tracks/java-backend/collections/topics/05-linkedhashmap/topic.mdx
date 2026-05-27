@@ -1,0 +1,57 @@
+`LinkedHashMap` is a `HashMap` with a **doubly-linked list** threaded through every entry. The hash table gives you O(1) lookups; the linked list gives you predictable iteration order — by default *insertion order*, optionally *access order*.
+
+## What it adds to HashMap
+
+Each entry is a subclass of `HashMap.Node` with two extra references:
+
+```java
+static class Entry<K,V> extends HashMap.Node<K,V> {
+    Entry<K,V> before, after;
+    Entry(int hash, K key, V value, Node<K,V> next) {
+        super(hash, key, value, next);
+    }
+}
+```
+
+The class also stores a `head` and `tail` pointer, so the entries form an ordered chain independent of bucket layout:
+
+<Diagram caption="Bucket array plus an ordered chain through entries">{`Hash table (buckets):
+  [0] -> e3
+  [1] -> e1 -> e5
+  [2] -> e2
+  [3] -> e4
+  ...
+
+Insertion order chain (head -> tail):
+  e1 <-> e2 <-> e3 <-> e4 <-> e5`}</Diagram>
+
+## The two modes
+
+The third constructor argument picks the mode:
+
+```java
+new LinkedHashMap<>(16, 0.75f, false); // insertion order (default)
+new LinkedHashMap<>(16, 0.75f, true);  // access order
+```
+
+In **insertion-order** mode, the chain reflects the order entries were added. In **access-order** mode, every `get`/`put` moves the touched entry to the *tail* — leaving the head as the least-recently-used entry. That's the building block for an LRU cache.
+
+## Hooks for subclasses
+
+`LinkedHashMap` exposes three protected hooks that fire as the chain changes:
+
+```java
+protected void afterNodeAccess(Node<K,V> p)  { /* move-to-tail in access-order mode */ }
+protected void afterNodeInsertion(boolean evict) { /* called after put / putIfAbsent */ }
+protected boolean removeEldestEntry(Map.Entry<K,V> eldest) { return false; }
+```
+
+Override `removeEldestEntry` to evict on every insert — that's the canonical bounded-cache pattern. The default returns `false`, so a plain `LinkedHashMap` grows unbounded just like `HashMap`.
+
+## Cost
+
+Memory is higher than `HashMap` (two extra references per entry — 16 bytes on a 64-bit JVM with compressed oops). Insert/remove cost is the same big-O but pays an extra pointer-update for the chain. Iteration is *faster* than `HashMap` for a partly-filled map, because you walk only the chain (n entries) instead of every bucket slot (n + capacity).
+
+<Callout kind="tip" title="Reach for it when">
+You need stable iteration order (logs, deterministic tests, JSON output) or you're building an LRU cache. Otherwise a plain `HashMap` is cheaper.
+</Callout>

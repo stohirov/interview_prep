@@ -1,0 +1,65 @@
+**`size()` is approximate because CHM doesn't maintain a single global counter — that would itself become a contention bottleneck. Instead it uses a striped counter (like `LongAdder`): each thread updates its own cell, and `size()` sums the cells on demand. Concurrent writes can change the total mid-summation. `mappingCount()` returns the same value as a `long`, which matters once the map exceeds `Integer.MAX_VALUE` entries.**
+
+## Why not a single counter?
+
+Imagine a `volatile long count` incremented on every put. Every writer would contend on the same cache line — CAS storms, cache-line ping-pong between cores. CHM's whole point is to scale; a single counter would erase the gain.
+
+## The striped counter design
+
+CHM uses `LongAdder`-style internals (`CounterCell[]`):
+
+- Each thread, indexed by a per-thread probe, updates its own `CounterCell`.
+- The array grows under contention up to roughly `NCPU` cells.
+- `size()` walks the array and sums every cell's value.
+
+Result: writes scale linearly with cores, and reading the size is O(cells), not O(map).
+
+## Why "approximate"?
+
+```java
+long total = baseCount;
+for (CounterCell c : cells) {
+    if (c != null) total += c.value;
+}
+```
+
+Between reading cell 0 and cell 7, other threads can `put` or `remove`. The returned number was the true size at no single instant — it's a *sum of snapshots*. For monitoring, it's plenty accurate. For control flow, don't trust the exact value.
+
+## `size()` vs `mappingCount()`
+
+| Method            | Return type | Saturates at      |
+|-------------------|-------------|-------------------|
+| `size()`          | `int`       | `Integer.MAX_VALUE` (~2.1B). Larger maps overflow / silently clamp. |
+| `mappingCount()`  | `long`      | `Long.MAX_VALUE` — for serious large maps. |
+
+If you only need a rough count and your map will never exceed 2 billion entries, `size()` is fine. If you might (caching, log aggregation, etc.), reach for `mappingCount()`.
+
+## Cost characteristics
+
+<ComplexityTable rows={[
+  {op: "put", best: "O(1)", average: "O(1)", worst: "O(log n) per bucket (treeified)", note: "CAS or sync on head"},
+  {op: "get", best: "O(1)", average: "O(1)", worst: "O(log n)", note: "lock-free"},
+  {op: "size() / mappingCount()", best: "O(NCPU)", average: "O(NCPU)", worst: "O(NCPU)", note: "sums striped cells"}
+]} />
+
+## Misuse
+
+```java
+// BAD — race condition
+if (map.size() < MAX) {
+    map.put(k, v);     // another thread may have put between check and act
+}
+
+// GOOD — atomic
+map.compute(k, (key, old) -> {
+    if (mapSizeWithinLimit()) return v;
+    return old;
+});
+// or use a Semaphore / explicit counter for capacity gating
+```
+
+<Callout kind="tip" title="Don't use size() for control flow">
+`size()` is a monitoring/diagnostic tool. For limits and capacity decisions, hold an explicit `LongAdder`/`Semaphore`/`AtomicInteger` alongside the map.
+</Callout>
+
+<ProbeNote>Probe: "If no concurrent writes are happening, is `size()` exact?" Effectively yes — the cells are stable, the sum is the true total. The "approximate" caveat is specifically about concurrent mutation during the call. Same logic applies to `isEmpty()`.</ProbeNote>

@@ -1,0 +1,51 @@
+Both patterns wrap a target object and delegate to it, which is why interviewers love the question. The distinction is **intent and interface shape**: an Adapter *changes* the interface to make two incompatible types talk to each other; a Decorator *preserves* the interface and layers on extra behavior.
+
+## The one-line test
+
+Ask: "does the caller see the same interface before and after wrapping?"
+
+- **Yes** → Decorator. The wrapper *is-a* component. You can stack wrappers and substitute one for the other.
+- **No** → Adapter. The wrapper translates calls from `Target` to `Adaptee`. Stacking adapters of different shapes makes no sense.
+
+## In code
+
+```java
+// ----- Adapter: shape change -----
+interface UsbPort { byte[] readUsb(); }
+class LegacySerialDevice { String readSerial() { return "..."; } }
+
+class SerialToUsbAdapter implements UsbPort {
+    private final LegacySerialDevice serial;
+    SerialToUsbAdapter(LegacySerialDevice s) { this.serial = s; }
+    public byte[] readUsb() { return serial.readSerial().getBytes(); }
+}
+
+// ----- Decorator: same shape, extra behavior -----
+interface DataSource { String read(); }
+class FileSource implements DataSource {
+    public String read() { return "raw data"; }
+}
+class EncryptedSource implements DataSource {
+    private final DataSource inner;
+    EncryptedSource(DataSource d) { this.inner = d; }
+    public String read() { return decrypt(inner.read()); }
+    private String decrypt(String s) { return s + " [decrypted]"; }
+}
+```
+
+You can write `new EncryptedSource(new BufferedSource(new FileSource()))` — a Decorator stack. You can't write `new SerialToUsbAdapter(new SomeOtherAdapter(...))` meaningfully — adapter chains imply your design is missing a unified interface.
+
+## Why interviewers care
+
+The two patterns demonstrate two different design pressures:
+
+- **Adapter** = *integration pressure*. You inherited a class with the wrong API and you can't change it.
+- **Decorator** = *composition pressure*. You want to add cross-cutting behavior (logging, retry, caching) without subclassing.
+
+A senior answer also notes that the JDK ships canonical examples of each. `InputStreamReader` adapts a byte `InputStream` into a char `Reader` — different interfaces. `BufferedInputStream` decorates an `InputStream` with buffering — same interface, more capability.
+
+<Callout kind="info" title="A common follow-up">
+"What about Proxy?" Proxy looks like Decorator (same interface), but its *intent* is gating access — lazy loading, security checks, remote calls — not enriching behavior. A Decorator caller asks for more; a Proxy caller asks for the same thing and the proxy decides whether and how to deliver it.
+</Callout>
+
+<ProbeNote>The interviewer is checking whether you can articulate intent vs structure. Structurally both patterns hold a reference and delegate; intent-wise they answer different questions. Get the "same interface or different interface" test out fast and you've shown you understand both patterns at the right level.</ProbeNote>

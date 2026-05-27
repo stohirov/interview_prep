@@ -1,0 +1,74 @@
+The **Composite** pattern lets clients treat individual objects (leaves) and compositions of objects (containers) uniformly through a shared interface. A file system is the canonical example: a `File` and a `Directory` both have a `size()`, but a directory's size is the recursive sum of its children's sizes.
+
+## The hierarchy
+
+```java
+public sealed interface Node permits FileNode, Directory {
+    String name();
+    long sum();   // size in bytes
+}
+
+public record FileNode(String name, long sum) implements Node {}
+
+public final class Directory implements Node {
+    private final String name;
+    private final List<Node> children = new ArrayList<>();
+
+    public Directory(String name) { this.name = name; }
+    public String name() { return name; }
+
+    public Directory add(Node child) { children.add(child); return this; }
+
+    public long sum() {
+        long total = 0;
+        for (Node c : children) total += c.sum(); // recurses uniformly
+        return total;
+    }
+}
+```
+
+`Directory.sum()` doesn't care whether each `child` is a `FileNode` or another `Directory` — both expose the same `sum()` method. That uniformity is the whole point.
+
+## Building and querying a tree
+
+```java
+Node root = new Directory("/")
+    .add(new FileNode("readme.md", 1_024))
+    .add(new Directory("src")
+        .add(new FileNode("Main.java", 4_096))
+        .add(new FileNode("App.java", 8_192)))
+    .add(new Directory("logs")
+        .add(new FileNode("app.log", 65_536)));
+
+System.out.println(root.sum()); // 78,848
+```
+
+The traversal is a textbook recursion that falls out of the polymorphic dispatch — no `instanceof`, no `switch`, no separate visitor needed for this simple aggregation.
+
+<Diagram caption="Composite tree: leaves and containers share the Node interface">{`             Directory("/")
+            /      |       \\
+           /       |        \\
+   FileNode    Directory   Directory
+  ("readme")    ("src")     ("logs")
+                /   \\         |
+        FileNode  FileNode  FileNode
+        (Main)    (App)     (app.log)`}</Diagram>
+
+## Why `sealed`
+
+Marking `Node` as `sealed interface ... permits FileNode, Directory` gives the compiler a closed sum type. If you later add `case SymbolicLink`, any `switch (node)` that handled the other two but not the new one becomes a compile error — exactly the safety net you want for a recursive data structure.
+
+## The trade-off the interviewer will probe
+
+Composite intentionally blurs the leaf/container distinction. A method like `add(Node)` makes sense on `Directory` but not on `FileNode`. Two design styles:
+
+1. **Uniform interface** (chosen above): `add` lives only on `Directory`. Callers who hold a `Node` reference can't add to it. Safer types, less convenient.
+2. **Transparent interface**: `add` lives on `Node`, with `FileNode.add` throwing `UnsupportedOperationException`. Convenient but runtime errors leak in.
+
+The *Design Patterns* book itself acknowledges this tension. The modern Java answer leans uniform plus `sealed` so the compiler enforces "add is only on Directory".
+
+<Callout kind="info" title="Other ops you'd add">
+`size()` (number of nodes), `flatten()` (depth-first stream of `FileNode`s), `find(predicate)` — each is a small recursion over the same shape. Composite is the gateway to the Visitor pattern when those operations get numerous and you want to keep them off the data classes.
+</Callout>
+
+<ProbeNote>The interviewer is testing whether you can recognize "recursive data structure" as a Composite cue, and whether you reach for `sealed` (or at least a closed hierarchy) so the recursive operations stay exhaustive. If you write `instanceof FileNode` inside `sum()` you've missed the point — the dispatch is what makes the pattern.</ProbeNote>

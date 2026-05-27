@@ -1,0 +1,47 @@
+**Yes — `HashSet` allows exactly one `null` element.** That's because `HashSet` is backed by `HashMap`, which permits one `null` key. Adding `null` a second time returns `false` and leaves the set unchanged, just like adding any other duplicate.
+
+## Why One Null Works
+
+`HashMap` special-cases `null` keys: they always hash to bucket 0 (via the internal `hash(null) == 0` rule), bypassing the usual `key.hashCode()` call. Equality for `null` keys is checked by reference (`==`). Since `HashSet.add(e)` delegates to `map.put(e, PRESENT)`, the same null-handling applies.
+
+```java
+Set<String> s = new HashSet<>();
+s.add(null);            // returns true — added
+s.add(null);            // returns false — already present
+s.add("a");
+s.contains(null);       // true
+s.size();               // 2
+```
+
+## Contrast with the Other Sets
+
+- **`LinkedHashSet`** — same as `HashSet`: one null allowed (backed by `LinkedHashMap`).
+- **`TreeSet`** — **no null allowed**. Adding null throws `NullPointerException` because the tree must call `compareTo` on the new element, and `null.compareTo(...)` is impossible. (With a custom `Comparator` that tolerates null, you could in principle accept it, but the default `naturalOrder` won't.)
+- **`Set.of(...)`** — null-hostile by design. `Set.of(null)` throws NPE at construction, and `Set.of("a").contains(null)` also throws NPE on lookup.
+- **`ConcurrentHashMap`-backed sets** (e.g., `ConcurrentHashMap.newKeySet()`) — **no null allowed**, because `null` is used as a sentinel for "key absent" internally.
+
+```java
+new TreeSet<String>().add(null);              // NullPointerException
+Set.of("a", null);                            // NullPointerException
+Set.of("a").contains(null);                   // NullPointerException
+ConcurrentHashMap.<String>newKeySet().add(null); // NullPointerException
+```
+
+## Why You Probably Shouldn't
+
+Even where it's *allowed*, storing `null` in a `Set` is usually a code smell:
+
+1. **Stream pipelines break.** `stream().map(String::length)` will NPE on a null element.
+2. **`for-each` is fragile.** You constantly need null-guards inside the loop.
+3. **`Set.of`/`Set.copyOf` interop fails.** You can't snapshot or transform via the modern immutable factories.
+4. **It hides intent.** A null in a set of users probably means "missing" — model that explicitly with `Optional` or a sentinel.
+
+The framework's null-hostility (visible in `Set.of`, `ConcurrentHashMap`, `TreeSet`) reflects the maintainers' position that allowing null was a Java 1.2 mistake they couldn't fix without breaking compatibility.
+
+<Callout kind="tip" title="Modern guideline">
+Treat `HashSet`'s null-tolerance as a legacy quirk. If you're designing new code, use `Set.of`/`Set.copyOf` for constants and `ConcurrentHashMap.newKeySet()` for mutable sets — both of which enforce non-null.
+</Callout>
+
+<ProbeNote>
+The interviewer is using a small fact to probe several deeper things: (1) you know `HashSet` is `HashMap`-backed; (2) you can articulate **why** the limit is one (because keys are unique by `equals`); (3) you know which other sets reject null and **why** (`TreeSet` needs `compareTo`, `Set.of` is null-hostile by policy, `ConcurrentHashMap` uses null as a sentinel). A senior answer also calls out that storing null is rarely a good design choice even when allowed.
+</ProbeNote>

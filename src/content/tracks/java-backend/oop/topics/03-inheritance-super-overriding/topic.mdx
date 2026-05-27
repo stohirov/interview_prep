@@ -1,0 +1,55 @@
+**Overriding is how a subclass replaces a superclass method, and dynamic dispatch is how the JVM picks the right implementation at runtime.** It looks simple in the source — `@Override`, same signature, done — but underneath, the JVM is walking a per-class method table on every virtual call. Knowing the mechanism explains why static methods aren't polymorphic, why private methods aren't overridable, and why covariant returns required a bytecode trick to introduce.
+
+## What "override" means at runtime
+
+When the compiler sees `shape.area()`, it emits one of three bytecodes:
+
+- `invokevirtual` — instance methods on classes (the common case)
+- `invokeinterface` — instance methods on interface references
+- `invokespecial` — constructors, private methods, `super.x()`
+- `invokestatic` — static methods (no dispatch)
+
+For `invokevirtual` and `invokeinterface`, the JVM looks up the actual method to run via a **vtable** (per-class) or **itable** (per-interface implementor) keyed by method index. The receiver's runtime class — not the declared type — picks the entry. That's dynamic dispatch in one sentence.
+
+```java
+class Animal { public String sound() { return "?"; } }
+class Dog extends Animal { @Override public String sound() { return "woof"; } }
+
+Animal a = new Dog();
+a.sound();          // invokevirtual; dispatches on Dog's vtable -> "woof"
+```
+
+## `@Override` — a small annotation, a big safety net
+
+`@Override` is *not* required, but it's an unforced error to omit it. Without it, a typo silently creates a new method instead of overriding:
+
+```java
+class Cache {
+    @Override public boolean equals(Object o) { /* ... */ }   // ok
+    public boolean equlas(Object o) { /* ... */ }             // typo — NEW method
+}
+```
+
+The annotation tells the compiler: "I claim this overrides a supertype method." If it doesn't (wrong name, wrong signature, wrong access), you get a compile error instead of a silent bug.
+
+## Covariant return types
+
+Before Java 5, an overriding method had to return the *exact* same type as the parent. Since Java 5:
+
+```java
+class Animal { Animal copy() { return new Animal(); } }
+class Dog extends Animal {
+    @Override Dog copy() { return new Dog(); }      // covariant return
+}
+```
+
+`Dog.copy()` returns `Dog`, a subtype of `Animal`. Callers holding a `Dog` reference get a `Dog` back without a cast. The compiler synthesizes a **bridge method** under the hood — `Animal copy()` that calls `Dog copy()` — to preserve binary compatibility with old callers that expect the parent's signature.
+
+## What does NOT participate in overriding
+
+- **`static` methods**: hidden, not overridden. Dispatched by the declared type, not the runtime type.
+- **`private` methods**: not visible to subclasses; subclass declarations just create unrelated methods.
+- **`final` methods**: explicitly forbidden from being overridden.
+- **`new` modifier**: Java has no equivalent to C#'s `new` keyword — you simply can't intentionally "shadow" instance methods.
+
+The six questions below pull each of these apart.

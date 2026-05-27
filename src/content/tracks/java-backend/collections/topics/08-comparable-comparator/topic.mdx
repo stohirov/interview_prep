@@ -1,0 +1,30 @@
+`Comparable<T>` and `Comparator<T>` both define orderings, but they live in different places and serve different roles. `Comparable` is the **natural ordering** baked into a type; `Comparator` is an **external strategy** for ordering you can swap, compose, and reverse.
+
+## The split at a glance
+
+- `Comparable<T>` — single method `int compareTo(T other)`. Implemented *by* the type itself. Returned by `TreeMap`/`TreeSet`/`Collections.sort` when no comparator is supplied. Examples: `Integer`, `String`, `BigDecimal`, `LocalDate`.
+- `Comparator<T>` — single method `int compare(T a, T b)`. Passed *to* sorting code. Stateless or stateful. Composable via `thenComparing`, `reversed`, `nullsFirst`.
+
+## When to use which
+
+- Is there *one obvious correct ordering* for the type? Implement `Comparable`. Numeric types, dates, identifiers all have one.
+- Is the ordering context-dependent (sort by name, then by date, then descending by price)? Use `Comparator`. Multiple comparators can coexist for the same type.
+- Are you a library author? Implement `Comparable` for natural ordering AND let callers pass a `Comparator` for overrides — sorted collections accept both.
+
+## The compareTo / compare contract
+
+Both methods return a **negative int** if `a < b`, **zero** if `a == b` (per the comparator), **positive int** if `a > b`. Implementations must be:
+
+1. **Antisymmetric** — `sgn(compare(a, b)) == -sgn(compare(b, a))`.
+2. **Transitive** — `a > b` and `b > c` implies `a > c`.
+3. **Consistent** with itself across calls.
+
+There's a *fourth* highly-recommended (but not strictly required) property: **consistent with equals** — `compare(a, b) == 0` if and only if `a.equals(b)`. Violating this leads to weirdness in `TreeSet` (covered in the next question).
+
+## What you'll cover
+
+- `Comparable` vs `Comparator` mechanics and trade-offs.
+- Why `BigDecimal` famously breaks the consistent-with-equals recommendation.
+- Composing comparators with `comparing`, `thenComparing`, `reversed`.
+- `nullsFirst` and `nullsLast` for null-tolerant ordering.
+- Why `HashSet` requires neither but `TreeSet` requires one.

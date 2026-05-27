@@ -1,0 +1,80 @@
+The **Template Method** pattern fixes the *order* of an algorithm in a base class and lets subclasses fill in the variable *steps*. It belongs whenever you have several variants of "the same process with different parts" — and it's the textbook embodiment of the **Hollywood Principle**: *"Don't call us, we'll call you."*
+
+## The Hollywood Principle
+
+In a normal API, the caller drives: you instantiate a service, call `step1`, call `step2`, etc. With Template Method, the framework drives: you subclass and provide `step1` and `step2`, and the base class calls them in the right order. The flow of control is inverted — you don't call the framework, the framework calls your overrides. That's **inversion of control**, and Template Method is the simplest IoC pattern.
+
+## A tax calculator
+
+```java
+public abstract class AbstractTaxCalculator {
+
+    // The template: order is fixed here and final
+    public final BigDecimal calculateTax(Order order) {
+        BigDecimal base = baseAmount(order);
+        BigDecimal taxable = applyExemptions(base, order);
+        BigDecimal tax = taxable.multiply(rate(order));
+        return roundForJurisdiction(tax);
+    }
+
+    // Required hooks — every jurisdiction implements
+    protected abstract BigDecimal rate(Order order);
+    protected abstract BigDecimal roundForJurisdiction(BigDecimal tax);
+
+    // Optional hook with a sensible default
+    protected BigDecimal applyExemptions(BigDecimal base, Order order) {
+        return base; // most jurisdictions: no exemptions
+    }
+
+    // Helper the template calls — usually not overridden
+    private BigDecimal baseAmount(Order order) {
+        return order.lines().stream()
+            .map(l -> l.price().multiply(BigDecimal.valueOf(l.qty())))
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+}
+
+public class UsSalesTax extends AbstractTaxCalculator {
+    protected BigDecimal rate(Order order) { return new BigDecimal("0.0725"); }
+    protected BigDecimal roundForJurisdiction(BigDecimal tax) {
+        return tax.setScale(2, RoundingMode.HALF_UP);
+    }
+}
+
+public class UkVat extends AbstractTaxCalculator {
+    protected BigDecimal rate(Order order) { return new BigDecimal("0.20"); }
+    protected BigDecimal roundForJurisdiction(BigDecimal tax) {
+        return tax.setScale(2, RoundingMode.HALF_EVEN); // banker's rounding
+    }
+    @Override
+    protected BigDecimal applyExemptions(BigDecimal base, Order order) {
+        // UK exempts children's clothing
+        return order.hasChildrenClothing() ? base.multiply(new BigDecimal("0.9")) : base;
+    }
+}
+```
+
+Two non-obvious choices worth defending in an interview:
+
+- `calculateTax` is `final` — subclasses must not override the template, only its steps. Otherwise the IoC promise is broken.
+- Hooks come in two flavors: `abstract` (required, like `rate`) and concrete-with-default (optional, like `applyExemptions`). The concrete ones are *hooks* — overridable but with a working default for the common case.
+
+## When it belongs
+
+- The order of steps is invariant; what each step *does* varies.
+- You have 2+ implementations that share most of the algorithm.
+- You want to enforce the order from one place so a careless subclass can't break invariants.
+
+Real-world: `org.springframework.jdbc.core.JdbcTemplate.execute(...)` is Template Method — it opens the connection, prepares the statement, hands the statement to *your* callback, then guarantees cleanup in `finally`. You can't forget to close anything because you don't write that part.
+
+## When to avoid it
+
+- Composition would do the job with no inheritance: instead of `abstract class AbstractFoo`, you could inject a `Strategy`. Today this is usually the better choice — Strategy is more flexible and testable than Template Method.
+- The variable parts are a single method — that's literally a Strategy, and a lambda is cleaner.
+- Steps need to vary in order, not just content. Template Method assumes a fixed sequence; once order varies, you've outgrown it.
+
+<Callout kind="tip" title="Template Method's modern challenger">
+Composition + Strategy is usually preferred. Template Method's appeal — *"force everyone to follow the order"* — is real, but it costs you the rigidity of inheritance: single-parent hierarchies, harder to test, harder to mix. Reach for Template Method when the *order* is the asset you're protecting.
+</Callout>
+
+<ProbeNote>Two beats interviewers want: name the Hollywood Principle and explain inversion of control with it, and articulate the modern critique — that Strategy + composition often subsumes Template Method without the inheritance cost. Citing `JdbcTemplate` or `AbstractList` as canonical JDK examples shows you've actually seen the pattern in the wild.</ProbeNote>

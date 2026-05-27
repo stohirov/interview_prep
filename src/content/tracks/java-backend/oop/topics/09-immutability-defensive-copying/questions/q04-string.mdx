@@ -1,0 +1,53 @@
+**`String` immutability is a JVM-wide design decision**, not a stylistic one. Three concrete payoffs justify it: hash caching, security guarantees that the language relies on, and free thread safety / interning. Each of these would collapse if `String` were mutable.
+
+## 1. Hash code caching
+
+`String` caches its `hashCode()` in a `private int hash` field, computed lazily on first call. Because the underlying `char[]` can never change, that cached value is valid forever.
+
+```java
+// java.lang.String (simplified)
+private int hash;       // default 0
+
+public int hashCode() {
+    int h = hash;
+    if (h == 0 && value.length > 0) {
+        h = /* compute from value */;
+        hash = h;       // safe: any racing thread computes the same value
+    }
+    return h;
+}
+```
+
+This matters because `String` is by far the most-used `HashMap` key in any real codebase. Without caching, every `map.get(key)` re-walks the chars.
+
+## 2. Security
+
+The JDK's security model passes strings into trust-sensitive APIs and assumes they won't change between the check and the use:
+
+- **Class loaders** — `ClassLoader.loadClass("com.evil.Bomb")` checks the name against security policy. If `String` were mutable, an attacker could pass `"com.safe.Class"`, wait for the check to pass, then mutate it to `"com.evil.Bomb"` before the actual load.
+- **File paths** — `new File(userInput).exists()` then `new FileReader(userInput)` would TOCTOU the same way.
+- **Network hosts**, **reflection** (`Class.forName`), **SQL strings**, **URL parsing** — all pass `String` as a trusted identifier.
+
+If `String` were mutable, every one of these APIs would need a defensive copy on entry, and the JDK would be riddled with `new String(input)` calls.
+
+## 3. Thread safety and the string pool
+
+Immutable objects are automatically thread-safe — no locking, no `volatile`, no race conditions. Multiple threads can share the same `String` instance with zero coordination.
+
+This enables the **string pool**: at the bytecode level, every string literal in your program with the same value points to the *same* `String` instance (`String.intern()` makes this explicit). Pooling only works because the shared instance can never change underneath you — otherwise interning `"hello"` and then mutating it would corrupt every literal in the JVM.
+
+<Callout kind="tip" title="Bonus: enables == as identity">
+Because of pooling, `"abc" == "abc"` is true for literals. This is a side effect of the design, not a contract — always use `.equals()`. But the JIT can rely on it for constant folding.
+</Callout>
+
+## The cost
+
+Building strings incrementally creates garbage. Use `StringBuilder` for hot-path concatenation in loops — it's a mutable buffer that produces one immutable `String` at the end.
+
+```java
+var sb = new StringBuilder();
+for (var s : items) sb.append(s).append(',');
+String result = sb.toString();   // one immutable String, no intermediate garbage
+```
+
+<ProbeNote>The interviewer is checking that you connect immutability to concrete JVM features — pool, hashCode cache, security manager — not just recite "thread safe". A senior-level follow-up: "Why isn't `StringBuilder` thread-safe but `StringBuffer` is?" — `StringBuffer` is the legacy 1.0 synchronized version; `StringBuilder` (1.5) is the modern unsynchronized version for the common single-threaded case.</ProbeNote>

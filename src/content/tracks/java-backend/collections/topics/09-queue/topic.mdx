@@ -1,0 +1,31 @@
+`Queue<E>` is Java's FIFO collection interface; `Deque<E>` ("deck" — double-ended queue) extends it to allow insertion and removal at both ends. Together they provide stacks, queues, sliding windows, and priority structures. Pick the right implementation and your concurrent producer-consumer code becomes simple; pick the wrong one and you've inherited 1996-era synchronization or O(n) head operations.
+
+## The hierarchy
+
+- `Queue<E>` — single-ended FIFO. Methods to add/remove from head and tail.
+- `Deque<E>` — both ends accessible. Replaces the legacy `Stack` class.
+- `BlockingQueue<E>` (in `java.util.concurrent`) — adds `put`/`take` that block on full/empty.
+- `PriorityQueue<E>` — heap-ordered, not FIFO.
+- `ArrayDeque<E>` — modern array-backed Deque; the right default Stack/Queue.
+- `LinkedList<E>` — implements Deque but with poor cache locality; avoid.
+
+## When to use which
+
+- **General FIFO queue** — `ArrayDeque`.
+- **Stack (LIFO)** — `ArrayDeque` (`push`/`pop`/`peek`). **Never** `java.util.Stack` — it's a legacy synchronized class.
+- **Producer-consumer between threads** — `LinkedBlockingQueue`, `ArrayBlockingQueue`, or `SynchronousQueue` depending on capacity needs.
+- **Lock-free concurrent queue** — `ConcurrentLinkedQueue`.
+- **Top-K, scheduling, event simulation** — `PriorityQueue` (or `PriorityBlockingQueue` if shared across threads).
+
+## The two API styles
+
+`Queue` and `Deque` have *two parallel sets of methods* — one throws on failure, the other returns a sentinel (`false` or `null`). This is a recurring source of bugs; covered in detail in the first question.
+
+## What you'll cover
+
+- The throw-vs-return method matrix.
+- Why `Stack` is legacy and what to use instead.
+- How `ArrayDeque` is implemented (circular buffer with power-of-two sizing).
+- Why `PriorityQueue.iterator()` does NOT iterate in priority order.
+- Solving a top-K / k-merge problem with `PriorityQueue`.
+- `PriorityQueue` vs `PriorityBlockingQueue` in concurrent code.

@@ -1,0 +1,72 @@
+**A marker interface is an empty interface used purely to *tag* a type — `implements Serializable` declares "this class agrees to be serialized" without adding any methods. Annotations (Java 5+) replaced most markers because they carry metadata in a more granular, parameterized, and reflection-friendly form.** Markers haven't fully died — they survive where the JVM or libraries need fast, generic-aware type checks.
+
+## The classic markers in the JDK
+
+```java
+public interface Serializable { /* no methods */ }
+public interface Cloneable    { /* no methods */ }
+public interface RandomAccess { /* no methods */ }
+```
+
+- `Serializable` — your class opts into Java's binary serialization protocol. The serializer checks `o instanceof Serializable` and throws `NotSerializableException` otherwise.
+- `Cloneable` — opts your class into `Object.clone()`. If absent, `clone()` throws `CloneNotSupportedException`.
+- `RandomAccess` — signals that a `List` supports constant-time positional access (`ArrayList` does, `LinkedList` doesn't). Algorithms use it to choose between index-based and iterator-based traversal.
+
+## How a library uses one
+
+```java
+public static <T> int indexOf(List<T> list, T target) {
+    if (list instanceof RandomAccess) {
+        for (int i = 0; i < list.size(); i++)            // index loop
+            if (Objects.equals(list.get(i), target)) return i;
+    } else {
+        int i = 0;
+        for (T x : list) {                                // iterator loop
+            if (Objects.equals(x, target)) return i;
+            i++;
+        }
+    }
+    return -1;
+}
+```
+
+The marker is a *runtime capability check*. No methods, no implementation — just a type-system flag.
+
+## Why annotations took over
+
+Annotations express the same idea with more power:
+
+```java
+@Entity
+@Table(name = "users")                       // parameterized metadata
+public class User {
+    @Id @GeneratedValue Long id;
+    @Column(nullable = false) String name;   // field-level metadata
+}
+```
+
+Marker interfaces can't:
+
+- Carry parameters (`@Table(name = "users")`).
+- Annotate fields, methods, parameters, or local variables — only types.
+- Be retained selectively (source / class / runtime).
+- Be applied without polluting the type hierarchy — once `Foo implements Marker`, every subclass `is-a Marker` whether or not it should be.
+
+`@Override`, `@Deprecated`, `@FunctionalInterface`, `@Test`, `@Inject` — all do work that pre-Java-5 would have needed a marker.
+
+## When markers still win
+
+- **`instanceof` is faster and clearer than `getClass().isAnnotationPresent(...)`.** For very hot paths the JVM can specialize on the type check.
+- **Generics use markers in bounds:** `<T extends Comparable<T>>` is structurally what a marker bound looks like. Annotations can't appear in type bounds.
+- **Auto-inheritance.** Mark a base class and every subclass inherits the marker for free. Annotations require `@Inherited` and even then only flow through `extends`, not `implements`.
+- **Legacy and serialization.** `Serializable`, `Cloneable`, `RandomAccess`, and `EventListener` are too deeply wired into the platform to replace.
+
+## A modern Java take
+
+Bloch (*Effective Java* item 41) gives the rule: use a marker interface when you need to type-check *generically* (a method parameter typed as the marker) or when you'd otherwise have to use reflection at every check. Use annotations for purely declarative metadata, especially when parameters or non-type targets are involved.
+
+<Callout kind="info" title="Quick rule">
+Need a runtime `instanceof` check? Marker interface. Need declarative metadata or parameters? Annotation.
+</Callout>
+
+<ProbeNote>The interviewer wants the definition, two or three JDK examples, and a coherent story for why annotations didn't fully replace them. Strong candidates volunteer the `RandomAccess` example because it shows a *behavioral* (not just declarative) use that annotations can't express cleanly. Weak ones just say "annotations are newer and better."</ProbeNote>

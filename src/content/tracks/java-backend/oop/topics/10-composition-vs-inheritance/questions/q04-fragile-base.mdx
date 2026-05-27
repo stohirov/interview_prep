@@ -1,0 +1,60 @@
+**The fragile base class problem** is what happens when a subclass overrides methods of a superclass *that internally call each other*. A seemingly safe change to the superclass — refactoring `methodA` to call `methodB`, or vice versa — silently breaks every subclass that overrode either method. The base class is "fragile" because the subclasses depend on undocumented call patterns, not just public contracts.
+
+## The canonical example: `HashSet.addAll`
+
+```java
+public class InstrumentedHashSet<E> extends HashSet<E> {
+    private int addCount = 0;
+
+    @Override public boolean add(E e) {
+        addCount++;
+        return super.add(e);
+    }
+    @Override public boolean addAll(Collection<? extends E> c) {
+        addCount += c.size();
+        return super.addAll(c);
+    }
+    public int addCount() { return addCount; }
+}
+
+var s = new InstrumentedHashSet<String>();
+s.addAll(List.of("a", "b", "c"));
+System.out.println(s.addCount());   // 6 — expected 3
+```
+
+The bug: `HashSet.addAll` is implemented as a loop that calls `this.add(e)` for each element. Because `this` is a `InstrumentedHashSet`, the loop calls the *overridden* `add` — bumping `addCount` once per element. Then the override of `addAll` adds the element count again. Three elements, counted six times.
+
+## Why "just don't override `add`" doesn't help
+
+The bug isn't in the override — it's in the implicit contract violation. `HashSet`'s javadoc never says "`addAll` calls `add` internally." That's an implementation detail. The subclass made an assumption that happens to be true in this version of `HashSet` and may not be true in the next.
+
+In fact, the opposite bug is just as common: imagine `HashSet.addAll` was rewritten in Java X+1 to *not* call `add` (for performance — direct table insert). Now the subclass's override of `addAll` is *not* double-counting, but the *non-overridden* `add` path still works — and you have inconsistent counts depending on which method callers use. The base class evolved; the subclass broke silently.
+
+## The structural pattern
+
+<Diagram caption="Self-use across overridable methods is the trap">{`Super:
+    methodA() { ... methodB(); ... }    // internal self-use
+    methodB() { ... }
+
+Sub extends Super:
+    @Override methodA() { ... }
+    @Override methodB() { logged++; super.methodB(); }   // accidentally counts
+                                                          // calls made FROM methodA`}</Diagram>
+
+Anytime a superclass invokes an overridable method on `this`, it's promising callers that the override will be called — *forever*. The base class becomes a tangled contract about its own internal call graph.
+
+## The fix — composition
+
+The forwarding-wrapper version of `InstrumentedSet` (see q02) doesn't have this bug. The wrapper invokes only the public API of the wrapped set. The wrapped set's internal `addAll → add` calls happen *inside* the wrapped instance, so they don't re-enter the wrapper.
+
+## Other historical instances
+
+- **Java `Properties extends Hashtable<Object, Object>`** — `Properties.put(k, v)` can store non-String keys, breaking the "properties are string-to-string" promise.
+- **`Stack extends Vector`** — exposes `add(int, E)` and `get(int)` so you can violate the LIFO invariant.
+- **Date/Time API in pre-Java 8** — `Timestamp extends Date`, breaking the equals contract symmetrically.
+
+<Callout kind="warn" title="Defense: document self-use or final the method">
+If you must allow extension, do exactly what `AbstractList` does — javadoc each overridable method with "this implementation calls X, Y". And mark methods `final` if you genuinely don't want them overridden.
+</Callout>
+
+<ProbeNote>The interviewer wants you to name the *root cause*: self-use of overridable methods makes the superclass's internal call graph part of the contract, and that's a contract no sane superclass author wants to make. The fix is composition — the wrapper only ever sees the public API.</ProbeNote>

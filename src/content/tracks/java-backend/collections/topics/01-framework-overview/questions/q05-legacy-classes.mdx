@@ -1,0 +1,44 @@
+**The legacy collection classes are `Vector`, `Stack`, `Hashtable`, `Dictionary`, and the `Enumeration` interface** — they predate the Collections Framework (which arrived in Java 1.2) and were retrofitted to implement the new interfaces for compatibility. They're considered "legacy" because they make poor default choices: synchronized-by-default, inconsistent naming, and weaker contracts.
+
+## The Cast of Characters
+
+- **`Vector<E>`** — a synchronized resizable array, the ancestor of `ArrayList`.
+- **`Stack<E> extends Vector<E>`** — LIFO stack. Extends `Vector`, which is itself a design mistake (`Stack` shouldn't be a `List`).
+- **`Hashtable<K,V>`** — synchronized hash map, ancestor of `HashMap`. Note the lowercase `t` — historically inconsistent.
+- **`Dictionary<K,V>`** — abstract base class for key-value structures, predates `Map`. Now obsolete.
+- **`Enumeration<E>`** — predecessor of `Iterator`, with just `hasMoreElements()` / `nextElement()`. No `remove`.
+- **`Properties extends Hashtable<Object,Object>`** — still in active use for config files, but its `Hashtable` parentage leaks through.
+
+## Why "Legacy"?
+
+```java
+// Legacy
+Vector<String>    v = new Vector<>();
+Hashtable<String,Integer> h = new Hashtable<>();
+Stack<Integer>    s = new Stack<>();
+
+// Modern equivalents
+List<String>      v2 = new ArrayList<>();
+Map<String,Integer> h2 = new HashMap<>();
+Deque<Integer>    s2 = new ArrayDeque<>();   // ArrayDeque is the recommended stack
+```
+
+The problems with the legacy types:
+
+1. **Always synchronized** — every method on `Vector` and `Hashtable` is synchronized, paying a cost most code doesn't need. Modern code prefers unsynchronized defaults (`ArrayList`, `HashMap`) and opts in to concurrency via `ConcurrentHashMap` or `CopyOnWriteArrayList`.
+2. **Null hostility inconsistency** — `Hashtable` rejects null keys *and* null values (throwing `NullPointerException`); `HashMap` allows both. Different rules, same shape — a footgun.
+3. **Stack extends Vector** — meaning a `Stack` is also a `List`, so you can `get(0)` or `add(5, "x")` into the middle of a "stack." A naming-driven mistake.
+4. **Weaker iteration** — `Enumeration` predates fail-fast `Iterator`, has no `remove`, and isn't part of `Iterable`.
+5. **Inconsistent naming** — `Hashtable` (lowercase t) vs. `HashMap`, `elementAt` vs. `get`, `addElement` vs. `add`.
+
+## When You Still See Them
+
+`Properties` remains common because `System.getProperties()` returns one and config-file APIs accept it. `Hashtable` may appear in third-party reflection-heavy code. Otherwise, treat all five as **read-only encounters**: understand them when you meet them, never reach for them in new code.
+
+<Callout kind="warn" title="Vector is not 'thread-safe enough'">
+Even when you need thread safety, `Vector` is rarely the right choice. Compound operations like "check-then-act" still need external synchronization, and `CopyOnWriteArrayList` or a concurrent collection is usually a better tool.
+</Callout>
+
+<ProbeNote>
+The interviewer is probing whether you understand **why** the JCF was created. Strong candidates name the specific design failures (synchronized-by-default, `Stack extends Vector`, null inconsistencies) rather than vaguely saying "they're old." Bonus depth: knowing that `Properties` is the one legacy class still genuinely in use and explaining why that's a wart you live with.
+</ProbeNote>

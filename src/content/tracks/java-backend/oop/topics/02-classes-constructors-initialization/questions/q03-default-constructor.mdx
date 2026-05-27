@@ -1,0 +1,79 @@
+**The compiler inserts a no-argument default constructor *only* when the class declares zero explicit constructors.** Define any constructor — even one taking arguments — and the default vanishes. This is the source of countless "no default constructor" deserialization bugs.
+
+## The rule
+
+```java
+class A {                              // no explicit ctor
+    int x;
+}
+// compiler inserts: public A() { super(); }
+new A();                               // compiles
+```
+
+```java
+class B {
+    int x;
+    public B(int x) { this.x = x; }    // explicit ctor declared
+}
+// no default ctor inserted
+new B();                               // compile error: no B()
+```
+
+The moment you write *any* constructor, you've told the compiler you've thought about construction, and it stops helping.
+
+## Access modifier mirroring
+
+The synthesized default constructor inherits the **access level of the class**:
+
+- `public class Foo` → `public Foo()`
+- `class Foo` (package-private) → `Foo()` (package-private)
+- `private` is not legal for top-level classes; for nested classes the visibility carries through.
+
+That's why a `public` class with no explicit constructor still works from other packages — the synthesized constructor is public, not just default-visibility.
+
+## When it bites you
+
+Frameworks that build objects by reflection (Hibernate, Jackson, JAX-B, Spring `BeanUtils`) require a no-arg constructor:
+
+```java
+@Entity
+public class User {
+    @Id Long id;
+    String name;
+
+    public User(String name) { this.name = name; }   // breaks Hibernate
+}
+```
+
+Hibernate can't construct this entity — it needs `new User()` and then setter/field injection. The fix is either:
+
+```java
+protected User() { /* for Hibernate */ }
+public    User(String name) { this.name = name; }
+```
+
+…or add Lombok's `@NoArgsConstructor(access = PROTECTED)`.
+
+## What the default constructor actually does
+
+```java
+// compiler emits, conceptually:
+public ClassName() {
+    super();
+}
+```
+
+Just `super()` — no field assignments (those happen via field initializers / instance blocks in the standard order). If the parent class has no accessible no-arg constructor, the synthesized `super()` won't compile:
+
+```java
+class Parent { public Parent(int x) {} }
+class Child extends Parent {}          // compile error: implicit super() fails
+```
+
+You must either give the child an explicit constructor that calls `super(someInt)`, or give the parent a no-arg constructor.
+
+<Callout kind="warn" title="Records have their own rule">
+A `record` *always* gets an auto-generated canonical constructor matching its components. You can write a compact constructor, but you can't make a record "default-constructable" without components.
+</Callout>
+
+<ProbeNote>This question screens for whether you've ever debugged a Hibernate or Jackson error. Strong answers connect the rule to a real symptom — "frameworks fail because there's no no-arg constructor after I added a parameterized one." Knowing the access-modifier mirroring and the parent-must-have-callable-super-ctor edge case marks the senior.</ProbeNote>

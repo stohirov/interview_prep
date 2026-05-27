@@ -1,0 +1,91 @@
+**LSP says: anywhere your code expects a `T`, a subtype of `T` must be drop-in usable** — without surprising side effects, broken invariants, or new exceptions. Rectangle/Square is the textbook violation because it's intuitively "obviously a square is a rectangle" — and yet you can't write a `Rectangle` that's also a `Square` without breaking code that exercises the `Rectangle` contract.
+
+## The setup
+
+```java
+public class Rectangle {
+    protected int width, height;
+    public void setWidth(int w)  { this.width = w; }
+    public void setHeight(int h) { this.height = h; }
+    public int area() { return width * height; }
+}
+
+public class Square extends Rectangle {
+    @Override public void setWidth(int w)  { this.width = w; this.height = w; }
+    @Override public void setHeight(int h) { this.width = h; this.height = h; }
+}
+```
+
+The override is "logical" — a square always has equal sides, so setting one dimension forces the other. Looks fine in isolation.
+
+## The test that holds for Rectangle, fails for Square
+
+Here's a perfectly reasonable test:
+
+```java
+void increaseHeightAndCheckArea(Rectangle r) {
+    r.setWidth(5);
+    r.setHeight(4);
+    assert r.area() == 20;   // 5 * 4
+}
+```
+
+For any `Rectangle`, this passes. For `Square`:
+
+```java
+increaseHeightAndCheckArea(new Square());
+// setWidth(5)  -> width=5, height=5
+// setHeight(4) -> width=4, height=4
+// area() == 16
+// AssertionError
+```
+
+The test made an assumption the `Rectangle` interface licensed: setting one dimension does not affect the other. `Square` breaks that assumption while inheriting `Rectangle`'s API — so anywhere a `Rectangle` is expected, you can't safely pass a `Square`. **Substitutability is dead.**
+
+## Why "but a square IS a rectangle" is wrong here
+
+In math, a square is a rectangle. In a mutable type system, the *behaviour* of `Rectangle` (independent setters) is part of its contract. `Square` violates that contract, regardless of geometric truth.
+
+The reverse — `Rectangle extends Square`? — also doesn't work, because `Rectangle` would need to *add* an invariant (width = height) that `Square` doesn't have. Subtypes can *strengthen* postconditions and *weaken* preconditions, never the reverse (this is the **behavioral subtyping** rule from Liskov & Wing's 1994 paper).
+
+## The fix
+
+For mutable geometry, neither should extend the other. Both should implement a common interface:
+
+```java
+public interface Shape {
+    int area();
+}
+public final class Rectangle implements Shape {
+    private int width, height;
+    public Rectangle(int w, int h) { this.width = w; this.height = h; }
+    public void setWidth(int w)  { this.width = w; }
+    public void setHeight(int h) { this.height = h; }
+    @Override public int area()  { return width * height; }
+}
+public final class Square implements Shape {
+    private int side;
+    public Square(int s)         { this.side = s; }
+    public void setSide(int s)   { this.side = s; }
+    @Override public int area()  { return side * side; }
+}
+```
+
+Or make both **immutable** — the problem disappears because there are no setters to violate:
+
+```java
+public record Rectangle(int width, int height) {}
+public record Square(int side) {}
+```
+
+## Real-world LSP violations
+
+- **`SqsQueue implements Queue<T>`** that swallows `InterruptedException` — callers that depend on `Queue`'s "respect interruption" contract break.
+- **`ArrayList.subList`** returns a `List<T>` that throws `ConcurrentModificationException` when the parent is modified — surprising for a vanilla `List` user.
+- **`Properties extends Hashtable<Object, Object>`** allows `put(Integer, Date)` — breaks the "string-to-string" promise advertised by `Properties.getProperty`.
+
+<Callout kind="warn" title="LSP is about behavior, not types">
+The compiler checks signatures. LSP is about *behavioral contracts* the compiler can't see: invariants, postconditions, exception types, side effects. Tests and javadoc are your enforcement.
+</Callout>
+
+<ProbeNote>The probe is whether you grasp that LSP is a behavioral contract, not a type-system rule. Naming the "rectangle test that fails for square" is the canonical demo. Mentioning that immutability sidesteps the issue (no setters to violate) shows depth.</ProbeNote>

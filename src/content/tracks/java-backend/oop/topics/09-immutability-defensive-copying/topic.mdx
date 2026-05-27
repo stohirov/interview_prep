@@ -1,0 +1,39 @@
+**Immutability** is the single most cost-effective tool you have for reasoning about Java code. An immutable object's state can never change after construction, so it is automatically thread-safe, freely cacheable, freely shareable, and safe to use as a `Map` key or `Set` element. *Effective Java* Item 17 ("Minimize mutability") spells out a five-step recipe and warns about the one place developers always forget — the boundary between your class and its mutable collaborators.
+
+## The recipe
+
+To make a class immutable:
+
+1. **Don't provide mutators.** No setters, no `void` methods that change state.
+2. **Make the class `final` (or use a private constructor and static factories).** Subclasses can otherwise add mutable state or override methods.
+3. **Make every field `private final`.** `private` enforces access, `final` enforces single assignment and gives you the JMM's safe-publication guarantee.
+4. **Defensively copy mutable inputs in the constructor.** Without this, the caller still holds a reference to your "internal" state.
+5. **Defensively copy mutable references on the way out.** Same reason, in reverse.
+
+## A `Period` example
+
+```java
+public final class Period {
+    private final Date start;
+    private final Date end;
+
+    public Period(Date start, Date end) {
+        this.start = new Date(start.getTime()); // copy IN
+        this.end   = new Date(end.getTime());
+        if (this.start.after(this.end)) throw new IllegalArgumentException();
+    }
+
+    public Date start() { return new Date(start.getTime()); } // copy OUT
+    public Date end()   { return new Date(end.getTime()); }
+}
+```
+
+Note the order in the constructor: copy *first*, then validate the copies. Validating the originals leaves you open to a Time-Of-Check-To-Time-Of-Use race where the caller mutates the `Date` between the check and the field assignment.
+
+## Records — the modern default, with one caveat
+
+A `record` collapses 80% of this boilerplate: it is implicitly final, every component is private final, and the canonical accessor and `equals`/`hashCode` are auto-generated. But records do **not** defensively copy mutable components. A `record Period(Date start, Date end) {}` is structurally immutable but not behaviorally — the caller's `Date` can still be mutated through their retained reference. Use a compact canonical constructor and an accessor override when components are mutable.
+
+<Callout kind="tip" title="Prefer immutable component types">
+The cleanest fix is to use immutable types from the start: `Instant` instead of `Date`, `List.copyOf(xs)` instead of a `List<T>`. Then defensive copying disappears.
+</Callout>

@@ -1,0 +1,33 @@
+Beyond `ConcurrentHashMap` and the blocking queues, `java.util.concurrent` ships three more workhorse collections you should know cold: `CopyOnWriteArrayList`, `ConcurrentSkipListMap`, and `ConcurrentLinkedQueue`. Each makes a very different trade-off between read cost, write cost, and ordering guarantees.
+
+## CopyOnWriteArrayList — snapshot semantics
+
+Every mutation clones the entire backing array under a `ReentrantLock`. Readers never lock and iterate a frozen snapshot of the array reference they captured. The cost model is brutal but predictable:
+
+- Reads: O(1) get, lock-free, no volatile reads on the hot path
+- Writes: O(n) — full array copy on every `add`/`set`/`remove`
+- Memory: a transient duplicate of the array per write
+
+This is exactly right for collections where writes are rare and reads dominate — listener lists, observer registries, mostly-static config snapshots. It is exactly wrong for anything write-heavy or large.
+
+## ConcurrentSkipListMap — the only concurrent NavigableMap
+
+A lock-free, probabilistic skip list. It's the JDK's only concurrent implementation of `NavigableMap` / `SortedMap` — if you need concurrent **and** sorted, this is the answer. Expected O(log n) for `get`, `put`, `remove`, `firstKey`, `ceilingKey`, etc. Iterators are *weakly consistent*: they never throw `CME` and reflect some valid state during traversal, but may miss concurrent updates.
+
+There's also `ConcurrentSkipListSet`, which is just a `Set` view over a skip-list map.
+
+## ConcurrentLinkedQueue — lock-free FIFO
+
+An unbounded, non-blocking FIFO based on the Michael & Scott lock-free queue algorithm. `offer` and `poll` use CAS on `next` pointers — no locks anywhere. `poll()` returns `null` when empty (it never blocks), and `size()` is O(n) and only loosely accurate.
+
+Use it when producers and consumers are both fast and you want maximum throughput without backpressure. Use `LinkedBlockingQueue` instead when you need a bound or `take()`-style blocking.
+
+## Cheat sheet
+
+<ComplexityTable rows={[
+  {op: "CopyOnWriteArrayList.get", best: "O(1)", average: "O(1)", worst: "O(1)", note: "lock-free read"},
+  {op: "CopyOnWriteArrayList.add", best: "O(n)", average: "O(n)", worst: "O(n)", note: "full array copy"},
+  {op: "ConcurrentSkipListMap.get/put", best: "O(log n)", average: "O(log n)", worst: "O(n)", note: "probabilistic"},
+  {op: "ConcurrentLinkedQueue.offer/poll", best: "O(1)", average: "O(1)", worst: "O(1)", note: "CAS, amortized"},
+  {op: "ConcurrentLinkedQueue.size", best: "O(n)", average: "O(n)", worst: "O(n)", note: "traverses, approximate"}
+]} />

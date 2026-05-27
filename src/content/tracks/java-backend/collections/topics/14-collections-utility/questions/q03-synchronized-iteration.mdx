@@ -1,0 +1,73 @@
+**Because each individual method on the wrapper is synchronized in isolation, but iteration consists of *multiple* method calls — `hasNext()`, then `next()`, repeated. Between those two calls another thread can mutate the list, invalidating the iterator's modCount and triggering `ConcurrentModificationException` on the next read.**
+
+## The problem
+
+```java
+List<String> list = Collections.synchronizedList(new ArrayList<>(
+    List.of("a", "b", "c")));
+
+// Thread A:
+for (String s : list) {           // hasNext()    [synchronized]
+    System.out.println(s);        // next()       [synchronized]
+}
+
+// Thread B (concurrently):
+list.add("d");                    // [synchronized]
+```
+
+Each individual call (`hasNext`, `next`, `add`) takes the wrapper's monitor. But the lock is **released between calls**. Thread B can sneak `add("d")` in between Thread A's `hasNext()` and `next()`, which bumps the underlying `ArrayList`'s `modCount`. The next `next()` checks `modCount` against its captured `expectedModCount`, sees a mismatch, and throws `ConcurrentModificationException`.
+
+## The required pattern
+
+```java
+List<String> list = Collections.synchronizedList(new ArrayList<>());
+
+// Wrap the ENTIRE iteration in synchronized on the wrapper
+synchronized (list) {
+    for (String s : list) {
+        System.out.println(s);
+    }
+}
+```
+
+Holding the monitor across the whole loop prevents any other thread from mutating between `hasNext()` and `next()`. The wrapper documents this — but the documentation is easy to miss, and the bug only shows up under load.
+
+## Same for stream / forEach
+
+```java
+synchronized (list) {
+    list.stream().filter(...).forEach(...);   // also needs the lock
+    list.forEach(System.out::println);         // also needs the lock
+}
+```
+
+The default `Collection.forEach` and stream sources iterate using the iterator under the hood. Same hazard.
+
+## Why the wrapper can't fix this for you
+
+The wrapper sees individual method invocations on itself, not "iteration as a unit." It has no way to know when iteration starts or ends across multiple separate calls. The contract was designed in Java 1.2 when this trade-off — fine-grained locking + caller responsibility — was the only option.
+
+## Better alternatives
+
+Almost always, you should reach for a real concurrent collection instead:
+
+```java
+// Snapshot iteration, no manual sync needed
+List<String> cow = new CopyOnWriteArrayList<>();
+for (String s : cow) { ... }              // safe, frozen snapshot
+
+// Concurrent map, weakly consistent iteration
+ConcurrentHashMap<String, Integer> m = new ConcurrentHashMap<>();
+m.forEach((k, v) -> ...);                 // safe, no CME
+
+// Concurrent navigable, weakly consistent iteration
+ConcurrentSkipListMap<String, Integer> nav = new ConcurrentSkipListMap<>();
+```
+
+Reach for `Collections.synchronizedList` only when you really do want serialized access and the simplicity of a single monitor — usually that's a sign the code should be redesigned to avoid sharing the list at all.
+
+<Callout kind="warn" title="The hazard is not theoretical">
+The race is small but real. It will pass tests on a developer laptop and fail in production at 3am, intermittently, with no useful stack trace context. Always lock the iteration explicitly.
+</Callout>
+
+<ProbeNote>Follow-up: "What does `synchronized(list)` actually lock?" — the wrapper itself; the wrapper's methods all do `synchronized(mutex) { ... }` where `mutex` is `this`. The lock you take must be the same monitor the wrapper uses, which is the wrapper instance.</ProbeNote>

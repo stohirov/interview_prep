@@ -1,0 +1,78 @@
+`BigDecimal.compareTo` is **scale-insensitive** (`new BigDecimal("2.0").compareTo(new BigDecimal("2.00")) == 0`), but `BigDecimal.equals` is **scale-sensitive** (`new BigDecimal("2.0").equals(new BigDecimal("2.00"))` is `false`). Because `TreeMap` uses `compareTo` (not `equals`) to identify keys, using `BigDecimal` as a key violates the `SortedMap` contract clause "consistent with equals" — leading to subtle bugs.
+
+## The contract
+
+From `SortedMap`'s Javadoc:
+
+> The ordering maintained by a sorted map must be *consistent with equals* if it is to correctly implement the `Map` interface.
+> Two keys `k1` and `k2` are consistent with equals if and only if `(k1.compareTo(k2) == 0) == k1.equals(k2)`.
+
+`BigDecimal` famously violates this for any pair of values that differ only in scale.
+
+## The bug in action
+
+```java
+TreeMap<BigDecimal, String> tm = new TreeMap<>();
+tm.put(new BigDecimal("2.0"),  "twenty-tenths");
+tm.put(new BigDecimal("2.00"), "two-hundred-hundredths");
+
+System.out.println(tm.size());                          // 1
+System.out.println(tm.get(new BigDecimal("2.000")));    // twenty-tenths or two-hundred-hundredths?
+// (TreeMap treats them all as the same key; the second put overwrote the first)
+```
+
+Now compare with `HashMap`:
+
+```java
+HashMap<BigDecimal, String> hm = new HashMap<>();
+hm.put(new BigDecimal("2.0"),  "twenty-tenths");
+hm.put(new BigDecimal("2.00"), "two-hundred-hundredths");
+
+System.out.println(hm.size());                          // 2 -- different hashCodes
+System.out.println(hm.get(new BigDecimal("2.000")));    // null -- yet another scale
+```
+
+The two maps disagree about whether these values are "the same key". Worse, `tm.equals(hm)` returns `false`, which violates expectations about polymorphic `Map` use — code written against `Map<BigDecimal, String>` behaves differently depending on the implementation.
+
+## Why is BigDecimal designed this way?
+
+`compareTo` represents *numerical* ordering — `2.0` and `2.00` are the same number. `equals` represents *value identity*, including scale — `2.0` and `2.00` carry different metadata (precision), which can matter for currency formatting or rounding rules. Both are legitimate operations; the API just doesn't fit cleanly into the `Map`/`SortedMap` contract.
+
+## What to use instead
+
+The standard workarounds:
+
+```java
+// 1. Normalise the scale before insertion
+tm.put(big.stripTrailingZeros(), value);
+// All "equivalent" scales now collapse to the same canonical key.
+
+// 2. Wrap in a key type with consistent equals/hashCode/compareTo
+record Money(BigDecimal amount) implements Comparable<Money> {
+    @Override public int compareTo(Money other) {
+        return amount.compareTo(other.amount);
+    }
+    @Override public boolean equals(Object o) {
+        return o instanceof Money m && amount.compareTo(m.amount) == 0;
+    }
+    @Override public int hashCode() {
+        return amount.stripTrailingZeros().hashCode();
+    }
+}
+
+// 3. Use a Comparator-based TreeMap and accept that you're indexing by value, not by BigDecimal identity.
+new TreeMap<BigDecimal, String>(BigDecimal::compareTo); // same problem, but explicit
+```
+
+Strategy 1 is simplest. Strategy 2 makes intent explicit at the type level.
+
+## Other "consistent with equals" landmines
+
+- **`String.CASE_INSENSITIVE_ORDER`** — orders ignoring case, but `String.equals` is case-sensitive. Use with care in `TreeMap`.
+- **Custom comparators that ignore fields** — e.g. comparing only `Customer.id` but `equals` covers all fields.
+
+<Callout kind="warn" title="The Javadoc says 'should'">
+The contract uses "must" for `Comparable` consistency in `TreeSet`/`TreeMap`. It's not enforced — the JDK won't throw — but the behaviour silently diverges from `HashMap`, and that's where the bugs hide.
+</Callout>
+
+<ProbeNote>This question separates candidates who have shipped financial code from those who haven't. The right answer covers (1) the scale issue, (2) the "consistent with equals" contract, and (3) at least one mitigation (`stripTrailingZeros` or a wrapper type).</ProbeNote>

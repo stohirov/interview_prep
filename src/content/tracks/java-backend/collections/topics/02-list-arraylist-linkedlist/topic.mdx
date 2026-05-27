@@ -1,0 +1,29 @@
+`List<E>` is the ordered, index-addressable branch of the Collection framework — duplicates allowed, insertion order preserved, every element reachable by `get(i)`. Two concrete implementations dominate interview questions: **`ArrayList`** (the workhorse, backed by a contiguous array) and **`LinkedList`** (a doubly-linked node chain that also implements `Deque`). A third — `Vector` — exists for legacy reasons; modern code uses `CopyOnWriteArrayList` when concurrency matters.
+
+## ArrayList — The Default
+
+`ArrayList` stores elements in a backing `Object[]` that grows automatically. The growth policy in modern OpenJDK is **`newCapacity = oldCapacity + (oldCapacity >> 1)`** — that's **1.5×** since Java 7 (it was 2× in older JDKs). Random access is `O(1)`, append (amortized) is `O(1)`, but insertion or removal in the middle is `O(n)` because tail elements must shift via `System.arraycopy`.
+
+```java
+List<Integer> xs = new ArrayList<>(1000);  // pre-size to avoid grow copies
+xs.add(42);                                 // amortized O(1)
+xs.add(0, 7);                               // O(n) — shifts everything right
+int v = xs.get(500);                        // O(1) — direct array indexing
+```
+
+## LinkedList — Rarely the Right Choice
+
+`LinkedList` is a doubly-linked list. `add`/`remove` at the head or tail is `O(1)`, but `get(i)` is `O(n)` because there's no random access — it walks from the nearer end. Each node also carries two reference pointers plus a header, so memory overhead is roughly **3–4× higher** than `ArrayList`'s packed array. Cache locality is poor: traversing a `LinkedList` chases pointers across the heap, while `ArrayList` streams adjacent memory.
+
+In practice you should almost always prefer `ArrayList` (or `ArrayDeque` when you specifically need a queue/deque). `LinkedList` survives mostly because it implements `Deque`, but `ArrayDeque` outperforms it for that role too.
+
+## List.of, Arrays.asList, and Friends
+
+Java offers several ways to construct a list, and they have very different mutability semantics:
+
+- `new ArrayList<>()` — fully mutable, growable.
+- `Arrays.asList(a, b, c)` — **fixed-size** array-backed view; `set` works, `add`/`remove` throw.
+- `List.of(a, b, c)` — **truly immutable**, null-hostile, structurally shared (Java 9+).
+- `Collections.unmodifiableList(list)` — read-only **wrapper** around an existing list (still backed by it).
+
+Choosing the wrong one is one of the most common production bugs in Java code. Let's walk through the questions interviewers actually ask.

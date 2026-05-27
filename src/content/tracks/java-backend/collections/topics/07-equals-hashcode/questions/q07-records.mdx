@@ -1,0 +1,85 @@
+Records (Java 16+) auto-generate `equals`, `hashCode`, and `toString` from all components. The implementations are guaranteed correct, satisfy both contracts, and are immutable — making records the default choice for value classes.
+
+## What the compiler generates
+
+```java
+public record Point(int x, int y) {}
+```
+
+Expands (roughly) to:
+
+```java
+public final class Point extends java.lang.Record {
+    private final int x;
+    private final int y;
+
+    public Point(int x, int y) { this.x = x; this.y = y; }
+
+    public int x() { return x; }
+    public int y() { return y; }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof Point that)) return false;
+        return this.x == that.x && this.y == that.y;
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(x, y);
+    }
+
+    @Override
+    public String toString() {
+        return "Point[x=" + x + ", y=" + y + "]";
+    }
+}
+```
+
+(Actual implementation uses `invokedynamic` and `ObjectMethods.bootstrap` for efficiency, but the semantics are the above.)
+
+## Why records dodge every classic equals trap
+
+- **Implicitly `final`** — no subclassing means no Point/ColorPoint symmetry trap.
+- **Components are final** — no mutable state, so `hashCode` stays consistent forever.
+- **Type check uses `instanceof`** — handles `null` correctly without an explicit null check.
+- **All components included** — no "I forgot to add the new field to equals" bug when refactoring.
+- **Symmetric across all subtypes** — there are no subtypes.
+
+## You can override if you must
+
+```java
+public record CaseInsensitiveName(String value) {
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof CaseInsensitiveName n
+            && value.equalsIgnoreCase(n.value);
+    }
+    @Override
+    public int hashCode() {
+        return value.toLowerCase().hashCode();
+    }
+}
+```
+
+But if you do, you must override both consistently. The compiler doesn't enforce the contract — it just gives you the default if you don't replace it.
+
+<Callout kind="warn" title="Beware deep equality with mutable components">
+Records call `equals` on each component. If a component is mutable (a `List`, an array, a regular class with broken equals), the record's equality inherits those flaws. Records are *shallowly* immutable — the reference can't change, but what it points to might.
+</Callout>
+
+## When to use records
+
+- Data Transfer Objects (DTOs) for REST/gRPC payloads.
+- Map keys requiring stable equals/hashCode (e.g., `Map<Coordinate, Tile>`).
+- Sealed-type variants (`sealed interface Shape permits Circle, Square` — both can be records).
+- Multi-value returns from a method (`record SearchResult(int hits, Duration took) {}`).
+
+## When NOT to use records
+
+- Classes that need to extend a non-`Record` superclass (records can only implement interfaces).
+- Classes with significant non-component state (records can have static fields but not instance fields beyond components).
+- JPA entities, where mutability and a no-arg constructor are usually required by the framework.
+
+<ProbeNote>Probe: "Can a record be Serializable?" (Yes — it has a special serialization form that doesn't require a no-arg constructor; it uses the canonical constructor.) "Can you put validation in a record?" (Yes — compact canonical constructor: `public Point { if (x < 0) throw ...; }`.) "What's the equivalent of a private setter on a record?" (None — records are immutable. Use a `with`-style method that returns a new record.)</ProbeNote>

@@ -1,0 +1,58 @@
+**`final` only freezes the reference, not the object it points to.** A `final Date` means you can't reassign the variable, but the `Date` itself stays fully mutable. Immutability is a property of the *entire reachable object graph*, not of a single field declaration.
+
+## The illusion
+
+```java
+public final class Box {
+    private final List<String> items = new ArrayList<>();
+    // looks immutable — final field, final class, no setter
+    public List<String> items() { return items; }
+}
+
+Box b = new Box();
+b.items().add("oops");   // perfectly legal — mutated through the live reference
+```
+
+The field `items` is final, so `b.items = somethingElse` would not compile. But `items.add(...)` doesn't touch the reference — it mutates the `ArrayList` instance. Final says nothing about that.
+
+## Three layers of defense
+
+To make `Box` truly immutable you need all three:
+
+```java
+public final class Box {
+    private final List<String> items;
+
+    public Box(List<String> items) {
+        this.items = List.copyOf(items);   // 1. unmodifiable snapshot
+    }
+
+    public List<String> items() {
+        return items;                       // 2. already unmodifiable, safe to return
+    }
+}
+```
+
+- `final` keeps the reference fixed.
+- `List.copyOf` builds an *unmodifiable* `List` from a snapshot — mutating the source post-construction doesn't affect us, and callers can't mutate what we return.
+- The class is `final` so a subclass can't add a mutable field.
+
+## The arrays gotcha
+
+Arrays are always mutable and there is no immutable array type. A `private final int[] xs` is exactly as leaky as a mutable field:
+
+```java
+public final class Stats {
+    private final int[] xs;
+    public Stats(int[] xs) { this.xs = xs; }       // shared
+    public int[] data() { return xs; }              // leaked
+}
+```
+
+Fix with `.clone()` on the way in and on the way out, or expose `List<Integer>` / a read-only view (`IntStream`, `length()` + `get(int)`).
+
+<Callout kind="info" title="Why the JMM still loves final">
+Even though `final` doesn't make the referent immutable, it does give you a guarantee that other threads will see a fully-constructed object via *safe publication* — no torn or partially-initialized reads. That's why Item 17 still insists on `private final` for every field.
+</Callout>
+
+<ProbeNote>This question separates people who learned the keyword from people who understand object identity vs reference identity. A confident answer: "`final` constrains the slot, not the heap object. Immutability is transitive — you need every reachable component to be immutable too, which is why we either use immutable types like `Instant` or defensively copy."</ProbeNote>

@@ -1,0 +1,44 @@
+**Dynamic dispatch on the JVM is a vtable lookup for classes and an itable lookup for interfaces, both heavily optimized by HotSpot's inline caches.** Every loaded class has a per-class method table — a fixed-size array of pointers to the actual machine code for each virtual method — and the bytecode call simply indexes into it via the receiver's class pointer.
+
+## The two bytecodes
+
+`javac` emits one of two instructions for every instance call:
+
+```java
+List<String> xs = new ArrayList<>();
+xs.add("a");        // invokeinterface List.add
+((ArrayList<String>) xs).trimToSize();  // invokevirtual ArrayList.trimToSize
+```
+
+- **`invokevirtual`** — call on a class reference. Resolves via the class vtable.
+- **`invokeinterface`** — call on an interface reference. Resolves via the itable (or via `invokevirtual` on the hidden class methods after JVM optimization).
+
+Two more exist for the non-polymorphic cases: `invokestatic` (static methods, no receiver) and `invokespecial` (constructors, `super.x()`, private methods).
+
+## vtables
+
+After class loading, the JVM builds a **vtable** for each class — an array where each virtual method is assigned a stable slot index. Subclass vtables inherit slots from the parent and append their own, so an override lives at the same slot index as the parent's version. Dispatch is then:
+
+```text
+1. Load receiver's class pointer (in object header).
+2. Index into class.vtable[slot] — one pointer load.
+3. Jump to the resolved machine code.
+```
+
+Two indirections, one branch. That's the entire mechanism for `invokevirtual`.
+
+## itables
+
+Interfaces complicate things because a class can implement many interfaces, and slot indices in one interface don't align with another. The JVM keeps a separate **itable** per (class, interface) pair, found via a small linear scan of the class's itable list. Naively this is slower than a vtable lookup, which is why HotSpot leans hard on inline caches.
+
+## Inline caches
+
+The interpreter starts with a *monomorphic inline cache*: after the first dispatch at a callsite, the JVM caches the receiver's class and the resolved method address. The next call is just `if (receiver.class == cached) jump cached_target;` — one comparison, no table lookup.
+
+If a second receiver type shows up, the cache becomes **bimorphic** (two cached entries). After more types, it goes **megamorphic** and falls back to the real vtable/itable lookup. C2 also inlines the target method into the caller for hot, monomorphic sites, often erasing the call entirely.
+
+<Callout kind="tip" title="Why `final` and `private` can be faster">
+A `final` method or a method on a `final` class can be devirtualized at JIT time — the JVM proves only one possible target exists and rewrites the callsite as a direct call. This is the kernel of truth behind "marking methods final is a micro-optimization", but in practice HotSpot devirtualizes most monomorphic sites anyway.
+</Callout>
+
+<ProbeNote>The interviewer wants to hear "vtable / itable / inline cache" and a sense of *why* virtual calls are not slow in practice (monomorphic inline caching). Bonus points for naming all four invoke bytecodes and explaining that `invokedynamic` is the fifth one used for lambdas and `String` concatenation.</ProbeNote>

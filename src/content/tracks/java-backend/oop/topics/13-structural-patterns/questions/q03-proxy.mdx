@@ -1,0 +1,68 @@
+A **Proxy** stands in for another object, intercepting calls and adding behavior *around* delegation — usually invisibly to the caller. The three classic kinds map to three concerns: deferred work (virtual), authorization (protection), and location (remote). All three live in real production frameworks you already use.
+
+## Virtual proxy — defer expensive work
+
+Don't materialize the target until somebody actually needs it. Hibernate's lazy entity loading is the textbook case: when you fetch a `User` with `@OneToMany List<Order>`, Hibernate hands back a CGLIB proxy for the list. The SQL `SELECT * FROM orders WHERE user_id = ?` only fires the moment you call `orders.size()`.
+
+```java
+public interface Image { void render(); }
+
+public class RealImage implements Image {
+    private final byte[] pixels;
+    public RealImage(String path) {
+        this.pixels = loadFromDisk(path); // expensive
+    }
+    public void render() { /* draw pixels */ }
+    private byte[] loadFromDisk(String p) { /* I/O */ return new byte[0]; }
+}
+
+public class ImageProxy implements Image {
+    private final String path;
+    private RealImage real;
+    public ImageProxy(String path) { this.path = path; }
+    public void render() {
+        if (real == null) real = new RealImage(path); // load on first use
+        real.render();
+    }
+}
+```
+
+## Protection proxy — gate access
+
+Wrap the target with an access check before each call. Spring Security's method-level `@PreAuthorize` works this way: the framework generates a proxy that calls `SecurityContext.check()` and only then delegates.
+
+```java
+public class SecuredDocument implements Document {
+    private final Document target;
+    private final User caller;
+    public SecuredDocument(Document t, User u) { target = t; caller = u; }
+    public void edit(String content) {
+        if (!caller.hasRole("EDITOR")) throw new AccessDeniedException();
+        target.edit(content);
+    }
+}
+```
+
+## Remote proxy — hide the network
+
+The target lives in another process or machine; the proxy marshals the call, sends it over the wire, and unmarshals the response. Java RMI stubs, gRPC client stubs, and Feign clients are all remote proxies. The caller writes `userService.findById(7)` and never knows there was a TCP round-trip.
+
+## How Spring builds these
+
+Spring AOP (the engine behind `@Transactional`, `@Cacheable`, `@Async`, `@PreAuthorize`) generates proxies at runtime in two flavors:
+
+- **JDK dynamic proxies** when the bean implements at least one interface. The proxy implements all the bean's interfaces and routes everything through an `InvocationHandler`.
+- **CGLIB proxies** when there's no interface. The proxy is a runtime-generated *subclass* of the bean. That's why `final` classes and `final` methods can't be proxied this way — and why a self-invocation (`this.someAnnotatedMethod()`) bypasses the proxy entirely.
+
+<Callout kind="warn" title="The self-invocation gotcha">
+Calling another annotated method on `this` skips the proxy because `this` *is* the inner bean, not the proxy. Inject the bean into itself or extract the call into a separate bean to keep the interception alive.
+</Callout>
+
+## Proxy vs Decorator
+
+Structurally they're identical: same interface, wrapped reference, forwarded call. Intent differs:
+
+- Decorator *adds behavior the caller asked for* (extra encoding, buffering).
+- Proxy *controls access to the target* (lazy load, auth check, remote dispatch) — usually invisibly.
+
+<ProbeNote>The interviewer is testing whether you know proxies are everywhere in modern Java — Hibernate, Spring AOP, RMI, gRPC — and whether you understand the JDK vs CGLIB split and its self-invocation trap. Bonus points for mentioning that virtual threads + lazy proxies can deadlock if loading triggers another DB call on a pinned thread.</ProbeNote>

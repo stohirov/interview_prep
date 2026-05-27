@@ -1,0 +1,38 @@
+**Java has four kinds of nested classes — static nested, inner (non-static), local, and anonymous — distinguished by *what they capture* and *where they can be declared*.** Lambdas are not a fifth kind; they are a more compact representation of a subset of what anonymous classes can do, with subtly different `this` semantics.
+
+## The four kinds at a glance
+
+| Kind | Where declared | Has enclosing `this`? | Captures locals? | Typical use |
+|---|---|:-:|:-:|---|
+| Static nested | Inside another class, marked `static` | No | n/a | Helper grouped with its owner (`Map.Entry`) |
+| Inner (non-static) | Inside another class | Yes | n/a | Helper that needs the enclosing instance |
+| Local | Inside a method/block | Sometimes | Effectively final | One-off helper inside a method |
+| Anonymous | An expression, no name | Sometimes | Effectively final | One-off instance of a type with a custom override |
+
+The "sometimes" rows depend on whether the enclosing method is `static`.
+
+## What "captures the enclosing `this`" means
+
+An inner class instance secretly stores a reference to its enclosing instance — javac generates a synthetic field called `this$0`. That hidden reference is why an inner class can write `outerField` without qualification: it's really `this$0.outerField`. It is also why an inner class can keep its enclosing instance alive long after you thought it was gone (see the memory-leak question).
+
+## Lambdas vs anonymous classes
+
+```java
+Runnable a = new Runnable() { public void run() { System.out.println(this); } };
+Runnable b = () -> System.out.println(this);
+```
+
+In `a`, `this` is the anonymous `Runnable`. In `b`, `this` is the enclosing class's `this` — the lambda has no `this` of its own. Lambdas are also compiled with `invokedynamic` + `LambdaMetafactory`, often producing zero allocations for non-capturing lambdas; anonymous classes always produce a new class file at compile time and a new object per use.
+
+## The local-capture rule
+
+Local and anonymous classes (and lambdas) can capture local variables only if those variables are **effectively final** — assigned exactly once. This is because the JVM passes captures *by value* into a hidden field; if the local could change after capture, the inner instance would see a stale copy.
+
+## What you should reach for first
+
+- **Records** for data carriers.
+- **Lambdas** for one-method callbacks.
+- **Static nested classes** for tightly-coupled helpers.
+- **Inner / local / anonymous** rarely — most modern code can avoid them.
+
+The questions below cover capture semantics, the static-vs-inner footprint, the effectively-final rule, the lambda conversion, and the most common Android/Swing memory leak in the JVM ecosystem.

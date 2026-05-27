@@ -1,0 +1,52 @@
+**Records, sealed classes, and pattern matching** together pushed Java toward a more algebraic style — sum types as `sealed interface`, product types as `record`, and exhaustive dispatch via pattern-matching `switch`. None of the three is impressive alone; together they let you model a domain the way ML or Scala has for years, while staying in mainstream Java.
+
+## The three JEPs that built this era
+
+- **JEP 395 (Java 16)** — *Records*: transparent carriers for immutable data. Auto-generated constructor, accessors, `equals`, `hashCode`, `toString`. The "product" of an algebraic data type.
+- **JEP 409 (Java 17)** — *Sealed Classes*: a class or interface declares exactly which classes can extend or implement it. The "sum" of an algebraic data type.
+- **JEP 394 (Java 16)** — *Pattern Matching for `instanceof`*: removes the cast boilerplate. Foundation for the rest.
+- **JEP 441 (Java 21)** — *Pattern Matching for `switch`* (finalized): exhaustive switch over a sealed hierarchy. The dispatch mechanism.
+- **JEP 440 (Java 21)** — *Record Patterns* (finalized): destructure records inside patterns.
+
+Java 21 is the LTS where all of these landed as final features. Java 25 adds polish (primitive patterns, more deconstruction) but the shape is stable.
+
+## The algebraic data type shape
+
+The textbook example: a geometric shape hierarchy.
+
+```java
+public sealed interface Shape permits Circle, Square, Triangle {}
+
+public record Circle(double radius) implements Shape {}
+public record Square(double side) implements Shape {}
+public record Triangle(double base, double height) implements Shape {}
+
+double area(Shape s) {
+    return switch (s) {
+        case Circle(double r)            -> Math.PI * r * r;
+        case Square(double side)         -> side * side;
+        case Triangle(double b, double h) -> 0.5 * b * h;
+    };
+}
+```
+
+Five years ago this was an `abstract class Shape` with three subclasses, an `abstract double area()`, and the area logic scattered across three files. Today it's a flat hierarchy where adding `Pentagon` means writing one new `record` *and* getting a compile error at every non-exhaustive `switch` — telling you exactly which files need updating.
+
+## Why this matters for OOP design
+
+Classical OOP polymorphism puts behavior *with the data* (`shape.area()`). The new style puts behavior *next to the use site* (`switch (shape) { ... }`). Both are valid; the modern style wins when:
+
+- You have many operations over a closed set of types (visitor-like problems).
+- You want the compiler to enforce exhaustiveness.
+- The data shape is more stable than the operations.
+
+Classical polymorphism still wins when:
+
+- New types are added more often than new operations.
+- The behavior genuinely belongs to the type (a `Circle` knowing its area is reasonable).
+
+<Callout kind="tip" title="They're additive, not replacements">
+Sealed + records + pattern matching don't replace inheritance and polymorphism. They give you a precise tool for *closed* hierarchies and pure data — exactly where classical OO felt heavy. For open-ended frameworks, you still want abstract classes and dynamic dispatch.
+</Callout>
+
+This topic walks through each feature and the trade-offs that surface when you start using them together.

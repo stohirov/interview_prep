@@ -1,0 +1,59 @@
+**Java has four access levels — `private`, package-private (no keyword), `protected`, and `public` — ordered from narrowest to widest visibility.** Each level grants access to a strictly larger set of callsites, and the rule is always: pick the narrowest that compiles.
+
+## The table
+
+| Modifier | Same class | Same package | Subclass (other pkg) | Anywhere |
+|---|:-:|:-:|:-:|:-:|
+| `private` | yes | no | no | no |
+| package-private (no keyword) | yes | yes | no | no |
+| `protected` | yes | yes | yes (inherited) | no |
+| `public` | yes | yes | yes | yes |
+
+"Yes (inherited)" for `protected` has a subtle restriction — see below.
+
+## What "same class" means for `private`
+
+`private` is per top-level class, not per source file or per nested class. All nested classes inside the same top-level class can see each other's privates:
+
+```java
+public class Outer {
+    private int x;
+    static class Inner {
+        void touch(Outer o) { o.x = 1; }   // legal — same top-level class
+    }
+}
+```
+
+## The protected gotcha
+
+`protected` lets a subclass access an inherited member *through a reference of its own type (or a subtype)*, not through the parent type, when calling from a different package.
+
+```java
+// in pkg A
+public class Base { protected int x; }
+
+// in pkg B
+public class Sub extends Base {
+    void f(Base b, Sub s) {
+        // b.x = 1;   // ILLEGAL — different package, reference is Base, not Sub
+        s.x = 1;      // legal — reference is Sub (or subtype)
+        this.x = 1;   // legal — same as above
+    }
+}
+```
+
+This rule is part of the JLS (§6.6.2) and trips up senior candidates who assume `protected` is a blanket pass.
+
+## The unqualified case is package-private — and it's named
+
+Many devs call it "default," but the JLS term is *package access*. It is the right default for helper classes inside a package that should not leak as API.
+
+## Class-level vs member-level
+
+The four modifiers apply to members. Top-level classes can only be `public` or package-private (no `protected` or `private` at the top level — those would be meaningless without an enclosing scope). Nested classes can take all four.
+
+<Callout kind="tip" title="Choose by what could change">
+Modifiers are about what you can change without breaking callers. Making something `public` is a commitment; making it `private` keeps every refactoring option open. Use the narrowest scope that lets the code compile today.
+</Callout>
+
+<ProbeNote>The interviewer is checking the cross-package subclass nuance for `protected` — the part of the JLS most candidates miss. If you can describe the "must access through subtype reference" rule, you're squarely in middle/senior territory.</ProbeNote>

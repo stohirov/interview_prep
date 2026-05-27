@@ -1,0 +1,87 @@
+**The `Collections` class ships a handful of fundamental algorithms that operate on `List` (mostly). Most are O(n) in-place mutations; sort and binarySearch are O(n log n) / O(log n). Worth knowing because they're often the shortest, clearest way to express common operations.**
+
+## sort
+
+```java
+List<Integer> xs = new ArrayList<>(List.of(3, 1, 4, 1, 5, 9, 2, 6));
+Collections.sort(xs);                                // natural order
+Collections.sort(xs, Comparator.reverseOrder());     // custom comparator
+```
+
+Uses **TimSort** under the hood — adaptive merge sort that's O(n log n) worst case and O(n) on already-sorted or nearly-sorted input. Stable. In Java 8+ you can also do `list.sort(comparator)` directly on the list.
+
+## binarySearch
+
+```java
+List<Integer> sorted = List.of(1, 3, 5, 7, 9);
+int idx = Collections.binarySearch(sorted, 5);     // returns 2
+int miss = Collections.binarySearch(sorted, 4);    // returns -(insertion point) - 1
+                                                    // here: -3 (would insert at idx 2)
+```
+
+O(log n) on `RandomAccess` lists (`ArrayList`), O(n) on linked lists due to traversal. **Input must be sorted** by the same comparator (or natural order) you pass — undefined behavior otherwise. The negative return on miss is `-(insertionPoint) - 1` so you can compute insertion point as `-result - 1`.
+
+## reverse
+
+```java
+List<String> xs = new ArrayList<>(List.of("a", "b", "c", "d"));
+Collections.reverse(xs);   // [d, c, b, a]
+```
+
+In-place, O(n). For an immutable reversed *view*, use Sequenced Collections (Java 21+): `list.reversed()`.
+
+## shuffle
+
+```java
+Collections.shuffle(xs);                     // uses ThreadLocalRandom
+Collections.shuffle(xs, new Random(42));     // reproducible with seed
+```
+
+Fisher-Yates, O(n). For tests, always pass a seeded `Random` so failures are reproducible.
+
+## rotate
+
+```java
+List<Integer> xs = new ArrayList<>(List.of(1, 2, 3, 4, 5));
+Collections.rotate(xs, 2);   // [4, 5, 1, 2, 3]  — shifts right by 2
+Collections.rotate(xs, -1);  // shifts left by 1
+```
+
+In-place, O(n). Useful for circular buffers and "everyone passes their cards left" simulations.
+
+## frequency
+
+```java
+List<String> words = List.of("a", "b", "a", "c", "a", "b");
+int count = Collections.frequency(words, "a");   // 3
+```
+
+O(n) linear count. Equivalent to streams (`stream.filter(x::equals).count()`) but more concise. Uses `equals`, handles `null`.
+
+## disjoint
+
+```java
+boolean noOverlap = Collections.disjoint(
+    List.of(1, 2, 3),
+    Set.of(4, 5, 6)
+);   // true
+```
+
+`true` iff the two collections share no element. Smart enough to iterate the smaller collection and look up in the larger — pass a `Set` as one argument for O(n) total instead of O(n*m).
+
+## Quick reference
+
+<ComplexityTable rows={[
+  {op: "sort", best: "O(n)", average: "O(n log n)", worst: "O(n log n)", note: "TimSort, stable"},
+  {op: "binarySearch (RandomAccess)", best: "O(1)", average: "O(log n)", worst: "O(log n)", note: "requires sorted"},
+  {op: "reverse / rotate", best: "O(n)", average: "O(n)", worst: "O(n)", note: "in-place"},
+  {op: "shuffle", best: "O(n)", average: "O(n)", worst: "O(n)", note: "Fisher-Yates"},
+  {op: "frequency", best: "O(n)", average: "O(n)", worst: "O(n)", note: "linear scan"},
+  {op: "disjoint", best: "O(1)", average: "O(n)", worst: "O(n*m)", note: "depends on input types"}
+]} />
+
+<Callout kind="tip" title="Modern alternatives often read better">
+For `frequency`, consider `Collectors.groupingBy(x -> x, counting())` if you want all counts at once. For `disjoint`, `set1.stream().noneMatch(set2::contains)` is explicit about intent. Reach for `Collections` when it's genuinely the shortest expression.
+</Callout>
+
+<ProbeNote>If asked "why does binarySearch return a negative number?" — it's overloaded: positive means "found at this index," negative means "not found, but would belong at `-(result) - 1`." This lets one return value carry both pieces of information without allocating an `Optional` or a pair.</ProbeNote>

@@ -1,0 +1,49 @@
+**Optional operations are interface methods that an implementation is *permitted* to refuse by throwing `UnsupportedOperationException`.** They let the framework expose one rich interface (like `List`) while still allowing immutable, fixed-size, or view-only implementations — without needing a separate interface for every variant.
+
+## Why They Exist
+
+Without optional operations, the framework would have needed a combinatorial explosion of interfaces: `MutableList`, `ImmutableList`, `FixedSizeList`, `MutableSet`, `ImmutableSet`, and so on. Instead, JCF settles on a small set of capability interfaces (`List`, `Set`, `Map`) and documents which methods may legitimately throw.
+
+```java
+List<String> immutable = List.of("a", "b", "c");
+immutable.add("d");        // throws UnsupportedOperationException
+immutable.remove(0);       // throws UnsupportedOperationException
+immutable.get(0);          // works — read operations are mandatory
+
+List<Integer> fixed = Arrays.asList(1, 2, 3);
+fixed.set(0, 99);          // works — fixed size, but mutable elements
+fixed.add(4);              // throws UnsupportedOperationException
+```
+
+## Where You Encounter Them
+
+You hit optional operations whenever you obtain a view or factory-built collection:
+
+- `List.of(...)`, `Set.of(...)`, `Map.of(...)` — fully immutable.
+- `Collections.unmodifiableList(list)` — read-only wrapper.
+- `Arrays.asList(arr)` — fixed-size view of an array (mutators that change size throw; `set` works).
+- `Map.keySet()`, `Map.values()`, `Map.entrySet()` — cannot `add`.
+- `Collections.emptyList()`, `Collections.singletonList(x)` — immutable.
+
+## The Trade-off
+
+Critics call this a leak in the type system: the *type* `List` claims to support `add`, but at runtime you might get a `UnsupportedOperationException`. This is the price of API economy. The Javadoc compensates by explicitly marking methods as "Optional operation" and noting which implementations refuse them.
+
+<Callout kind="warn" title="Liskov consideration">
+Strictly speaking, throwing `UnsupportedOperationException` violates the **Liskov Substitution Principle** — a subtype is silently weakening a supertype's contract. The framework treats this as a pragmatic compromise documented in the Javadoc, but defensive code should never blindly mutate a `List` it didn't construct.
+</Callout>
+
+## A Practical Pattern
+
+When you receive a collection from an API, treat it as potentially unmodifiable unless you control its construction:
+
+```java
+public void process(List<String> input) {
+    var working = new ArrayList<>(input);  // defensive copy
+    working.add("extra");                  // safe to mutate
+}
+```
+
+<ProbeNote>
+The interviewer wants to see if you understand that **`UnsupportedOperationException` is a design choice**, not a bug. Strong answers acknowledge the Liskov trade-off, list concrete examples (`List.of`, `Arrays.asList`, `unmodifiableList`), and mention the defensive-copy pattern. Junior candidates often think `UnsupportedOperationException` means "I'm using the wrong collection" — it actually means "I respected the type but ignored the docs."
+</ProbeNote>

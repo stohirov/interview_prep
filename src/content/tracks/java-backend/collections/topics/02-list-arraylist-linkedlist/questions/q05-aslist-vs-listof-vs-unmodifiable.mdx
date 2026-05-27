@@ -1,0 +1,62 @@
+All three produce a `List`, but they differ in **mutability, null handling, structural sharing, and backing storage**. Picking the wrong one causes silent bugs (mutations leaking through wrappers) or runtime explosions (`UnsupportedOperationException`, `NullPointerException`).
+
+## Side-by-Side
+
+| Aspect                  | `Arrays.asList(a,b,c)`            | `List.of(a,b,c)`                  | `Collections.unmodifiableList(list)` |
+| ----------------------- | --------------------------------- | --------------------------------- | ------------------------------------ |
+| Introduced              | Java 1.2                          | Java 9                            | Java 1.2                             |
+| Returned class          | `java.util.Arrays$ArrayList`      | `ImmutableCollections.ListN`/`List12` | `Collections$UnmodifiableList`   |
+| `add`/`remove`/`clear`  | Throw `UnsupportedOperationException` | Throw `UnsupportedOperationException` | Throw `UnsupportedOperationException` |
+| `set(i, e)`             | **Works** (mutates backing array) | Throws `UnsupportedOperationException` | Throws `UnsupportedOperationException` |
+| Allows `null` elements  | Yes                               | **No** — NPE on construction      | Yes (if source allows)               |
+| `contains(null)`        | Returns true/false                | **Throws NPE**                    | Returns true/false                   |
+| Backing storage         | The supplied array (live view)    | Internal, structurally shared     | The wrapped list (live view)         |
+| Mutating the source     | Reflected in the list             | N/A — no external source          | **Reflected in the wrapper**         |
+| Serialization           | Serializable                      | Serializable (with proxy)         | Serializable                         |
+| Optimized for size      | No                                | Yes — `List12` for 0–2 elems      | No                                   |
+
+## Why "Live View" Matters for unmodifiableList
+
+`Collections.unmodifiableList` does **not** copy — it wraps. So if you retain a reference to the original list, you can still mutate it, and the "unmodifiable" wrapper will show those changes:
+
+```java
+List<String> source = new ArrayList<>(List.of("a", "b"));
+List<String> readonly = Collections.unmodifiableList(source);
+
+source.add("c");                       // mutate the original
+System.out.println(readonly);          // [a, b, c] — changes leaked through!
+
+readonly.add("d");                     // throws UnsupportedOperationException
+```
+
+For a **truly immutable snapshot**, copy first:
+
+```java
+List<String> snapshot = List.copyOf(source);
+// or
+List<String> snapshot2 = Collections.unmodifiableList(new ArrayList<>(source));
+```
+
+`List.copyOf` is the modern idiom — it returns the same immutable list types as `List.of`, and skips the copy if the input is already one of them.
+
+## The Null Behavior
+
+`List.of` is **null-hostile by design**: passing `null` to the factory or calling `contains(null)` throws `NullPointerException`. This is intentional — it encourages clean data models. The other two tolerate nulls.
+
+```java
+List.of("a", null);            // NullPointerException
+List.of("a").contains(null);   // NullPointerException
+Arrays.asList("a", null);      // OK
+Arrays.asList("a").contains(null); // OK
+```
+
+## When to Use Which
+
+- **Building a constant from literals?** `List.of(...)` — fastest, smallest, structurally shared.
+- **Adapting an existing array to a `List` API?** `Arrays.asList(arr)`.
+- **Defending against mutation by callers?** `List.copyOf(input)` if you must retain — `Collections.unmodifiableList(new ArrayList<>(input))` is the longhand.
+- **Wrapping internal state for read-only exposure?** `Collections.unmodifiableList` is fine *if* you guarantee no internal mutation.
+
+<ProbeNote>
+The interviewer wants to see you reason about **mutability, sharing, and null semantics** as three independent dimensions. Naming all three return types (`Arrays$ArrayList`, the `ImmutableCollections` family, `UnmodifiableList`) and explaining the "leaks through" hazard of `unmodifiableList` separates a senior answer from a junior one.
+</ProbeNote>

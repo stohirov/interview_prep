@@ -1,0 +1,70 @@
+A Strategy is a single-method interface — a SAM. Since Java 8, you can supply one with a lambda instead of a named class, which collapses three files into one expression. The classic interface form earns its keep when the strategy needs **state, multiple methods, identity, or DI metadata**.
+
+## Strategy as a lambda
+
+```java
+@FunctionalInterface
+public interface PricingStrategy {
+    BigDecimal price(Cart cart);
+}
+
+public class Checkout {
+    private final PricingStrategy pricing;
+    public Checkout(PricingStrategy p) { this.pricing = p; }
+    public BigDecimal total(Cart cart) { return pricing.price(cart); }
+}
+
+// Lambda strategies — no class needed
+var standard = new Checkout(cart -> cart.subtotal());
+var withTax  = new Checkout(cart -> cart.subtotal().multiply(new BigDecimal("1.08")));
+var bf       = new Checkout(cart -> cart.subtotal().multiply(new BigDecimal("0.75")));
+```
+
+Three pricing strategies, zero new classes. The `@FunctionalInterface` annotation is documentation: it tells readers (and the compiler) that you intend this to be lambda-targetable.
+
+## When the classic interface wins
+
+### 1. The strategy holds state
+
+A `RetryStrategy` with a backoff multiplier, a max attempt count, and a circuit-breaker reference can't fit cleanly in a lambda. You'd capture three locals, and the resulting closure is harder to test and impossible to inspect.
+
+```java
+public final class ExponentialBackoffRetry implements RetryStrategy {
+    private final int maxAttempts;
+    private final Duration initialDelay;
+    private final double multiplier;
+    public ExponentialBackoffRetry(int max, Duration init, double mult) { /* ... */ }
+    public <T> T execute(Callable<T> task) { /* loop with delays */ return null; }
+}
+```
+
+### 2. The strategy has multiple methods
+
+A `CompressionStrategy` with `compress(byte[])` and `decompress(byte[])` isn't a SAM. Lambdas don't apply — you need a real interface (or `default` methods that delegate to two SAMs, which is uglier than just naming the class).
+
+### 3. You need a stable identity
+
+If you cache strategies in a `Map<String, Strategy>`, route by type, or compare them for equality, lambdas are anonymous and unsuitable. Each `cart -> cart.subtotal()` is a fresh, unequal instance.
+
+### 4. The DI container needs to inject it
+
+Spring wires beans by type and name. A `@Component public class StandardPricing implements PricingStrategy` is discoverable; a lambda created in a `@Bean` method works but loses lifecycle hooks (`@PostConstruct`, `@PreDestroy`) and AOP eligibility.
+
+### 5. The strategy needs documentation or testability
+
+Lambdas don't carry names. Stack traces show `Checkout.lambda$method$0` not `StandardPricing.price`. For complex business rules, a named class with Javadoc and dedicated tests is worth the boilerplate.
+
+## A heuristic
+
+| Use a lambda when... | Use a class when... |
+|---|---|
+| The body is one expression or a few lines | The body needs helper methods |
+| There's no state beyond captured finals | The strategy is stateful |
+| One-off, defined where it's used | Reused across modules |
+| Behavior is the value | Identity matters |
+
+<Callout kind="tip" title="Method references are the sweet spot">
+When the strategy is "call this existing method," a method reference is even cleaner: `new Checkout(Cart::subtotal)`. You get a name, a stack frame, and zero ceremony.
+</Callout>
+
+<ProbeNote>The interviewer is checking whether you reflexively reach for lambdas without thinking. The mature answer is "lambda by default, class when state or multiple methods are involved" — and being able to name a real production case where the class form was the right call (`RetryStrategy`, `CompressionStrategy`, anything with a `@PostConstruct`).</ProbeNote>

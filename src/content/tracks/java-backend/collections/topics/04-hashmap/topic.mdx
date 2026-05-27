@@ -1,0 +1,38 @@
+`HashMap` is the workhorse `Map` implementation: an array of buckets where each bucket is either a singly linked list or, once it gets long enough, a red-black tree. It promises **O(1) average** get/put as long as your `hashCode()` spreads keys well and the load factor is respected.
+
+## The table
+
+The internal `Node<K,V>[] table` is allocated lazily on the first `put`. Its length is always a power of two. The bucket index for a key is computed as `(n - 1) & hash`, where `hash` is a *spread* of the key's `hashCode()`:
+
+```java
+static final int hash(Object key) {
+    int h;
+    return (key == null) ? 0 : (h = key.hashCode()) ^ (h >>> 16);
+}
+```
+
+The `^ (h >>> 16)` mixes the high 16 bits into the low 16, because the low bits drive the bucket choice for small tables.
+
+## Collisions: list then tree
+
+When two keys hash to the same bucket, they form a linked list. Once a bucket reaches **8 nodes** *and* the table capacity is at least **64**, that bucket is *treeified* into a red-black tree, bounding worst-case lookups at O(log n). If the table is smaller than 64, the map resizes instead.
+
+<Diagram caption="HashMap layout (Java 8+)">{`table[0] -> null
+table[1] -> Node(k1) -> Node(k7) -> null
+table[2] -> null
+table[3] -> TreeNode(root)            <-- bucket treeified at >=8
+            /        \\
+       TreeNode    TreeNode
+table[4] -> Node(k4) -> null
+...
+table[n-1] -> ...`}</Diagram>
+
+## Resizing
+
+When `size > capacity * loadFactor` (default `16 * 0.75 = 12`), the table doubles. Java 8's resize is clever: each entry either stays at its old index `i` or moves to `i + oldCap`, decided by a single bit `(hash & oldCap)`. No rehashing needed.
+
+<Callout kind="tip" title="Mutable keys break it">
+If a key's `hashCode()` changes after insertion (a mutable field used in `hashCode`), the entry becomes effectively unreachable — it lives in the old bucket but lookups compute a new index.
+</Callout>
+
+The combination of power-of-two sizing, bit-spread hashing, and tree fallback is what makes `HashMap` both fast on average and robust against pathological inputs.

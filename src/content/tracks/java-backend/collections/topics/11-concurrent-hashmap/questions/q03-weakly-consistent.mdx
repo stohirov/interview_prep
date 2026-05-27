@@ -1,0 +1,62 @@
+**A *weakly consistent* iterator never throws `ConcurrentModificationException`, reflects the map's state at some point at or after the iterator was created, may or may not see modifications made after creation, and is guaranteed to traverse each element at most once.**
+
+## Contrast with fail-fast
+
+`HashMap.iterator()` snapshots `modCount` and explodes on the next mutation. `ConcurrentHashMap.iterator()` walks the live `Node[]` table directly. Concurrent writes — by definition — can land in buckets the iterator hasn't reached yet or has already passed.
+
+## The four guarantees
+
+1. **No CME.** Iteration never throws because of concurrent modification.
+2. **Element-level consistency.** Each `Node` returned reflects a single coherent put — no torn reads (values are `volatile`).
+3. **No duplicates.** A key is visited at most once even if its bucket reshuffles mid-iteration.
+4. **No "before-snapshot" guarantee.** The iterator does *not* promise to reflect only state at construction time; it walks live data.
+
+## What you might or might not see
+
+```java
+ConcurrentHashMap<String, Integer> m = new ConcurrentHashMap<>();
+m.put("a", 1);
+m.put("b", 2);
+
+Iterator<String> it = m.keySet().iterator();   // weakly consistent
+
+m.put("c", 3);          // may or may not appear during iteration
+m.remove("a");          // "a" may or may not appear
+
+while (it.hasNext()) {
+    System.out.println(it.next());
+}
+```
+
+Possible outputs include `a b`, `b`, `a b c`, `b c`, `a b c`, etc. — depending on bucket layout and timing. All are valid.
+
+## Why it's a feature
+
+Locking the entire map for iteration would re-introduce the very contention CHM was built to avoid. Weak consistency is the explicit trade: you give up snapshot-style consistency, you get a never-blocking, never-throwing traversal. For monitoring, dumping, periodic processing, this is exactly what you want.
+
+## When weak consistency is wrong
+
+If your business logic requires "iterate over exactly the keys that existed at time T", CHM is not your tool. Options:
+
+- **Snapshot under external lock** — defeats the purpose.
+- **Atomically take a copy** — `new HashMap<>(chm)` works but copies every entry; size during copy is still approximate.
+- **`ConcurrentHashMap.forEachEntry` + a sentinel** — useful for streaming aggregation but still weakly consistent.
+
+## Other weakly consistent iterators
+
+| Collection                | Iterator type        |
+|---------------------------|----------------------|
+| `ConcurrentHashMap`       | weakly consistent    |
+| `ConcurrentSkipListMap`   | weakly consistent    |
+| `ConcurrentLinkedQueue`   | weakly consistent    |
+| `ConcurrentLinkedDeque`   | weakly consistent    |
+| `CopyOnWriteArrayList`    | snapshot (stronger)  |
+| `HashMap` / `ArrayList`   | fail-fast            |
+
+`CopyOnWriteArrayList` is stronger — it iterates a literal snapshot. Weakly consistent is the middle ground for structures where snapshotting is too expensive.
+
+<Callout kind="info" title="forEach is also weakly consistent">
+`chm.forEach((k, v) -> ...)` uses the same traversal logic — same guarantees, same caveats. The parallel form `forEach(parallelismThreshold, ...)` splits the work via a spliterator but keeps weak consistency.
+</Callout>
+
+<ProbeNote>Probe: "Could a weakly consistent iterator see the same key twice?" No — that's an explicit guarantee. It might miss a key, might see a key added after construction, but never visits one twice. This rules out using duplicate-visits as a correctness concern when consuming the iterator.</ProbeNote>

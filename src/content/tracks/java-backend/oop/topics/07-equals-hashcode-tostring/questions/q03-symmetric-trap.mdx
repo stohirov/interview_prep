@@ -1,0 +1,94 @@
+**The symmetric-equals trap appears the moment a subclass adds state that participates in equality — `Point` equals only on (x,y), `ColoredPoint extends Point` wants to equal on (x,y,color), and the two implementations cannot both honor symmetry.** This is the canonical Effective Java Item 10 example and the senior-interview reason "favor composition over inheritance" exists.
+
+## The setup
+
+```java
+public class Point {
+    private final int x, y;
+    public Point(int x, int y) { this.x = x; this.y = y; }
+    @Override public boolean equals(Object o) {
+        if (!(o instanceof Point p)) return false;
+        return p.x == x && p.y == y;
+    }
+    @Override public int hashCode() { return Objects.hash(x, y); }
+}
+
+public class ColoredPoint extends Point {
+    private final Color color;
+    public ColoredPoint(int x, int y, Color color) { super(x, y); this.color = color; }
+    @Override public boolean equals(Object o) {
+        if (!(o instanceof ColoredPoint cp)) return false;
+        return super.equals(cp) && cp.color == color;
+    }
+}
+```
+
+Looks reasonable. Now watch:
+
+```java
+Point        p  = new Point(1, 2);
+ColoredPoint cp = new ColoredPoint(1, 2, RED);
+
+p.equals(cp);   // true   — Point.equals sees a Point with matching x,y
+cp.equals(p);   // false  — ColoredPoint.equals rejects non-ColoredPoint
+```
+
+Symmetry is dead. And it gets worse:
+
+```java
+ColoredPoint cp2 = new ColoredPoint(1, 2, BLUE);
+p.equals(cp);    // true
+p.equals(cp2);   // true
+// by transitivity:   cp.equals(cp2) should be true
+cp.equals(cp2);  // false — different colors
+```
+
+Transitivity is dead too.
+
+## The patch that doesn't work
+
+A common attempt is to make `Point.equals` "color-aware" by using mixed comparison logic. Every variant either:
+
+- Breaks symmetry (one side ignores color, the other doesn't), or
+- Breaks transitivity (color-equality only applies between `ColoredPoint`s), or
+- Switches to `getClass()` — which fixes both contracts at the cost of forbidding any `Point` from equalling any `ColoredPoint` even when "same location" is what callers want.
+
+There is no way to satisfy all of {reflexive, symmetric, transitive} *and* "ColoredPoint extends Point and adds a state-bearing field" *and* "instances of the two types can sometimes be equal." This is a real theorem about set partitions, not a Java bug.
+
+## The fix: composition
+
+```java
+public final class ColoredPoint {
+    private final Point point;
+    private final Color color;
+    public ColoredPoint(int x, int y, Color color) {
+        this.point = new Point(x, y);
+        this.color = color;
+    }
+    public Point asPoint() { return point; }   // explicit view
+    @Override public boolean equals(Object o) {
+        return o instanceof ColoredPoint cp
+            && cp.point.equals(point)
+            && cp.color == color;
+    }
+    @Override public int hashCode() { return Objects.hash(point, color); }
+}
+```
+
+Now `Point` and `ColoredPoint` are unrelated types. There's no implicit equality between them; callers who want "same location" call `cp.asPoint().equals(p)` explicitly. Both classes are individually contract-correct, and the conversion is visible in the code.
+
+## The modern angle: records can't fall into this trap
+
+```java
+record Point(int x, int y) {}
+record ColoredPoint(int x, int y, Color color) {}
+// records are implicitly final and cannot extend other records — by design
+```
+
+The language designers learned from the Point/ColoredPoint history and made records non-extendable. The trap is now structurally impossible for value types.
+
+<Callout kind="tip" title="The general theorem">
+"There is no way to extend an instantiable class and add a value component while preserving the equals contract." — Effective Java, Item 10. The escape is composition, not better `equals` cleverness.
+</Callout>
+
+<ProbeNote>The interviewer wants you to walk the symmetry violation step by step, then transitivity, then conclude with the composition fix. Bonus: name Effective Java Item 10 and note that records' implicit `final` is the language baking this lesson into the type system.</ProbeNote>

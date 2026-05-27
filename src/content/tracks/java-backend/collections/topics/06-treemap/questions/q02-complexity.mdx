@@ -1,0 +1,39 @@
+Every keyed operation on `TreeMap` is **O(log n)** in the worst case — including the navigation methods like `floorKey`/`ceilingKey`. Iteration is O(n). There is no O(1) fast path the way `HashMap` has, because the data structure is fundamentally a tree.
+
+## The table
+
+<ComplexityTable rows={[
+  {op: "get", best: "O(log n)", average: "O(log n)", worst: "O(log n)", note: "tree descent"},
+  {op: "put", best: "O(log n)", average: "O(log n)", worst: "O(log n)", note: "descend + at most O(log n) rotations"},
+  {op: "remove", best: "O(log n)", average: "O(log n)", worst: "O(log n)", note: "find + recolor/rotate to fix invariants"},
+  {op: "containsKey", best: "O(log n)", average: "O(log n)", worst: "O(log n)", note: "same as get"},
+  {op: "containsValue", best: "O(n)", average: "O(n)", worst: "O(n)", note: "linear scan; no index on values"},
+  {op: "firstKey / lastKey", best: "O(log n)", average: "O(log n)", worst: "O(log n)", note: "leftmost / rightmost descent"},
+  {op: "floorKey / ceilingKey", best: "O(log n)", average: "O(log n)", worst: "O(log n)", note: "tree descent with bookkeeping"},
+  {op: "higherKey / lowerKey", best: "O(log n)", average: "O(log n)", worst: "O(log n)", note: "strict variants of floor/ceiling"},
+  {op: "subMap / headMap / tailMap", best: "O(1)", average: "O(1)", worst: "O(1)", note: "returns a view; no copy"},
+  {op: "iteration (full)", best: "O(n)", average: "O(n)", worst: "O(n)", note: "in-order traversal"},
+  {op: "size", best: "O(1)", average: "O(1)", worst: "O(1)", note: "cached counter"}
+]} />
+
+## A few subtleties
+
+- **`containsValue` is O(n)** — there's no secondary index on values. Don't rely on it for hot paths.
+- **`subMap` is O(1) but the resulting view's `size()` is O(n)** — it has to count by walking, because the backing tree's `size` counter covers the whole map, not the range.
+- **Range iteration** is O(k + log n), where k is the number of entries returned: O(log n) to find the start, plus k tree-successor steps.
+- **`put` rotations** are bounded at O(log n) total in the worst case, but amortised, recolorings happen far more often than rotations — rotations average O(1) per insert in practice.
+
+## How does it compare to HashMap?
+
+<ComplexityTable rows={[
+  {op: "get (avg)", best: "HashMap: O(1)", average: "HashMap: O(1)", worst: "TreeMap: O(log n)", note: "HashMap is faster for plain lookup"},
+  {op: "get (worst)", best: "HashMap: O(log n)", average: "TreeMap: O(log n)", worst: "Both O(log n)", note: "HashMap's worst case = TreeMap's normal case"},
+  {op: "ordered iteration", best: "TreeMap: O(n)", average: "TreeMap: O(n)", worst: "HashMap: needs sort, O(n log n)", note: "TreeMap wins decisively"},
+  {op: "range query", best: "TreeMap: O(log n + k)", average: "TreeMap: O(log n + k)", worst: "HashMap: O(n)", note: "HashMap has no native range support"}
+]} />
+
+<Callout kind="tip" title="Rule of thumb">
+If you only need key-value lookup, prefer `HashMap`. If you need order or range queries, the log-factor cost of `TreeMap` is small compared to writing the ordering logic yourself.
+</Callout>
+
+<ProbeNote>The trap is saying "O(log n) for everything" without noticing `containsValue` is O(n). Mentioning that `subMap` is a constant-time view (but `size()` on the view is linear) is a strong detail.</ProbeNote>

@@ -1,0 +1,81 @@
+**Three superficially similar options with very different costs and semantics. `Collections.emptyList()` is a shared immutable singleton — zero allocation. `new ArrayList<>()` is a mutable list with lazy capacity allocation. `List.of()` is also an immutable singleton, slightly newer API.**
+
+## Side-by-side
+
+| | `Collections.emptyList()` | `new ArrayList<>()` | `List.of()` |
+|---|---|---|---|
+| Allocates? | No — shared singleton | Yes — one `ArrayList` object | No — shared singleton |
+| Mutable? | No (UOE on `add`) | Yes | No (UOE on `add`) |
+| Null elements allowed? | N/A (empty) | Yes | No (would NPE if added) |
+| Returns same instance? | Yes, always | New each call | Yes, always (for empty) |
+| Available since | Java 1.5 | Java 1.2 | Java 9 |
+
+## Code
+
+```java
+List<String> a = Collections.emptyList();
+List<String> b = Collections.emptyList();
+System.out.println(a == b);   // true — shared singleton
+
+List<String> c = new ArrayList<>();
+List<String> d = new ArrayList<>();
+System.out.println(c == d);   // false — two distinct objects
+
+List<String> e = List.of();
+List<String> f = List.of();
+System.out.println(e == f);   // true — shared singleton
+```
+
+## Lazy capacity in ArrayList
+
+A common myth: "`new ArrayList<>()` allocates an array of length 10 immediately." Not since Java 7+:
+
+```java
+// Roughly (simplified from JDK source):
+public ArrayList() {
+    this.elementData = DEFAULTCAPACITY_EMPTY_ELEMENTDATA;  // shared {} sentinel
+}
+
+public boolean add(E e) {
+    if (elementData == DEFAULTCAPACITY_EMPTY_ELEMENTDATA) {
+        elementData = new Object[10];   // allocate on first add
+    }
+    elementData[size++] = e;
+    return true;
+}
+```
+
+So `new ArrayList<>()` itself only allocates the `ArrayList` object and shares a sentinel empty array. The 10-slot backing array materializes lazily on the first `add`.
+
+## When to use which
+
+- **Returning an empty result** from a method: `Collections.emptyList()` or `List.of()`. Zero allocation, immutable, makes the API contract clear.
+- **Need to populate later**: `new ArrayList<>()` (or `new ArrayList<>(expectedSize)` if you know roughly how many).
+- **API receiving an immutable list**: `List.of(...)` — also signals to readers "this is fixed."
+
+```java
+// Good: empty result, no allocation
+public List<Order> findByStatus(Status s) {
+    if (s == null) return List.of();          // or Collections.emptyList()
+    return repo.queryByStatus(s);
+}
+
+// Good: building incrementally
+List<Order> bucket = new ArrayList<>(expectedCount);
+for (var row : rows) bucket.add(map(row));
+return bucket;
+```
+
+## emptyList vs List.of — does it matter?
+
+Functionally almost identical. Both return shared, immutable, empty singletons. Stylistic differences:
+
+- `Collections.emptyList()` has been around since Java 5 — universal.
+- `List.of()` reads more consistently with `List.of("a", "b")` for non-empty cases.
+- `List.of()` returns a different concrete class (`ImmutableCollections.ListN` or `List12`) than `Collections.emptyList()` (`EmptyList`), but you should never depend on the concrete type.
+
+<Callout kind="tip" title="Don't return null">
+"Return empty, never null" is one of the cheapest API improvements you can make. `Collections.emptyList()` costs nothing and removes an entire class of NPE.
+</Callout>
+
+<ProbeNote>If asked "why does `new ArrayList<>()` not allocate an array of 10 anymore?" — because most `ArrayList` instances stay empty (returned from a method that found nothing). Lazy allocation pays for itself many times over.</ProbeNote>

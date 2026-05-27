@@ -1,0 +1,82 @@
+`floorKey`, `ceilingKey`, `higherKey`, `lowerKey` are O(log n) **nearest-match** lookups. They shine for *range queries*, *time-windowed lookups*, *bucket-by-threshold* logic, and any scenario where the exact key may not exist but the closest one does.
+
+## The four operations
+
+For a key `k` in a `NavigableMap`:
+
+| Method | Returns | Inclusive? |
+| --- | --- | --- |
+| `floorKey(k)` | largest key ≤ k | yes (key itself counts) |
+| `ceilingKey(k)` | smallest key ≥ k | yes |
+| `lowerKey(k)` | largest key strictly `< k` | no |
+| `higherKey(k)` | smallest key strictly `> k` | no |
+
+All return `null` if no such key exists.
+
+## Use case: time-bucketed event lookup
+
+Suppose you're tracking system events keyed by timestamp and want "what was the most recent event at or before time T?":
+
+```java
+NavigableMap<Instant, Event> events = new TreeMap<>();
+events.put(Instant.parse("2026-05-27T09:00:00Z"), new Event("startup"));
+events.put(Instant.parse("2026-05-27T09:15:00Z"), new Event("config-loaded"));
+events.put(Instant.parse("2026-05-27T09:45:00Z"), new Event("first-request"));
+
+Instant query = Instant.parse("2026-05-27T09:30:00Z");
+Map.Entry<Instant, Event> mostRecent = events.floorEntry(query);
+// -> (09:15:00Z, config-loaded)
+```
+
+With a `HashMap`, you'd have to scan every key, sort by timestamp, and binary-search the result — O(n) per query. `TreeMap.floorEntry` is O(log n).
+
+## Use case: pricing tiers (find the right band)
+
+```java
+// price thresholds -> discount rate
+NavigableMap<Integer, BigDecimal> tiers = new TreeMap<>();
+tiers.put(0,     new BigDecimal("0.00"));
+tiers.put(100,   new BigDecimal("0.05"));
+tiers.put(500,   new BigDecimal("0.10"));
+tiers.put(1000,  new BigDecimal("0.15"));
+
+int orderTotal = 750;
+BigDecimal discount = tiers.floorEntry(orderTotal).getValue();
+// 750 -> uses tier 500 -> 0.10 (10%)
+```
+
+The "floor" semantics map naturally onto "give me the largest tier ≤ this amount".
+
+## Use case: a range scan over a window
+
+Combine navigation with `subMap` for windowed iteration:
+
+```java
+Instant from = Instant.now().minus(Duration.ofMinutes(5));
+Instant to   = Instant.now();
+
+events.subMap(from, true, to, true)
+      .forEach((t, e) -> log.info("{} -> {}", t, e));
+```
+
+The `subMap` view is O(1) to construct; iteration over it is O(k + log n) where k is the number of entries in the window.
+
+## Floor vs lower (and why both exist)
+
+```java
+NavigableMap<Integer, String> m = new TreeMap<>();
+m.put(10, "ten");
+
+m.floorKey(10);  // 10  (<=)
+m.lowerKey(10);  // null (strictly <)
+m.ceilingKey(10);// 10  (>=)
+m.higherKey(10); // null (strictly >)
+```
+
+The strict variants matter when you want "the previous entry" or "the next entry" excluding the query itself — e.g. paging through events in order.
+
+<Callout kind="tip" title="Performance">
+These methods are O(log n) — the same cost as a normal `get`. Using `floorEntry` instead of "get the keys, sort them, binary-search" can take a request from 50ms to under a millisecond when the map holds thousands of entries.
+</Callout>
+
+<ProbeNote>The interviewer wants a *concrete* example. Time-windowed lookups, pricing tiers, and rate buckets are all natural fits. Mention `floorEntry`/`ceilingEntry` versions too — they return the key *and* value, saving a follow-up `get`.</ProbeNote>

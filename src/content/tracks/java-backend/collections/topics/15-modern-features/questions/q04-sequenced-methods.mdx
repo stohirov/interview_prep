@@ -1,0 +1,106 @@
+**The Sequenced Collection API adds six core methods to encounter-ordered collections — `getFirst`, `getLast`, `addFirst`, `addLast`, `removeFirst`, `removeLast` — plus `reversed()` for a live reverse view. All implementations: `List`, `LinkedHashSet`, `ArrayDeque`, `LinkedHashMap` (with map-shaped equivalents), and `NavigableMap`/`NavigableSet`.**
+
+## The six core methods
+
+```java
+SequencedCollection<E> c = ...;
+
+E first = c.getFirst();         // peek front; throws NoSuchElementException if empty
+E last  = c.getLast();          // peek back
+
+c.addFirst(e);                  // insert at front (UOE if collection rejects, e.g. unmodifiable)
+c.addLast(e);                   // insert at back
+
+E removed1 = c.removeFirst();   // remove and return front; NSEE if empty
+E removed2 = c.removeLast();    // remove and return back
+
+SequencedCollection<E> rev = c.reversed();   // live reverse view
+```
+
+`SequencedSet` has the same methods but with set semantics (adding a duplicate is a no-op or moves the existing element, depending on implementation).
+
+## Map equivalents
+
+```java
+SequencedMap<K, V> m = ...;
+
+Map.Entry<K, V> firstE = m.firstEntry();           // peek
+Map.Entry<K, V> lastE  = m.lastEntry();
+Map.Entry<K, V> popF   = m.pollFirstEntry();       // peek + remove, null if empty
+Map.Entry<K, V> popL   = m.pollLastEntry();
+m.putFirst(k, v);                                  // insert/move to front
+m.putLast(k, v);                                   // insert/move to back
+SequencedMap<K, V> rev = m.reversed();             // live reverse view
+
+SequencedSet<K> keys    = m.sequencedKeySet();
+SequencedCollection<V> values = m.sequencedValues();
+SequencedSet<Map.Entry<K, V>> entries = m.sequencedEntrySet();
+```
+
+Note the asymmetry: collection uses `getFirst/removeFirst` (throw on empty), map uses `firstEntry/pollFirstEntry` (return null on empty). This matches the existing pre-21 conventions for those types.
+
+## Who implements what
+
+| Type | Implements |
+|---|---|
+| `ArrayList`, `LinkedList`, `Vector`, `Stack` | `List` ⊂ `SequencedCollection` |
+| `LinkedList`, `ArrayDeque` | also `Deque` ⊂ `SequencedCollection` |
+| `LinkedHashSet` | `SequencedSet` |
+| `TreeSet`, any `NavigableSet` | `SequencedSet` (order = sort order) |
+| `LinkedHashMap` | `SequencedMap` |
+| `TreeMap`, any `NavigableMap` | `SequencedMap` |
+| `HashSet`, `HashMap` | **not** sequenced — no defined order |
+| `ConcurrentHashMap` | **not** sequenced |
+| `ConcurrentSkipListMap` | `SequencedMap` (via `NavigableMap`) |
+
+## Examples per collection
+
+```java
+// ArrayList
+List<Integer> list = new ArrayList<>(List.of(1, 2, 3));
+list.getFirst();   // 1
+list.getLast();    // 3
+list.addFirst(0);  // [0, 1, 2, 3]
+list.removeLast(); // returns 3, list is [0, 1, 2]
+list.reversed();   // live view [2, 1, 0]
+
+// LinkedHashSet (insertion-ordered)
+LinkedHashSet<String> set = new LinkedHashSet<>(List.of("a", "b", "c"));
+set.getFirst();           // "a"
+set.addFirst("zero");     // moves "zero" to front; existing duplicate would be re-positioned
+set.removeLast();         // removes "c"
+
+// ArrayDeque
+ArrayDeque<Integer> dq = new ArrayDeque<>(List.of(10, 20, 30));
+dq.getFirst();   // 10  — equivalent to existing peekFirst()
+dq.addLast(40);  // equivalent to existing offerLast(40)
+
+// LinkedHashMap
+LinkedHashMap<String, Integer> m = new LinkedHashMap<>();
+m.put("a", 1);
+m.put("b", 2);
+m.putFirst("z", 26);                  // [z=26, a=1, b=2]
+Map.Entry<String, Integer> head = m.firstEntry();
+m.pollLastEntry();                    // removes b=2
+```
+
+## The `reversed()` view in detail
+
+`reversed()` returns a *view*, not a copy. The returned collection's `add`, `remove`, and iteration all delegate to the original in reverse. Important behavioral subtlety:
+
+```java
+List<Integer> xs = new ArrayList<>(List.of(1, 2, 3));
+List<Integer> rev = xs.reversed();   // [3, 2, 1]
+
+rev.addFirst(99);   // adds 99 to front of rev = back of xs
+System.out.println(xs);   // [1, 2, 3, 99]
+System.out.println(rev);  // [99, 3, 2, 1]
+```
+
+`rev.reversed()` returns the original view (or an equivalent one) — it doesn't accumulate wrappers.
+
+<Callout kind="tip" title="Use these in new code">
+For Java 21+ code, `list.getFirst()` reads better than `list.get(0)` and `list.getLast()` is *much* better than `list.get(list.size() - 1)`. Same for `removeLast()` vs `remove(list.size() - 1)`.
+</Callout>
+
+<ProbeNote>If asked "does `LinkedHashSet.addFirst` move an existing element to the front?" — yes. For sequenced sets, `addFirst`/`addLast` are documented to re-position an already-present element. This is the same behavior pattern LinkedHashMap's `putFirst`/`putLast` follow.</ProbeNote>

@@ -1,0 +1,74 @@
+When you write `record Point(int x, int y) {}`, the compiler synthesizes a handful of members so you don't have to. Knowing the exact list — and that you can override any of them — is the difference between someone who's read about records and someone who's actually shipped them.
+
+## What you get for free
+
+For `record Point(int x, int y) {}` the compiler generates:
+
+1. **A canonical constructor** with the same parameter list as the header:
+   ```java
+   public Point(int x, int y) { this.x = x; this.y = y; }
+   ```
+2. **Accessor methods** named after the components — *no `get` prefix*:
+   ```java
+   public int x() { return this.x; }
+   public int y() { return this.y; }
+   ```
+3. **`equals(Object)`** — true iff the other is the same record type and *every component is equal* (using `Objects.equals` for refs, `==` for primitives, `Float.compare`/`Double.compare` for floats).
+4. **`hashCode()`** — combines hashes of every component, equivalent to `Objects.hash(x, y)`.
+5. **`toString()`** — `Point[x=3, y=4]` format.
+6. **Two `private final` fields** — `x` and `y`, automatically. You don't (and can't) re-declare them.
+
+## The compact canonical constructor
+
+When you need validation or normalization, use the **compact form** — same name, no parameter list, no `this.x = ...` assignments:
+
+```java
+public record Range(int low, int high) {
+    public Range {
+        if (low > high) throw new IllegalArgumentException("low > high");
+    }
+}
+```
+
+The compiler still emits the field assignments after your block runs, so you don't write them. You can also reassign parameters for normalization (`low = Math.min(low, 0)`), and the *final* value at the end of the block is what gets stored.
+
+## Overriding the generated members
+
+Anything the compiler generates, you can replace by declaring it explicitly:
+
+```java
+public record Duration(long seconds, int nanos) {
+    public Duration { // compact constructor — validate
+        if (nanos < 0 || nanos >= 1_000_000_000) throw new IllegalArgumentException();
+    }
+    @Override
+    public String toString() { return seconds + "." + nanos + "s"; } // custom
+}
+```
+
+Two things to watch:
+
+- If you override an accessor, your version replaces the trivial one — useful for defensive copying (`public List<String> tags() { return List.copyOf(tags); }`).
+- If you override `equals`/`hashCode`, you'd better preserve the contract — there's almost never a reason to.
+
+## What you don't get
+
+The compiler does **not** generate:
+
+- A no-arg constructor. Records are about specific values.
+- Setters. Records are immutable by design.
+- `Comparable`/`Cloneable`/`Serializable` implementations — though records *are* serializable by default if all components are.
+- A builder. If you want one, write it (or use a generator) — the more components a record has, the more this matters.
+
+<Callout kind="info" title="Override the canonical constructor, not just the compact one">
+The compact form is shorthand. You can also write the full canonical constructor explicitly when you need to assign different values than you received — useful if the parameters are mutable types you want to defensively copy:
+
+```java
+public Period(Date start, Date end) {
+    this.start = new Date(start.getTime());
+    this.end   = new Date(end.getTime());
+}
+```
+</Callout>
+
+<ProbeNote>The interviewer wants the full list — accessors (without `get`), `equals`, `hashCode`, `toString`, canonical constructor, plus that the fields are auto-declared private final. Bonus credit: explaining when to use the compact constructor (validation/normalization) vs the full canonical (defensive copy of mutable inputs).</ProbeNote>

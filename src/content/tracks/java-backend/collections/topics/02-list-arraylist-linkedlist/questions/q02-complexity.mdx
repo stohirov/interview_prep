@@ -1,0 +1,54 @@
+**`ArrayList` wins at random access and tail-append; `LinkedList` only wins at head insert/remove.** Despite textbook lore, even most "middle insertion" workloads favor `ArrayList` because the `O(n)` `arraycopy` is far faster than the `O(n)` pointer walk a `LinkedList` performs to locate the index.
+
+## The Numbers
+
+<ComplexityTable rows={[
+  {op: "get(i) / set(i)", best: "O(1)", average: "O(1)", worst: "O(1)", note: "ArrayList — direct array indexing"},
+  {op: "get(i) / set(i)", best: "O(1)", average: "O(n)", worst: "O(n)", note: "LinkedList — walks from nearer end (head or tail)"},
+  {op: "add(e)  [tail]", best: "O(1)", average: "O(1) amortized", worst: "O(n)", note: "ArrayList — worst when grow+copy is needed"},
+  {op: "add(e)  [tail]", best: "O(1)", average: "O(1)", worst: "O(1)", note: "LinkedList — append to tail pointer"},
+  {op: "add(0, e) [head]", best: "O(n)", average: "O(n)", worst: "O(n)", note: "ArrayList — shifts all elements right"},
+  {op: "add(0, e) [head]", best: "O(1)", average: "O(1)", worst: "O(1)", note: "LinkedList — head pointer rewrite"},
+  {op: "add(i, e) [middle]", best: "O(1)", average: "O(n)", worst: "O(n)", note: "ArrayList — arraycopy of (size-i) elements"},
+  {op: "add(i, e) [middle]", best: "O(1)", average: "O(n)", worst: "O(n)", note: "LinkedList — O(n) walk to locate, then O(1) link"},
+  {op: "remove(i) [middle]", best: "O(1)", average: "O(n)", worst: "O(n)", note: "ArrayList — arraycopy shift"},
+  {op: "remove(i) [middle]", best: "O(1)", average: "O(n)", worst: "O(n)", note: "LinkedList — O(n) walk dominates"},
+  {op: "remove(0) [head]", best: "O(n)", average: "O(n)", worst: "O(n)", note: "ArrayList — shift everything left"},
+  {op: "remove(0) [head]", best: "O(1)", average: "O(1)", worst: "O(1)", note: "LinkedList — unlink head"},
+  {op: "contains(o)", best: "O(1)", average: "O(n)", worst: "O(n)", note: "Both — linear scan"},
+  {op: "iterator next()", best: "O(1)", average: "O(1)", worst: "O(1)", note: "Both — but ArrayList has far better cache locality"},
+]} />
+
+## The Practical Catch
+
+The table makes `LinkedList` look competitive for head/middle ops. In real CPUs, it isn't. `ArrayList`'s `System.arraycopy` is a single intrinsic operating on packed memory — typically billions of elements per second. `LinkedList` chases pointers across heap-allocated nodes, missing the cache on every step.
+
+```java
+// Benchmarks consistently show ArrayList faster for most middle inserts
+// up to many thousands of elements, because:
+//   - arraycopy: 1 cache-friendly bulk move
+//   - LinkedList: i pointer dereferences + 4 pointer writes
+```
+
+## A Subtle Iterator Detail
+
+If you're traversing-and-removing with an `Iterator`, `LinkedList`'s remove is genuinely `O(1)` per call (it has the node in hand), while `ArrayList` is still `O(n)` per remove. But even here, the cache penalty of the walk often dominates.
+
+```java
+// LinkedList iterator-based removal: O(n) total
+var ll = new LinkedList<>(List.of(1,2,3,4,5));
+var it = ll.iterator();
+while (it.hasNext()) if (it.next() % 2 == 0) it.remove();
+
+// ArrayList equivalent: O(n^2) but often still faster in practice
+// — prefer removeIf which uses a single compaction pass: O(n)
+arrayList.removeIf(x -> x % 2 == 0);
+```
+
+<Callout kind="tip" title="Use removeIf">
+For bulk filtering of an `ArrayList`, **always prefer `removeIf`** — it performs a single in-place compaction pass and beats iterator-based removal asymptotically.
+</Callout>
+
+<ProbeNote>
+Interviewers want you to (1) recite the asymptotic table accurately, then (2) demonstrate maturity by noting that **constants matter** — `ArrayList` wins in practice for nearly all workloads thanks to cache locality and `arraycopy` intrinsics. Mentioning `removeIf` as the right tool for bulk deletion is a strong differentiator.
+</ProbeNote>

@@ -1,0 +1,136 @@
+A parking lot is the most-asked LLD question precisely because it's open-ended — there's no single right answer, only better and worse ways to decompose it. Walking through requirements → entities → patterns → trade-offs out loud is what the interviewer is grading.
+
+## Requirements (the first 5 minutes)
+
+- **Functional**: park a vehicle, unpark a vehicle, find an open spot, calculate the bill at exit, support multiple vehicle types (motorcycle, car, bus) and multiple spot sizes (small, medium, large).
+- **Non-functional**: ~500 spots, single-JVM, in-memory, multiple concurrent entry gates so thread safety matters.
+- **Out of scope**: reservations, payment processing, persistence across restart.
+
+## Use cases
+
+1. Driver pulls up. System asks for vehicle type. Finds the smallest spot the vehicle fits in. Issues a ticket (id, spot, entry time).
+2. Driver exits. Hands ticket. System computes bill from `entryTime → now` using the pricing strategy, frees the spot, returns receipt.
+3. Lot full. System reports no spot available for the vehicle type.
+
+## Class diagram
+
+<Diagram caption="Parking lot entities and relationships">{`
+       ParkingLot
+        /     \\
+      *        *
+   Floor      PricingStrategy  (Strategy)
+      |
+      *
+    Spot --has--> SpotType (enum: SMALL, MEDIUM, LARGE)
+      |
+      ?
+   Vehicle ----------------+
+      |                    |
+   VehicleType (enum)     Ticket
+                            \\
+                             entryTime, spotId, vehiclePlate
+`}</Diagram>
+
+## Key classes
+
+```java
+public enum VehicleType { MOTORCYCLE, CAR, BUS }
+public enum SpotType    { SMALL, MEDIUM, LARGE }
+
+public record Vehicle(String plate, VehicleType type) {}
+
+public final class Spot {
+    private final String id;
+    private final SpotType type;
+    private Vehicle occupant; // null when free
+    private final Object lock = new Object();
+
+    public Spot(String id, SpotType type) { this.id = id; this.type = type; }
+
+    public boolean tryAssign(Vehicle v) {
+        synchronized (lock) {
+            if (occupant != null) return false;
+            occupant = v;
+            return true;
+        }
+    }
+
+    public Vehicle release() {
+        synchronized (lock) {
+            Vehicle v = occupant;
+            occupant = null;
+            return v;
+        }
+    }
+
+    public SpotType type() { return type; }
+    public boolean fits(VehicleType v) { /* MOTORCYCLE -> any, CAR -> MEDIUM or LARGE, BUS -> LARGE */ return true; }
+}
+
+public record Ticket(String id, String spotId, String plate, Instant entryAt) {}
+
+public interface PricingStrategy {
+    BigDecimal price(Ticket ticket, Instant exitAt);
+}
+
+public final class HourlyPricing implements PricingStrategy {
+    public BigDecimal price(Ticket t, Instant exit) {
+        long hours = Math.max(1, Duration.between(t.entryAt(), exit).toHours());
+        return BigDecimal.valueOf(hours * 2);
+    }
+}
+
+public final class ParkingLot {
+    private final List<Floor> floors;
+    private final Map<String, Ticket> activeTickets = new ConcurrentHashMap<>();
+    private final PricingStrategy pricing;
+
+    public ParkingLot(List<Floor> floors, PricingStrategy pricing) {
+        this.floors = floors; this.pricing = pricing;
+    }
+
+    public Optional<Ticket> park(Vehicle v) {
+        for (Floor f : floors) {
+            Optional<Spot> spot = f.findFreeSpot(v.type());
+            if (spot.isPresent() && spot.get().tryAssign(v)) {
+                Ticket t = new Ticket(UUID.randomUUID().toString(), spot.get().id(), v.plate(), Instant.now());
+                activeTickets.put(t.id(), t);
+                return Optional.of(t);
+            }
+        }
+        return Optional.empty();
+    }
+
+    public BigDecimal unpark(String ticketId, Instant now) {
+        Ticket t = activeTickets.remove(ticketId);
+        if (t == null) throw new IllegalArgumentException("unknown ticket");
+        floors.stream().flatMap(f -> f.spots().stream())
+              .filter(s -> s.id().equals(t.spotId())).findFirst()
+              .ifPresent(Spot::release);
+        return pricing.price(t, now);
+    }
+}
+```
+
+The `Floor` class holds spots and answers "give me a free spot of a type fitting this vehicle" — typically an indexed structure (`Map<SpotType, Queue<Spot>>`) so the lookup is O(1).
+
+## Patterns used (and why)
+
+- **Strategy** for `PricingStrategy` — flat / hourly / day-of-week pricing can swap without touching `ParkingLot`. Lets the business team change prices without code review.
+- **Factory** for constructing `Vehicle` from raw input (`VehicleFactory.from(type, plate)`) — extends cleanly when "electric vehicle" arrives next quarter and needs a charging-capable spot.
+- **Singleton** for `ParkingLot` itself — but only if you're being old-school. In modern code it's a `@Component` managed by a DI container. Mention both.
+
+## Trade-offs to volunteer
+
+- **Concurrency**: per-spot lock keeps contention low; an alternative is `AtomicReference<Vehicle>` for lock-free assignment.
+- **Lookup**: indexed `Map<SpotType, Queue<Spot>>` per floor is O(1); a linear scan across all spots is O(n) but simpler. State you'd start linear and index when profiling demands it.
+- **State**: in-memory `ConcurrentHashMap` for tickets is fine for single-JVM; a DB-backed version unlocks restart safety and multi-instance.
+- **Pricing flexibility**: Strategy lets you add a `WeekendPricing` overnight; the alternative `if (day == Saturday)` inside `ParkingLot` violates OCP.
+
+## Extension questions to expect
+
+- "Now make it multi-lot federation." Introduce a registry service.
+- "Add reservations." Now `tryAssign` competes with reserved spots — need a reservation cache and a TTL.
+- "What if a spot can fit multiple motorcycles?" Spot becomes a small collection; capacity math changes.
+
+<ProbeNote>The interviewer wants to see you: scope the problem, draw the class diagram with cardinalities, name two or three patterns and defend them, and handle concurrency at least at the level of a per-spot lock. Bonus points for explicitly stating trade-offs ("I chose a `ConcurrentHashMap` because...") and acknowledging where you'd evolve the design if scale grew.</ProbeNote>

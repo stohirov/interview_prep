@@ -1,0 +1,79 @@
+**Fail-fast iterators throw `ConcurrentModificationException` the moment they detect the underlying collection was structurally modified after the iterator was created. Fail-safe iterators iterate over a snapshot (or a tolerant view) of the collection — they never throw, but they may not see the most recent state.** Most `java.util` collections are fail-fast; most `java.util.concurrent` ones are fail-safe.
+
+## How Fail-Fast Works
+
+Collections like `ArrayList`, `HashMap`, `HashSet`, and `LinkedHashMap` maintain an `int modCount` field that increments on every structural modification (add, remove, clear). When you create an iterator, it stores the current `modCount` as `expectedModCount`. Every `next()` call compares them:
+
+```java
+// Sketch from ArrayList.Itr
+final void checkForComodification() {
+    if (modCount != expectedModCount)
+        throw new ConcurrentModificationException();
+}
+```
+
+So this code fails:
+
+```java
+List<Integer> xs = new ArrayList<>(List.of(1, 2, 3, 4));
+for (Integer x : xs) {
+    if (x == 2) xs.remove(x);   // ConcurrentModificationException
+}
+```
+
+The correct way is to use the iterator's own `remove`:
+
+```java
+var it = xs.iterator();
+while (it.hasNext()) {
+    if (it.next() == 2) it.remove();   // OK — updates expectedModCount
+}
+// Or, even better:
+xs.removeIf(x -> x == 2);
+```
+
+## How Fail-Safe Works
+
+Fail-safe iterators come in two flavors:
+
+**Snapshot-based** (e.g., `CopyOnWriteArrayList`): the iterator captures a reference to the immutable backing array at creation time. Subsequent mutations replace the array but don't affect the iterator. You never see new elements added after iteration began, and you can never call `remove` through the iterator.
+
+```java
+List<String> log = new CopyOnWriteArrayList<>(List.of("a", "b"));
+var it = log.iterator();
+log.add("c");                          // safe — iterator unaffected
+while (it.hasNext()) System.out.println(it.next());  // prints a, b
+```
+
+**Weakly-consistent** (e.g., `ConcurrentHashMap`, `ConcurrentLinkedQueue`): the iterator walks the live structure but tolerates concurrent mutation. It is guaranteed to visit each element that existed at iterator creation **exactly once**, and *may or may not* reflect modifications made after creation. It never throws `ConcurrentModificationException`.
+
+```java
+var map = new ConcurrentHashMap<String, Integer>();
+map.put("a", 1); map.put("b", 2);
+for (var e : map.entrySet()) {
+    map.put("c", 3);   // safe — may or may not appear in this iteration
+}
+```
+
+## Side-by-Side
+
+| Aspect                          | Fail-fast                            | Fail-safe                             |
+| ------------------------------- | ------------------------------------ | ------------------------------------- |
+| Detection mechanism             | `modCount` vs `expectedModCount`     | None — tolerates mutation             |
+| On concurrent mutation          | Throws `ConcurrentModificationException` | Never throws                       |
+| Sees new elements?              | N/A — already crashed                | Snapshot: no; weakly-consistent: maybe |
+| Examples                        | `ArrayList`, `HashMap`, `HashSet`    | `CopyOnWriteArrayList`, `ConcurrentHashMap`, `ConcurrentLinkedQueue` |
+| Memory cost                     | None extra                           | Snapshot copies the array             |
+| Best for                        | Single-threaded; catching bugs       | Concurrent reads alongside writes     |
+
+## Fail-Fast is Best-Effort
+
+The Javadoc is explicit: fail-fast is **not a correctness guarantee**, just a debugging aid. In multi-threaded code without synchronization, a fail-fast iterator might *miss* a concurrent modification and produce garbage results. Never rely on `ConcurrentModificationException` to enforce thread safety.
+
+<Callout kind="info" title="Why removeIf is the modern answer">
+`List.removeIf` and `Map.values().removeIf` perform the removal internally with proper modCount updates and (on `ArrayList`) compact in a single linear pass. They sidestep the iterator-mutation dance entirely.
+</Callout>
+
+<ProbeNote>
+The interviewer is checking three things: (1) you can explain the `modCount` mechanism, (2) you know that **fail-fast is best-effort, not a thread-safety guarantee**, and (3) you can name the two flavors of fail-safe (snapshot vs weakly-consistent) with concrete examples from `java.util.concurrent`. Bonus: mentioning `removeIf` as the idiomatic alternative.
+</ProbeNote>

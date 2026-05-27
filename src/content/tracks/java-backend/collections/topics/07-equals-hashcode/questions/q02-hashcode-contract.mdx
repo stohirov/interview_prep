@@ -1,0 +1,53 @@
+The `hashCode` contract has **three rules**: (1) consistent across calls on the same object, (2) **equal objects must produce equal hashes**, and (3) **unequal objects MAY share a hash** — collisions are allowed and expected.
+
+## The three rules
+
+1. **Consistency** — Repeated calls to `hashCode()` on the same object must return the same integer, provided no information used in `equals` comparisons changes. (Across JVM restarts the value may differ, e.g., `String.hashCode` is stable but `Object.hashCode` is identity-based.)
+
+2. **Equal implies equal hash** — If `a.equals(b)`, then `a.hashCode() == b.hashCode()`. **This is the rule everyone forgets.**
+
+3. **Unequal MAY share hash** — If `!a.equals(b)`, their hashes are *not required* to differ. Collisions are normal; a good hash function just minimizes them.
+
+## Why rule 2 is non-negotiable
+
+`HashMap.get(key)` does:
+
+```java
+int h = key.hashCode();
+int bucket = h & (table.length - 1);
+// walk bucket, comparing each entry with key.equals(...)
+```
+
+If `a.equals(b)` but their hashes differ, they land in different buckets and the walk never finds the match. The map *contains* the entry but `get` returns `null`.
+
+## Why rule 3 has to allow collisions
+
+There are 2^32 possible `int` hash codes but infinitely many possible objects. By pigeonhole, **some unequal objects must share a hash**. A "perfect" hash function is impossible for unbounded domains. Hash maps handle collisions by chaining (a linked list, or since Java 8, a balanced tree once a bucket holds 8+ entries).
+
+## Good implementation
+
+```java
+@Override
+public int hashCode() {
+    return Objects.hash(cents, currency); // combines fields via 31 * h + ...
+}
+```
+
+`Objects.hash` boxes its varargs into an array, so for hot paths prefer inlining:
+
+```java
+@Override
+public int hashCode() {
+    int h = Long.hashCode(cents);
+    h = 31 * h + currency.hashCode();
+    return h;
+}
+```
+
+The `31 *` multiplier is a JIT-friendly odd prime; it shifts bits to reduce collisions.
+
+<Callout kind="warn" title="Constant hashCode is legal but terrible">
+Returning `0` from every `hashCode()` satisfies the contract — all equal objects share hash 0. But every entry collides into one bucket, degrading `HashMap` to O(n) (or O(log n) with the Java 8 tree-bin optimization). Legal, but you've made a hash map into a slow list.
+</Callout>
+
+<ProbeNote>Probe: "If a.hashCode() == b.hashCode(), what can you conclude?" (Nothing — they might or might not be equal.) "If a.hashCode() != b.hashCode()?" (They are definitely not equal — contrapositive of rule 2.)</ProbeNote>

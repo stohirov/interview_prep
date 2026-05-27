@@ -1,0 +1,126 @@
+Designing an LRU cache from scratch is the most common LLD coding question at Amazon, Google, and Meta. The expected answer is a **`HashMap<K, Node>` paired with a doubly-linked list**, where the hash map gives O(1) lookup of nodes and the list maintains recency order. Both data structures cooperate to keep every operation O(1). Anything else (a `LinkedHashMap` with `removeEldestEntry`, a single sorted structure) is a sign you haven't done the work.
+
+## Requirements
+
+- Fixed capacity `n`. `put` over capacity evicts the **least recently used** entry.
+- `get` returns the value (or null) and marks the entry as most recently used.
+- `put` of an existing key overwrites and marks as MRU.
+- Single-threaded by default — concurrent variant is a follow-up.
+- O(1) `get` and O(1) `put`.
+
+## Class diagram
+
+<Diagram caption="LRU cache: hash map points into a doubly-linked list">{`
+   index (HashMap<K, Node>):    list:
+     k1 -> nodeA                 head <-> nodeC <-> nodeA <-> nodeB <-> tail
+     k2 -> nodeB                        ^                          ^
+     k3 -> nodeC                        MRU                        LRU
+`}</Diagram>
+
+## The code
+
+```java
+public final class LruCache<K, V> {
+
+    private static final class Node<K, V> {
+        K key;
+        V value;
+        Node<K, V> prev, next;
+        Node(K k, V v) { key = k; value = v; }
+    }
+
+    private final int capacity;
+    private final Map<K, Node<K, V>> index;
+    private final Node<K, V> head; // sentinel before MRU
+    private final Node<K, V> tail; // sentinel after LRU
+
+    public LruCache(int capacity) {
+        if (capacity <= 0) throw new IllegalArgumentException("capacity must be > 0");
+        this.capacity = capacity;
+        this.index = new HashMap<>(capacity * 4 / 3 + 1);
+        this.head = new Node<>(null, null);
+        this.tail = new Node<>(null, null);
+        head.next = tail;
+        tail.prev = head;
+    }
+
+    public V get(K key) {
+        Node<K, V> node = index.get(key);
+        if (node == null) return null;
+        moveToFront(node);
+        return node.value;
+    }
+
+    public void put(K key, V value) {
+        Node<K, V> existing = index.get(key);
+        if (existing != null) {
+            existing.value = value;
+            moveToFront(existing);
+            return;
+        }
+        Node<K, V> node = new Node<>(key, value);
+        index.put(key, node);
+        addToFront(node);
+        if (index.size() > capacity) {
+            Node<K, V> lru = tail.prev;
+            unlink(lru);
+            index.remove(lru.key);
+        }
+    }
+
+    // --- O(1) list ops ---
+
+    private void addToFront(Node<K, V> n) {
+        n.prev = head;
+        n.next = head.next;
+        head.next.prev = n;
+        head.next = n;
+    }
+
+    private void unlink(Node<K, V> n) {
+        n.prev.next = n.next;
+        n.next.prev = n.prev;
+        n.prev = n.next = null;
+    }
+
+    private void moveToFront(Node<K, V> n) {
+        unlink(n);
+        addToFront(n);
+    }
+}
+```
+
+## Why sentinels
+
+The dummy `head` and `tail` nodes mean every real node always has non-null `prev` and `next`. No null checks inside `unlink`. No "is this the only node?" special case in `addToFront`. Two extra `Node` allocations at construction time bought you zero branching in the hot path.
+
+## Complexity
+
+<ComplexityTable rows={[
+  {op: "get (hit)",      best: "O(1)", average: "O(1)", worst: "O(1)", note: "hash lookup + 6 pointer writes for moveToFront"},
+  {op: "get (miss)",     best: "O(1)", average: "O(1)", worst: "O(1)", note: "hash lookup only"},
+  {op: "put (new)",      best: "O(1)", average: "O(1)", worst: "O(1)", note: "insert at front; may evict LRU still O(1)"},
+  {op: "put (existing)", best: "O(1)", average: "O(1)", worst: "O(1)", note: "value swap + moveToFront"},
+  {op: "size",           best: "O(1)", average: "O(1)", worst: "O(1)", note: "delegates to HashMap.size"}
+]} />
+
+## Why not `LinkedHashMap`?
+
+`LinkedHashMap(capacity, 0.75f, true)` with `removeEldestEntry` *does* implement LRU. It's correct. But in the interview it shortcuts the question — the interviewer wants to see *you* derive the structure. Write the hand-rolled version, then mention that production code would lean on `LinkedHashMap` or Caffeine.
+
+## Variations the interviewer will ask about
+
+- **Thread safety**: wrap public methods with `synchronized` or use a `ReentrantLock`. A truly concurrent LRU is hard — every `get` must move a node, which means writes everywhere; Caffeine uses a clever ring-buffer pre-amortized approach. For the interview, lock-based is fine.
+- **TTL eviction**: store an `expiresAt` on each node, check in `get` and lazily evict, or use a `DelayQueue` for proactive cleanup.
+- **LFU**: tracks *frequency* of access instead of recency. Different problem — extra `Map<freq, LinkedHashSet<K>>` data structure. Not a one-line tweak.
+- **Capacity in bytes** (not entries): each node carries a `weight`; eviction loops until total weight is within capacity.
+
+<Callout kind="info" title="The interview's two failure modes">
+(1) Reaching for `LinkedHashMap` before being asked — you've skipped the test. (2) Forgetting that the hash map values are *nodes*, not raw values; without that, you can't find the list position in O(1) and the whole thing degrades to O(n) on `get`.
+</Callout>
+
+## Extension question: distributed LRU
+
+The expected answer: don't. A distributed cache (Redis, Memcached) provides similar semantics with TTL/LRU eviction built in, and consistency across nodes is its own problem. If forced, you'd shard by key hash and accept that each shard maintains its own LRU.
+
+<ProbeNote>Two patterns make-or-break the answer: (1) the hash map values are *nodes*, not values, so you can find the list position in O(1); (2) the doubly-linked list with sentinels makes every operation branch-free O(1). The complexity table and the "why not `LinkedHashMap`" answer are the senior-level touches.</ProbeNote>

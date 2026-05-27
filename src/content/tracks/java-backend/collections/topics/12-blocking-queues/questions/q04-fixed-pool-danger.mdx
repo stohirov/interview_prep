@@ -1,0 +1,100 @@
+**`Executors.newFixedThreadPool(n)` uses an unbounded `LinkedBlockingQueue`. If tasks arrive faster than they're processed, the queue grows without limit — eventually `OutOfMemoryError`, or so much GC pressure that the service becomes unresponsive long before that. The pool also can't propagate backpressure to upstream producers because submissions never block or fail.**
+
+## The actual source
+
+```java
+public static ExecutorService newFixedThreadPool(int nThreads) {
+    return new ThreadPoolExecutor(
+        nThreads, nThreads,
+        0L, TimeUnit.MILLISECONDS,
+        new LinkedBlockingQueue<Runnable>()   // <-- UNBOUNDED
+    );
+}
+```
+
+`LinkedBlockingQueue` with no capacity argument defaults to `Integer.MAX_VALUE`. For practical purposes — unlimited.
+
+## What goes wrong
+
+```
+incoming rate:  1000 tasks/sec
+process rate:    500 tasks/sec   (8 threads, ~16ms per task)
+```
+
+Queue grows by 500 tasks/sec. Each `Runnable` ≈ a few hundred bytes plus closures over captured state — easily several KB. In an hour, that's millions of queued tasks, gigabytes of heap. Symptoms:
+
+1. **Heap fills.** Eventually `OutOfMemoryError: Java heap space`.
+2. **GC pauses lengthen.** Old-gen fills with task objects → frequent full GCs → throughput collapses.
+3. **Latency for downstream consumers explodes.** Tasks sit in queue minutes or hours before running.
+4. **No upstream signal.** `submit()` always returns immediately — the producer has no idea anything is wrong.
+
+The bug is usually invisible in tests (low load) and only fires in production under burst or sustained traffic.
+
+## The fix: bounded queue + rejection policy
+
+```java
+ThreadPoolExecutor pool = new ThreadPoolExecutor(
+    8, 8,
+    0L, TimeUnit.MILLISECONDS,
+    new ArrayBlockingQueue<>(256),         // bounded
+    new ThreadFactoryBuilder().setNameFormat("worker-%d").build(),
+    new ThreadPoolExecutor.CallerRunsPolicy()  // backpressure
+);
+```
+
+Three things change:
+
+1. **Bounded queue (256).** Hard cap on memory used by pending tasks.
+2. **Rejection policy.** When pool + queue are both saturated, the executor must do *something* with the new task — drop, throw, run inline, etc.
+3. **Backpressure path.** `CallerRunsPolicy` runs the task on the submitter's thread, which slows the producer to the pool's actual throughput.
+
+## Choosing a rejection policy
+
+| Policy                  | When to use                                                              |
+|-------------------------|--------------------------------------------------------------------------|
+| `AbortPolicy` (default) | API-style services where you can return 503 to the caller.               |
+| `CallerRunsPolicy`      | Internal pipelines where the caller can safely take the work.            |
+| `DiscardPolicy`         | Telemetry, logs, fire-and-forget where dropping is acceptable.           |
+| `DiscardOldestPolicy`   | Latest-value caches where newer tasks supersede older ones.              |
+| Custom                  | Log + metric + drop, log + retry queue, etc.                             |
+
+```java
+RejectedExecutionHandler handler = (task, executor) -> {
+    metrics.counter("pool.rejected").increment();
+    log.warn("pool saturated, dropping task");
+    // optionally: secondary slower queue, dead-letter, etc.
+};
+```
+
+## Worked example: detecting saturation
+
+Add monitoring so you *see* the queue depth before you OOM:
+
+```java
+ThreadPoolExecutor pool = ...;
+Gauge.builder("pool.queue.size", pool, p -> p.getQueue().size())
+     .register(meterRegistry);
+Gauge.builder("pool.active", pool, ThreadPoolExecutor::getActiveCount)
+     .register(meterRegistry);
+```
+
+Alert when `queue.size` approaches capacity. Saturation should be a known, measured event — not a 3am OOM page.
+
+## Virtual threads (Java 21+)
+
+For workloads that are dominantly I/O-bound, the entire pattern can be replaced:
+
+```java
+try (var exec = Executors.newVirtualThreadPerTaskExecutor()) {
+    // 1 virtual thread per task, cheap to create
+    for (Request r : requests) exec.submit(() -> handle(r));
+}
+```
+
+Virtual threads sidestep the "fixed pool + unbounded queue" trap by making thread creation cheap and blocking-aware. But you still need an explicit `Semaphore` or rate limiter to bound concurrency upstream.
+
+<Callout kind="danger" title="Audit your service for newFixedThreadPool">
+Search every service for `Executors.newFixedThreadPool` and `Executors.newSingleThreadExecutor` — both ship with unbounded queues. Replace with explicit `ThreadPoolExecutor` constructions before they bite you in production.
+</Callout>
+
+<ProbeNote>Probe: "Why doesn't `LinkedBlockingQueue` default to a small bound?" Library backward compatibility — the original 1.5 contract was unbounded, and changing it would break code. The lesson: defaults aren't always safe; read the constructor's actual parameters.</ProbeNote>

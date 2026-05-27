@@ -1,0 +1,78 @@
+**`HashSet` is just a thin wrapper around a `HashMap`.** Every element you `add` becomes a key in the internal map, and every value is a shared dummy sentinel `Object` named `PRESENT`. This means the entire `HashSet` API delegates to `HashMap`, and inherits its performance, threading, and ordering characteristics.
+
+## The Implementation
+
+If you open `java.util.HashSet` in the JDK source, you'll find something close to this:
+
+```java
+public class HashSet<E> extends AbstractSet<E>
+        implements Set<E>, Cloneable, java.io.Serializable {
+
+    private transient HashMap<E, Object> map;
+
+    // Dummy value shared by all keys.
+    private static final Object PRESENT = new Object();
+
+    public HashSet() {
+        map = new HashMap<>();
+    }
+
+    public boolean add(E e) {
+        return map.put(e, PRESENT) == null;
+    }
+
+    public boolean contains(Object o) {
+        return map.containsKey(o);
+    }
+
+    public boolean remove(Object o) {
+        return map.remove(o) == PRESENT;
+    }
+
+    public int size() { return map.size(); }
+    public Iterator<E> iterator() { return map.keySet().iterator(); }
+}
+```
+
+That's nearly the whole class. Everything interesting — hashing, bucketing, treeification at high collision counts, resize policy — happens in `HashMap`.
+
+## Why a Dummy Value?
+
+The framework could have built `HashSet` from scratch with its own hash table, but reusing `HashMap` saves thousands of lines and consolidates tuning. `PRESENT` is a single shared object — it costs nothing per element beyond the value-reference slot already in each `HashMap.Node`.
+
+## Consequences You Inherit
+
+Because `HashSet` is `HashMap`-backed, you inherit:
+
+- **`O(1)` average** for `add`, `remove`, `contains`; **`O(n)` worst case** if all elements collide.
+- **Treeified buckets**: since Java 8, when a single bucket has more than 8 entries (and the table is large enough), it converts to a red-black tree to bound worst-case lookup at `O(log n)`.
+- **Default capacity 16**, default load factor 0.75 — resize doubles the table when `size > capacity * loadFactor`.
+- **One null allowed** (`HashMap` allows one null key).
+- **Not thread-safe** — same as `HashMap`.
+- **Fail-fast iterator** — modCount-based.
+- **Unordered iteration** — iteration order depends on hash, capacity, and insertion history.
+
+## Sizing for Performance
+
+Because growth involves rehashing every element into a larger table, pre-sizing matters for large sets:
+
+```java
+// Bad: 13 resizes for 1M elements
+Set<Long> s = new HashSet<>();
+for (long i = 0; i < 1_000_000; i++) s.add(i);
+
+// Good: one allocation, sized to load factor
+Set<Long> s = HashMap.newHashSet(1_000_000);   // Java 19+
+// Or pre-Java 19:
+Set<Long> s = new HashSet<>((int) (1_000_000 / 0.75f) + 1);
+```
+
+`HashMap.newHashSet(n)` (added in Java 19) is the modern, correct way — it accounts for the load factor for you.
+
+<Callout kind="info" title="LinkedHashSet uses LinkedHashMap">
+By the same trick, `LinkedHashSet` is a `LinkedHashMap` with `PRESENT` values, inheriting insertion-order iteration "for free."
+</Callout>
+
+<ProbeNote>
+The interviewer is testing whether you've ever actually opened the JDK source. Strong answers name **`PRESENT`** explicitly, mention that all hash-table behavior (treeified buckets, load factor 0.75, default capacity 16) is inherited from `HashMap`, and reference `HashMap.newHashSet` as the modern sizing tool. A bonus point: noting that `LinkedHashSet` follows the same pattern with `LinkedHashMap`.
+</ProbeNote>

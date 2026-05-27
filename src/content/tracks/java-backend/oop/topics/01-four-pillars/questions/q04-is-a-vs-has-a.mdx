@@ -1,0 +1,64 @@
+**Use inheritance only when the subtype genuinely *is a* substitutable kind of the supertype — passing Liskov's test in every method.** For everything else, prefer composition (`has-a`), because it composes behavior without inheriting the rigidity, fragility, and accidental method exposure that come with `extends`.
+
+## The Liskov test
+
+If `B extends A`, then anywhere code expects an `A`, you must be able to pass a `B` without surprising the caller. If you can't, the relationship is not really `is-a` — it's "looks similar," which isn't enough.
+
+The classic violation: `Square extends Rectangle`.
+
+```java
+class Rectangle {
+    protected int w, h;
+    public void setWidth(int w)  { this.w = w; }
+    public void setHeight(int h) { this.h = h; }
+    public int area() { return w * h; }
+}
+
+class Square extends Rectangle {
+    @Override public void setWidth(int w)  { this.w = w; this.h = w; }
+    @Override public void setHeight(int h) { this.w = h; this.h = h; }
+}
+
+void assertArea(Rectangle r) {
+    r.setWidth(5); r.setHeight(4);
+    assert r.area() == 20;       // passes for Rectangle, fails for Square
+}
+```
+
+A `Square` *is not* a substitutable `Rectangle`, even though every square is geometrically a rectangle. Inheritance was the wrong tool.
+
+## When `has-a` wins
+
+The same domain modeled with composition:
+
+```java
+public final class Stack<E> {
+    private final List<E> items = new ArrayList<>();   // has-a List
+    public void push(E e) { items.add(e); }
+    public E pop()        { return items.remove(items.size() - 1); }
+    public int size()     { return items.size(); }
+}
+```
+
+A `Stack` *has a* `List`. It doesn't extend `ArrayList`, so it doesn't accidentally inherit `add(int, E)` (which would let callers insert into the middle and break the LIFO invariant). Composition lets us expose only the four operations a stack should support.
+
+## Practical decision rubric
+
+- **`is-a` (inherit)** only when:
+  1. The subtype satisfies every supertype contract (Liskov).
+  2. The base was *designed* for inheritance (documented protected hooks).
+  3. You're inside a closed family — sealed hierarchy, framework callback.
+- **`has-a` (compose)** when:
+  1. You want to reuse behavior but not the API.
+  2. The relationship is "uses" or "delegates to," not "is a kind of."
+  3. The base class isn't yours and isn't documented for extension.
+
+## Java's strongest hint
+
+The JDK itself prefers composition. `Properties extends Hashtable` is one of the most-cited mistakes in the platform — `properties.put(nonStringKey, ...)` compiles fine and silently corrupts the file format. Bloch's *Effective Java* item 18 ("Favor composition over inheritance") was written about exactly this kind of pain.
+
+<Callout kind="tip" title="Default to composition">
+If you can't articulate why inheritance is the right tool for *this* design, the answer is composition. Inheritance is a commitment you cannot reverse without breaking every subclass.
+</Callout>
+
+<ProbeNote>The interviewer wants the Liskov test on your lips and at least one concrete violation in your back pocket (Square/Rectangle, Stack/Vector, Properties/Hashtable all work). Strong candidates volunteer that inheritance also breaks encapsulation — the subclass depends on superclass internals — which is the deeper reason "favor composition" is the default.</ProbeNote>

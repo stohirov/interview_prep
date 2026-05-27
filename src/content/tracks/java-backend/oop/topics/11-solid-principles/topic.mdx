@@ -1,0 +1,38 @@
+**SOLID is the senior developer's shorthand** for five design principles that, applied together, produce code that survives changing requirements. They're not laws of nature — they're heuristics for keeping the cost of change low. Robert Martin coined the acronym, but the underlying ideas come from Parnas, Liskov, Meyer, and Bertrand. The principle most candidates fumble is L (Liskov), and it's also the deepest.
+
+## The five, in one sentence each
+
+- **S — Single Responsibility:** A class should have one and only one reason to change.
+- **O — Open/Closed:** Classes should be *open for extension* (you can add behavior) but *closed for modification* (you don't edit existing code to do so).
+- **L — Liskov Substitution:** A subtype must be usable everywhere its supertype is used, without surprising the caller.
+- **I — Interface Segregation:** Many small, client-specific interfaces beat one fat general-purpose one.
+- **D — Dependency Inversion:** Depend on abstractions, not on concretions. High-level modules shouldn't import low-level modules — both should depend on interfaces.
+
+## Why the acronym matters
+
+Each letter targets a different axis of change:
+
+- **S** keeps responsibilities aligned with *who asks for changes* (the billing team changes billing code, the reporting team changes reporting code — not the same class).
+- **O** prevents regressions: existing tested code stays untouched when you add a new feature.
+- **L** preserves polymorphism: if subtypes break the parent's contract, every call site needs to know which subtype it has — and polymorphism is dead.
+- **I** keeps clients decoupled from methods they don't use, so changes to one client don't ripple to others.
+- **D** breaks the compile-time dependency graph, enabling testing (mocks) and runtime swapping (DI).
+
+## The principle most often violated
+
+**LSP.** The classic Rectangle/Square trap (q03) is the textbook case, but real-world LSP violations are subtler: a `SqsQueue` that swallows `InterruptedException` while its `Queue` interface promises to propagate it; an `ArrayList.subList` that throws `ConcurrentModificationException` when the parent is structurally modified; a `MagicalCache` whose `get` has side effects. Each of these breaks substitutability and forces callers to know the concrete type.
+
+## How to use SOLID in practice
+
+It's a checklist, not a constitution. When reviewing code, ask:
+
+1. If a requirement changes, how many files do I edit? (S, O)
+2. Could a teammate use this subclass somewhere a base type is expected and get bitten? (L)
+3. Does this interface force implementers to support methods they don't care about? (I)
+4. Can I test this class without spinning up its real dependencies? (D)
+
+If you can't answer cleanly, refactor.
+
+<Callout kind="tip" title="SOLID vs YAGNI">
+Don't apply SOLID to throwaway scripts. Each principle has a cost — extra interfaces, extra files, indirection. The payoff is in code that changes often. For one-shot code, skip it.
+</Callout>

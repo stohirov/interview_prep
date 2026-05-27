@@ -1,0 +1,95 @@
+**`Collections.synchronizedMap` wraps every method in `synchronized(mutex)` — every operation serializes through a single lock, and iteration requires you to lock manually. `ConcurrentHashMap` allows concurrent reads with no locking and concurrent writes to different buckets, plus atomic compound operations via `compute` / `merge`.**
+
+## What `Collections.synchronizedMap` actually does
+
+```java
+public V get(Object key) {
+    synchronized (mutex) { return m.get(key); }
+}
+public V put(K key, V value) {
+    synchronized (mutex) { return m.put(key, value); }
+}
+// ... same pattern for every method
+```
+
+It's a thin wrapper. Every call grabs one mutex. Two threads cannot read in parallel, let alone write. The wrapped map is still a plain `HashMap` underneath.
+
+## Comparison
+
+| Property                          | `synchronizedMap`        | `ConcurrentHashMap`           |
+|-----------------------------------|--------------------------|-------------------------------|
+| Lock granularity                  | Whole map, single mutex  | Per bucket (`synchronized` on head) or CAS |
+| Concurrent reads                  | No — serialized          | Yes — lock-free               |
+| Concurrent writes                 | No                       | Yes — different buckets       |
+| Null keys/values                  | Allowed (if backing map allows) | Forbidden              |
+| Iteration                         | Fail-fast; must lock externally | Weakly consistent; no extra locking |
+| Atomic compound ops               | Manual `synchronized` block | Built-in `compute`, `merge` |
+| Best workload                     | Rare access; legacy code | High concurrency, dominant reads |
+
+## Iteration is the killer footgun
+
+`synchronizedMap` iteration *requires* external synchronization:
+
+```java
+Map<K, V> m = Collections.synchronizedMap(new HashMap<>());
+// ...
+synchronized (m) {                       // YOU must hold the lock
+    for (Map.Entry<K, V> e : m.entrySet()) {
+        ...
+    }
+}
+```
+
+Forget the `synchronized(m)` block and you get `ConcurrentModificationException` the moment another thread writes. With CHM you just iterate.
+
+## Atomic compound operations
+
+The other big win is in CHM. Consider "increment a counter for key k":
+
+```java
+// synchronizedMap — must lock around two ops
+synchronized (m) {
+    Integer cur = m.get(k);
+    m.put(k, cur == null ? 1 : cur + 1);
+}
+
+// ConcurrentHashMap — built-in, atomic per bucket
+chm.merge(k, 1, Integer::sum);
+```
+
+Or "cache-on-miss":
+
+```java
+// synchronizedMap
+synchronized (m) {
+    V v = m.get(k);
+    if (v == null) {
+        v = expensiveLoad(k);
+        m.put(k, v);
+    }
+    return v;
+}
+
+// ConcurrentHashMap
+return chm.computeIfAbsent(k, this::expensiveLoad);
+```
+
+CHM holds the bucket lock for the lambda's duration — atomic across check + insert.
+
+## When `synchronizedMap` is still OK
+
+- Legacy code that already uses it and isn't hot.
+- You need `null` keys/values *and* thread safety (rare, smelly).
+- You want a thread-safe wrapper around an `EnumMap`, `LinkedHashMap` (LRU cache), or `TreeMap` (where CHM doesn't fit).
+
+For `LinkedHashMap`-as-LRU-cache, you typically *do* need `synchronizedMap` plus external locking around iteration, because there's no concurrent LRU map in the JDK.
+
+## What about `Hashtable`?
+
+Same as `synchronizedMap`: one mutex per operation. Predates the Collections framework. Don't use it in new code.
+
+<Callout kind="tip" title="Migration heuristic">
+If you see `Collections.synchronizedMap` in code where the map is accessed from more than one thread per second, switch to `ConcurrentHashMap`. The API is mostly drop-in (no nulls), and the throughput difference under contention is often 10x or more.
+</Callout>
+
+<ProbeNote>Probe: "When would CHM be *worse* than synchronizedMap?" Single-threaded code — CHM's extra machinery (volatile reads, counter cells, treeification checks) adds overhead. In a single-threaded path, plain `HashMap` beats both. Choose by actual contention, not by paranoia.</ProbeNote>

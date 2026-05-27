@@ -1,0 +1,48 @@
+The default initial capacity is **16** and the default load factor is **0.75**. Together they mean the first resize happens at size 12 (`16 * 0.75`).
+
+## Why 16?
+
+Capacity must be a power of two so the index calculation `(n - 1) & hash` works as a fast bit mask. Sixteen is small enough to be cheap for tiny maps but big enough that a handful of inserts don't immediately trigger a resize. The constant lives in `HashMap` as:
+
+```java
+static final int DEFAULT_INITIAL_CAPACITY = 1 << 4; // 16
+static final float DEFAULT_LOAD_FACTOR = 0.75f;
+```
+
+## Why 0.75?
+
+The load factor is a **space/time tradeoff**:
+
+- Lower (e.g. 0.5) → fewer collisions, more wasted slots, more frequent resizes.
+- Higher (e.g. 1.0) → denser table, longer chains, slower lookups.
+
+Java's choice of 0.75 comes from analysis of bucket occupancy under random hashing. With a good hash function, bucket sizes follow a **Poisson distribution**. At load factor 0.75 the mean λ ≈ 0.5, and the source comments give the probability of a bucket containing exactly k entries:
+
+```text
+0:    0.60653066
+1:    0.30326533
+2:    0.07581633
+3:    0.01263606
+4:    0.00157952
+5:    0.00015795
+6:    0.00001316
+7:    0.00000094
+8:    0.00000006
+```
+
+So a bucket of 8+ — the treeify threshold — occurs with probability under one in ten million. The map stays list-based almost always, and trees are reserved for genuinely bad keys (or attack inputs).
+
+## Tuning
+
+If you know the final size up front, pre-size to avoid resizes:
+
+```java
+// expecting ~1000 entries: capacity = 1000 / 0.75 = ~1334, rounds up to 2048
+Map<String, User> users = new HashMap<>(1334);
+```
+
+<Callout kind="tip" title="Java 19+">
+`HashMap.newHashMap(int numMappings)` does this math for you — pass the expected entry count, not capacity.
+</Callout>
+
+<ProbeNote>The interviewer is checking that you understand 0.75 is not arbitrary — it's tuned so the Poisson tail makes treeification effectively never happen with a good hash. Bonus points for mentioning `newHashMap` or pre-sizing.</ProbeNote>

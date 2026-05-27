@@ -1,0 +1,60 @@
+**`HashSet` is fastest with no ordering, `LinkedHashSet` preserves insertion order at a small cost, and `TreeSet` keeps elements sorted at the cost of `O(log n)` operations.** Pick based on which property you actually need — defaulting to `HashSet` is almost always right.
+
+## Side-by-Side
+
+| Aspect                  | `HashSet`                       | `LinkedHashSet`                          | `TreeSet`                              |
+| ----------------------- | ------------------------------- | ---------------------------------------- | -------------------------------------- |
+| Backing structure       | `HashMap`                       | `LinkedHashMap` (hash + linked list)     | `TreeMap` (red-black tree)             |
+| Iteration order         | Unspecified, may change         | **Insertion order**                      | **Sorted** (Comparable / Comparator)   |
+| `add`/`remove`/`contains` | O(1) average, O(log n) worst (treeified) | O(1) average                       | **O(log n)**                           |
+| Allows null             | Yes, one                        | Yes, one                                 | **No** (NPE — can't compare null)      |
+| Element requirement     | Sane `equals`/`hashCode`        | Sane `equals`/`hashCode`                 | `Comparable` or supplied `Comparator`  |
+| Memory per element      | ~32–48 bytes (node)             | +16 bytes (two extra references)         | ~40+ bytes (tree node with parent/left/right + color) |
+| Implements              | `Set`                           | `Set` (insertion-ordered)                | `NavigableSet`, `SortedSet`            |
+| Reverse iteration       | No                              | No (manual)                              | **Yes** — `descendingSet`              |
+| Range queries           | No                              | No                                       | **Yes** — `subSet`, `headSet`, `tailSet` |
+| Thread-safe             | No                              | No                                       | No (`ConcurrentSkipListSet` exists)    |
+
+## Quick Code
+
+```java
+Set<String> hs = new HashSet<>();
+hs.add("c"); hs.add("a"); hs.add("b");
+// Iteration order: unspecified — could be [a, b, c] or [c, a, b] or anything.
+
+Set<String> lhs = new LinkedHashSet<>();
+lhs.add("c"); lhs.add("a"); lhs.add("b");
+// Iteration: [c, a, b]  — insertion order
+
+NavigableSet<String> ts = new TreeSet<>();
+ts.add("c"); ts.add("a"); ts.add("b");
+// Iteration: [a, b, c]  — sorted
+
+ts.first();           // "a"
+ts.ceiling("b");      // "b"
+ts.higher("b");       // "c"
+ts.subSet("a", "c");  // [a, b]
+ts.descendingSet();   // [c, b, a]
+```
+
+## When to Choose Which
+
+- **Default to `HashSet`**. If you just need "membership test, no duplicates, fast" — done.
+- **`LinkedHashSet`** when iteration order must be **predictable and stable** (e.g., deduplicating while preserving insertion order, or building a deterministic test fixture).
+- **`TreeSet`** when you need **sorted iteration**, **range queries** (`subSet`), or **nearest-neighbor lookups** (`floor`/`ceiling`). Also when your elements have a natural ordering you want to leverage (scheduling, leaderboards).
+- **`EnumSet`** when the elements are an enum type — orders of magnitude faster than the others.
+
+## Subtle TreeSet Gotcha
+
+`TreeSet` uses **`compareTo` (or the `Comparator`) to determine equality**, not `equals`. If your comparator returns 0 for two objects that are not `equals`, the set treats them as equal. This is a famous source of "I added two distinct objects and only one is there" bugs.
+
+```java
+NavigableSet<String> ci = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+ci.add("Hello");
+ci.add("HELLO");
+System.out.println(ci.size());  // 1 — comparator says they're equal
+```
+
+<ProbeNote>
+The interviewer wants to see you can map a *requirement* to the right `Set` implementation, not just recite their names. Strong candidates explicitly say "default to `HashSet`" and only mention `LinkedHashSet`/`TreeSet` when a specific property is needed. The killer follow-up is the **`TreeSet` uses `compareTo` for equality** gotcha — knowing that earns serious credibility.
+</ProbeNote>

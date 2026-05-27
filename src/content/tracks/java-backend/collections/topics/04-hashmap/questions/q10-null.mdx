@@ -1,0 +1,63 @@
+`HashMap` allows **one null key** and **any number of null values**. The null key is stored at bucket 0 with a hash of 0.
+
+## The hash function for null
+
+The very first line of `HashMap.hash` short-circuits null:
+
+```java
+static final int hash(Object key) {
+    int h;
+    return (key == null) ? 0 : (h = key.hashCode()) ^ (h >>> 16);
+}
+```
+
+So the null key always hashes to 0, and `(n - 1) & 0 == 0`, meaning it always lives at index 0.
+
+## Null values are unrestricted
+
+There's nothing special about a null value — it's just a reference stored in `Node.value`. You can have many entries with null values, no problem.
+
+```java
+Map<String, String> m = new HashMap<>();
+m.put(null, "first");
+m.put(null, "second");       // overwrites; one null key only
+m.put("a", null);
+m.put("b", null);
+
+System.out.println(m.size());     // 3 (null, a, b)
+System.out.println(m.get(null));  // second
+System.out.println(m.get("a"));   // null
+```
+
+## The `containsKey` trap
+
+Because `get` returns null both when the key is absent **and** when its value is null, you cannot distinguish those cases by inspecting the return value:
+
+```java
+m.put("present", null);
+m.get("present"); // null
+m.get("missing"); // null
+
+m.containsKey("present"); // true  -- the right way to check
+m.containsKey("missing"); // false
+```
+
+Use `containsKey` or `getOrDefault` to disambiguate, or just avoid null values entirely (often better — `Optional` makes intent explicit).
+
+## How other maps compare
+
+| Map                     | Null key   | Null value |
+| ----------------------- | ---------- | ---------- |
+| `HashMap`               | one        | many       |
+| `LinkedHashMap`         | one        | many       |
+| `TreeMap`               | **no**     | many       |
+| `Hashtable`             | **no**     | **no**     |
+| `ConcurrentHashMap`     | **no**     | **no**     |
+
+`TreeMap` rejects null keys because it has to call `compareTo` on them. `ConcurrentHashMap` rejects both nulls because `get` returning null would otherwise be ambiguous in concurrent code (you can't safely `containsKey`-then-`get`).
+
+<Callout kind="tip" title="Avoid null in maps">
+The cleanest modern API is to disallow null values. If absence is a meaningful state, model it with `Optional<V>` or a sentinel. It removes a whole category of bugs and lets you use `ConcurrentHashMap` later without refactoring.
+</Callout>
+
+<ProbeNote>The probe is twofold: (1) do you know the rule, and (2) do you know the trap that `get(key) == null` is ambiguous? Bonus points for contrasting with `ConcurrentHashMap` and explaining *why* it disallows null values.</ProbeNote>

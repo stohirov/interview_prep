@@ -1,0 +1,70 @@
+`java.util.Stack` is a legacy class from Java 1.0 that **extends `Vector`** — meaning every operation is `synchronized` (slow, unnecessary for single-threaded use) and it inherits methods that violate stack semantics (`get(int)`, `add(int, E)`). The modern replacement is `ArrayDeque` (or `Deque<E>` more generally), used via `push`/`pop`/`peek`.
+
+## Why Stack is broken
+
+```java
+public class Stack<E> extends Vector<E> {
+    public synchronized E push(E item) { ... }
+    public synchronized E pop() { ... }
+    public synchronized E peek() { ... }
+    // inherits from Vector:
+    //   E get(int index)
+    //   void add(int index, E element)
+    //   E set(int index, E element)
+    //   ... 30+ more
+}
+```
+
+Two problems:
+
+1. **Every operation acquires a lock** even in single-threaded code. Vector's synchronization predates the modern collections framework's "synchronize at higher level" philosophy.
+2. **You can violate LIFO** by calling inherited methods. `stack.add(0, x)` inserts at the bottom; `stack.get(5)` reaches into the middle. A type-system Stack isn't a stack.
+
+## The replacement: ArrayDeque
+
+```java
+Deque<Integer> stack = new ArrayDeque<>();
+stack.push(1);   // top: 1
+stack.push(2);   // top: 2, then 1
+int top = stack.pop();  // 2
+int peek = stack.peek(); // 1
+```
+
+- Unsynchronized — fast for single-threaded use.
+- O(1) amortized for push/pop/peek.
+- Circular buffer, cache-friendly (no per-node allocation).
+- No mid-stack access — Deque's API surface is exactly what a stack needs.
+
+For multi-threaded LIFO, use `ConcurrentLinkedDeque` or `LinkedBlockingDeque`.
+
+## Performance comparison
+
+```java
+// Single-threaded benchmark, 10M push/pop pairs
+java.util.Stack:    ~ 350 ms (synchronized overhead)
+ArrayDeque:         ~  85 ms (no locking)
+```
+
+The 4x speedup comes from skipping uncontested lock acquisition and from the circular buffer's better cache behavior.
+
+## Why hasn't Stack been removed?
+
+Backward compatibility — countless tutorials, textbooks, and legacy codebases use `Stack`. The Javadoc since Java 1.6 explicitly says:
+
+> A more complete and consistent set of LIFO stack operations is provided by the `Deque` interface and its implementations, which should be used in preference to this class.
+
+But the class itself remains.
+
+## Beware: `Vector` and `Hashtable` are siblings
+
+All three (`Vector`, `Hashtable`, `Stack`) are legacy synchronized classes from Java 1.0. Modern equivalents:
+
+- `Vector` to `ArrayList` (single-threaded) or `CopyOnWriteArrayList` (concurrent, read-heavy).
+- `Hashtable` to `HashMap` (single-threaded) or `ConcurrentHashMap` (concurrent).
+- `Stack` to `ArrayDeque` (single-threaded) or `ConcurrentLinkedDeque` (concurrent).
+
+<Callout kind="warn" title="Stack iteration order is bottom-to-top">
+Just to add insult, `Stack.iterator()` walks from bottom (oldest pushed) to top (most recent). Most people expect top-to-bottom. `ArrayDeque.iterator()` walks from head (top of the stack, last pushed) to tail (bottom), matching `pop` order.
+</Callout>
+
+<ProbeNote>Probe: "When would you still use java.util.Stack?" (Legacy API compatibility only — never new code.) "What about Deque vs ArrayDeque as the variable type?" (Code to the interface, instantiate the concrete: `Deque<E> stack = new ArrayDeque<>();`.) "Is ArrayDeque thread-safe?" (No — for concurrent stacks use `ConcurrentLinkedDeque` or `LinkedBlockingDeque`.)</ProbeNote>

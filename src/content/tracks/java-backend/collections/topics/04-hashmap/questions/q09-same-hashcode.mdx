@@ -1,0 +1,66 @@
+Both entries end up in the **same bucket**, and `HashMap` uses `equals()` to tell them apart. They coexist as separate entries — `put` does not overwrite, `get` returns the value of whichever key actually `equals` the query key.
+
+## The contract
+
+The Java contract requires:
+
+1. If `a.equals(b)` then `a.hashCode() == b.hashCode()`.
+2. The reverse is **not** required: two unequal objects may share a hash code.
+
+`HashMap` relies on (1) to find candidates fast; it relies on `equals` to confirm the match.
+
+## What happens inside
+
+When `put(k, v)` lands in a non-empty bucket, the map walks the chain (or descends the tree) comparing each existing node:
+
+```java
+if (e.hash == hash && (e.key == key || (key != null && key.equals(e.key)))) {
+    // match - replace value
+}
+```
+
+Two checks: same spread hash AND (identity OR `equals`). Identity (`==`) is a fast early exit; `equals` is the authoritative test.
+
+## Worked example
+
+```java
+record Key(String s) {
+    @Override public int hashCode() { return 42; } // intentionally constant
+    // equals/hashCode auto-generated for records, but we override hashCode here
+}
+
+Map<Key, String> m = new HashMap<>();
+m.put(new Key("a"), "alpha");
+m.put(new Key("b"), "beta");
+m.put(new Key("a"), "ALPHA");   // matches Key("a") via equals -> replaces
+
+System.out.println(m.size());                  // 2
+System.out.println(m.get(new Key("a")));       // ALPHA
+System.out.println(m.get(new Key("b")));       // beta
+```
+
+All three puts go to the same bucket (hash is 42 for everything), but `equals` keeps them logically distinct.
+
+## Performance impact
+
+With many same-hash keys, the bucket chain grows. Once it hits 8 (and the table is at least 64), it's promoted to a red-black tree, so the worst-case `get` is O(log k) inside the bucket — bounded.
+
+## The danger
+
+If you override `equals` but **not** `hashCode`, equal keys land in different buckets and `get` won't find them. The standard advice — "always override both together" — exists exactly to keep `HashMap` correct.
+
+```java
+// BROKEN: equal Users hash to different buckets
+record User(long id) {
+    @Override public boolean equals(Object o) {
+        return o instanceof User u && u.id == id;
+    }
+    // no hashCode override -> uses Object.hashCode() (identity)
+}
+```
+
+<Callout kind="warn" title="Records are safe by default">
+Java records auto-generate consistent `equals` and `hashCode` from their components. The example above only breaks because we *explicitly* overrode equals and not hashCode.
+</Callout>
+
+<ProbeNote>The interviewer wants to hear the contract: same hash means same bucket, equals decides identity, equals/hashCode must agree. Bonus: mention treeification protects worst-case behavior when collisions pile up.</ProbeNote>

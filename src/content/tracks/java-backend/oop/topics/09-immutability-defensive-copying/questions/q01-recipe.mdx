@@ -1,0 +1,39 @@
+**Effective Java Item 17** lists five rules. Miss any one of them and the class is mutable in some sneaky way that will eventually bite you.
+
+## The five rules
+
+1. **Don't provide methods that modify state.** No setters, no `add`/`remove`, no `void` mutators.
+2. **Ensure the class can't be extended.** Mark it `final`, or make the constructor private and expose static factories.
+3. **Make all fields `final`.** Single assignment, plus the JMM safe-publication guarantee for properly constructed objects.
+4. **Make all fields `private`.** Even with `final`, a `public final Date` leaks the referent so the caller can mutate it.
+5. **Ensure exclusive access to mutable components.** Defensive copy on the way in (constructor) and on the way out (accessor).
+
+## `Period` with every rule applied
+
+```java
+public final class Period {                  // Rule 2: final
+    private final Date start;                // Rules 3 + 4: private final
+    private final Date end;
+
+    public Period(Date start, Date end) {
+        this.start = new Date(start.getTime());  // Rule 5: copy IN
+        this.end   = new Date(end.getTime());
+        if (this.start.after(this.end))          // validate AFTER copy
+            throw new IllegalArgumentException(start + " after " + end);
+    }
+
+    public Date start() { return new Date(start.getTime()); } // Rule 5: copy OUT
+    public Date end()   { return new Date(end.getTime()); }
+    // Rule 1: no setStart, no setEnd, no shift(long delta)
+}
+```
+
+## What each rule actually buys you
+
+<Callout kind="info" title="Why final the class?">
+Without `final`, a malicious subclass can override an accessor to return the live field, or add a mutable component. The only escape hatch: a private constructor + static factories — that's what `BigInteger` and `LocalDate` do.
+</Callout>
+
+A "mostly immutable" class with one forgotten rule is *worse* than a frankly mutable one — the rest of your codebase will trust the immutability you advertised and skip locks or defensive copies of its own.
+
+<ProbeNote>The interviewer wants the five-bullet list verbatim, then a working code sample. The trap question that often follows: "What about a derived field that's computed lazily and cached?" — that's still allowed (`String.hashCode()` does it) as long as the cached field is never observable as different values across threads. The data race on a non-final `int hash` is benign because the only racing write writes the same value.</ProbeNote>

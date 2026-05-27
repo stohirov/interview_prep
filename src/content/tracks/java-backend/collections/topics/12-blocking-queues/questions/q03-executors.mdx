@@ -1,0 +1,80 @@
+**The `Executors` factory methods each wire a `ThreadPoolExecutor` to a specific `BlockingQueue`. Knowing which queue each factory uses is essential — it's the difference between a healthy service and a heap OOM.**
+
+## The mapping
+
+| Factory                                       | Queue                            | Bounded? | Why                                                |
+|-----------------------------------------------|----------------------------------|----------|----------------------------------------------------|
+| `Executors.newSingleThreadExecutor()`         | `LinkedBlockingQueue<>()`        | NO       | One worker, tasks queue up unbounded               |
+| `Executors.newFixedThreadPool(n)`             | `LinkedBlockingQueue<>()`        | NO       | n workers, all overflow into unbounded queue       |
+| `Executors.newCachedThreadPool()`             | `SynchronousQueue<>()`           | 0 cap    | No queueing — spin up a thread per task            |
+| `Executors.newScheduledThreadPool(n)`         | `DelayedWorkQueue` (internal)    | unbounded | Tasks held until their scheduled time             |
+| `Executors.newWorkStealingPool()`             | per-thread deques inside `ForkJoinPool` | N/A | Work-stealing scheduler                           |
+
+## The danger pattern
+
+```java
+ExecutorService pool = Executors.newFixedThreadPool(8);
+
+while (true) {
+    pool.submit(() -> handle(receive()));  // accepts forever, even under load
+}
+```
+
+If `handle()` takes longer than tasks arrive, the queue grows without bound. The JVM doesn't push back, doesn't reject, doesn't warn — it just consumes heap until OOM. By then GC pauses are catastrophic and your service is dead.
+
+## What `newCachedThreadPool` does differently
+
+```java
+new ThreadPoolExecutor(
+    0, Integer.MAX_VALUE,
+    60L, TimeUnit.SECONDS,
+    new SynchronousQueue<Runnable>()
+);
+```
+
+`SynchronousQueue` has zero capacity. Every `submit(task)` must hand the task directly to a thread:
+
+1. If an idle thread is calling `take()`, it grabs the task.
+2. Otherwise, since the queue can't hold the task, the pool **creates a new thread** (up to `Integer.MAX_VALUE`).
+
+This means `newCachedThreadPool` can grow to thousands of threads under load. Different failure mode (thread exhaustion / OOM from thread stacks) but same root cause: no upper bound.
+
+## `newScheduledThreadPool` and `DelayedWorkQueue`
+
+`ScheduledThreadPoolExecutor` uses an internal `DelayedWorkQueue` — a specialized heap of `RunnableScheduledFuture`. Workers `take()` the next ready task; tasks not yet due block the worker until their time. Also unbounded.
+
+## The right way to build a pool
+
+Build the executor explicitly, with eyes open:
+
+```java
+ThreadPoolExecutor pool = new ThreadPoolExecutor(
+    8,                            // core threads
+    16,                           // max threads
+    60L, TimeUnit.SECONDS,        // idle keep-alive (for non-core)
+    new ArrayBlockingQueue<>(1024), // BOUNDED queue
+    new ThreadFactoryBuilder().setNameFormat("worker-%d").build(),
+    new ThreadPoolExecutor.CallerRunsPolicy()   // backpressure
+);
+```
+
+`CallerRunsPolicy` makes the submitter thread execute the task itself when the pool and queue are saturated — natural rate-limiting. Other built-in policies:
+
+| Policy                       | Behavior                                              |
+|------------------------------|-------------------------------------------------------|
+| `AbortPolicy` (default)      | Throw `RejectedExecutionException`                    |
+| `CallerRunsPolicy`           | Submitter runs the task — applies backpressure        |
+| `DiscardPolicy`              | Silently drop the task                                |
+| `DiscardOldestPolicy`        | Drop the oldest queued task, then enqueue the new one |
+
+## Pool sizing rule of thumb
+
+- **CPU-bound work:** threads ≈ `Runtime.getRuntime().availableProcessors()`.
+- **I/O-bound work:** threads ≈ cores × (1 + wait/compute ratio). Often 50-200 for heavy I/O.
+- **Mixed:** profile. Don't guess.
+
+<Callout kind="warn" title="Project Loom changes the math">
+On Java 21+, virtual threads (`Thread.ofVirtual().start(...)` / `Executors.newVirtualThreadPerTaskExecutor()`) make blocking I/O cheap and remove most reasons to thread-pool I/O work. For blocking I/O specifically, prefer virtual threads. For CPU-bound work, a bounded `ThreadPoolExecutor` is still the right tool.
+</Callout>
+
+<ProbeNote>Probe: "What about `newSingleThreadExecutor` — same problem?" Yes — it wraps a `ThreadPoolExecutor(1, 1, 0L, MILLIS, new LinkedBlockingQueue<>())`. Single thread + unbounded queue = perfect OOM recipe under sustained load. Wrap with a bounded queue or use a custom executor.</ProbeNote>

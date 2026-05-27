@@ -1,0 +1,52 @@
+**Almost never.** This is a famous trick question — the honest answer is that you rarely should. Modern CPUs make `ArrayList` win even on workloads where Big-O analysis says `LinkedList` should be faster, because pointer chasing destroys cache locality and `LinkedList` allocates a node-per-element with high memory overhead.
+
+## The Theoretical Case for LinkedList
+
+In a vacuum, `LinkedList` looks attractive for:
+
+- Frequent **head insertion/removal** (`O(1)` vs `O(n)`).
+- Frequent **iterator-position removal** (`O(1)` per call).
+- Workloads dominated by adds at both ends.
+
+If those genuinely describe your code, you should still **prefer `ArrayDeque`** over `LinkedList` — same `O(1)` ends, plus contiguous storage and no per-element node overhead.
+
+## Why ArrayList Wins in Practice
+
+```text
+ArrayList memory layout: [a][b][c][d][e][f]...        (one cache line ~ 8-16 refs)
+LinkedList memory layout: [node]->...->[node]->...    (each node = 24-40 bytes, scattered)
+```
+
+Concrete reasons:
+
+1. **Cache locality.** Iterating an `ArrayList` streams adjacent memory; the CPU's prefetcher loads the next cache line before you ask. Each `LinkedList` `next()` is a potential cache miss.
+2. **Node overhead.** Each `LinkedList.Node` carries `prev`, `next`, and `item` references plus a 12–16 byte object header — roughly **3–4× the memory** of an array slot per element.
+3. **GC pressure.** N nodes = N garbage objects. `ArrayList` is one array; freeing it is one operation.
+4. **`arraycopy` is fast.** Bulk shifts use `System.arraycopy`, often a single intrinsic that processes elements in SIMD-sized chunks. Even an `O(n)` middle-insert on `ArrayList` often beats `LinkedList`'s `O(n)` walk-to-position.
+
+## The Rare Honest Use Case
+
+There's one scenario where `LinkedList` is defensible: you need a **doubly-linked list with stable element identity** so external pointers (iterators or `ListIterator`s) survive across structural modifications elsewhere in the list — and you don't want `CopyOnWriteArrayList`'s snapshot semantics.
+
+```java
+// Maintaining LRU order with O(1) move-to-front?
+// Use LinkedHashMap with accessOrder=true — not LinkedList.
+
+// Producer-consumer queue?
+// Use ArrayDeque (single-threaded) or ArrayBlockingQueue / LinkedBlockingQueue.
+
+// Sliding window?
+// ArrayDeque.
+```
+
+## What Bloch Said
+
+Joshua Bloch himself has stated publicly that he wishes `LinkedList` weren't in the framework — beginners reach for it based on textbook intuition and ship slower code. The educational value (teaching what a doubly-linked list *is*) is real, but its practical role in production code is vanishingly small.
+
+<Callout kind="warn" title="Don't be clever">
+If your benchmark genuinely shows `LinkedList` faster than `ArrayList` for your workload, double-check it. Nine times out of ten, the test is flawed (no JMH warmup, GC noise, or measuring the wrong operation).
+</Callout>
+
+<ProbeNote>
+The interviewer is checking whether you parrot textbook Big-O or **think about real hardware**. Strong candidates explicitly say "almost never," mention cache locality and `ArrayDeque` as the better queue/stack, and reference that `removeIf` plus bulk-add patterns make `ArrayList`'s O(n) shifts cheap in practice. A bonus point: knowing Bloch himself regrets including `LinkedList`.
+</ProbeNote>

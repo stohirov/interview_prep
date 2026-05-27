@@ -1,0 +1,82 @@
+`Comparator.nullsFirst(cmp)` and `Comparator.nullsLast(cmp)` are **decorator** comparators that handle `null` inputs explicitly — placing `null`s before or after non-null values — and delegate to the inner comparator for non-null pairs. Without them, comparing `null` throws `NullPointerException`.
+
+## The problem
+
+```java
+List<String> names = Arrays.asList("Bob", null, "Alice", null);
+names.sort(Comparator.naturalOrder());
+// throws NullPointerException — String.compareTo(null) NPEs
+```
+
+## The fix
+
+```java
+names.sort(Comparator.nullsFirst(Comparator.naturalOrder()));
+// [null, null, "Alice", "Bob"]
+
+names.sort(Comparator.nullsLast(Comparator.naturalOrder()));
+// ["Alice", "Bob", null, null]
+```
+
+## How they work
+
+`nullsFirst(cmp)` returns a comparator that:
+
+1. If both args are non-null, delegates to `cmp.compare(a, b)`.
+2. If both are null, returns 0.
+3. If only `a` is null, returns negative (a comes first).
+4. If only `b` is null, returns positive (a comes after).
+
+`nullsLast` does the inverse: nulls sort to the end.
+
+## Nullable fields, not just nullable arguments
+
+The common case is sorting by an optional field:
+
+```java
+public record Customer(String name, LocalDate lastOrder) {}
+
+// lastOrder can be null for never-ordered customers
+customers.sort(
+    Comparator.comparing(
+        Customer::lastOrder,
+        Comparator.nullsLast(Comparator.naturalOrder())
+    )
+);
+// Customers with orders sorted by date; never-ordered customers at the end.
+```
+
+`comparing` takes an optional second argument: a comparator for the **extracted key**. Passing `nullsLast(naturalOrder())` here lets the key (`lastOrder`) be null without crashing.
+
+## Chaining with null-safe keys
+
+```java
+Comparator<Customer> cmp = Comparator
+    .comparing(Customer::name, Comparator.nullsFirst(Comparator.naturalOrder()))
+    .thenComparing(Customer::lastOrder, Comparator.nullsLast(Comparator.naturalOrder()));
+```
+
+Each key gets its own null policy. Name nulls go first; date nulls go last.
+
+## Why this matters in practice
+
+- Real datasets have null/missing values. Sorting them without handling nulls crashes on the first null.
+- `Collectors.toMap` rejects null values by default — but `groupingBy` allows them, and the resulting `Map<K, List<V>>` may have null `K`.
+- Database results often have nullable columns. Mapping them to sort-friendly types means handling null in the comparator.
+
+<Callout kind="warn" title="Records and null components">
+Records allow null components (unless you reject them in the compact constructor). If you sort records by a nullable component, wrap with `nullsFirst` or `nullsLast`.
+</Callout>
+
+## Alternative: filter nulls first
+
+```java
+customers.stream()
+    .filter(c -> c.lastOrder() != null)
+    .sorted(Comparator.comparing(Customer::lastOrder))
+    .toList();
+```
+
+Sometimes the cleaner approach — but you lose the null entries from the result. `nullsLast` keeps them visible at the end.
+
+<ProbeNote>Probe: "What happens if you mix nullsFirst and nullsLast in a chain?" (Each key follows its own policy — completely fine.) "Why does Comparator.naturalOrder() NPE on null but TreeSet rejects null silently with NPE on insert?" (TreeSet.add calls compareTo on the new element vs existing ones; the first add of null may even succeed if the tree is empty, but subsequent adds NPE. Use TreeSet with a nullsFirst-wrapped comparator if you need null support.)</ProbeNote>

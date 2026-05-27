@@ -1,0 +1,97 @@
+**The exercise: take an everyday `UserService` that "just works" and walk through each SOLID principle, naming the violation, the smell that gives it away, and the fix.** This is the kind of step-by-step refactor a senior code review produces — and the kind interviewers love because it shows you can apply theory to messy reality.
+
+## The starting class
+
+```java
+public class UserService {
+    private final Connection conn = DriverManager.getConnection("jdbc:mysql://...");
+
+    public void register(String email, String password) throws Exception {
+        // 1. validate
+        if (!email.contains("@")) throw new IllegalArgumentException();
+        if (password.length() < 8) throw new IllegalArgumentException();
+
+        // 2. hash
+        var hash = MessageDigest.getInstance("MD5").digest(password.getBytes());
+
+        // 3. persist
+        try (var ps = conn.prepareStatement("INSERT INTO users(email, pwd) VALUES (?,?)")) {
+            ps.setString(1, email);
+            ps.setBytes(2, hash);
+            ps.executeUpdate();
+        }
+
+        // 4. send welcome email
+        var smtp = new SmtpClient("mail.example.com");
+        smtp.send(email, "Welcome", "Thanks for signing up!");
+
+        // 5. log to file
+        Files.writeString(Path.of("/var/log/users.log"), email + " registered\n",
+                          StandardOpenOption.APPEND);
+    }
+}
+```
+
+It compiles, it works, and it's a SOLID disaster. Let's walk through.
+
+## S — Single Responsibility (violated)
+
+`UserService` validates input, hashes passwords, persists to a database, sends email, *and* writes logs. Five responsibilities; any of them changing requires editing this class.
+
+**Fix:** Extract `EmailValidator`, `PasswordHasher`, `UserRepository`, `EmailSender`, and use the standard logging API. `UserService` becomes a thin orchestrator.
+
+## O — Open/Closed (violated)
+
+The hash algorithm is hardcoded to MD5. Changing to bcrypt means editing `register`. The notification is hardcoded to SMTP — adding SMS would require an `if`/`else` here.
+
+**Fix:** Inject a `PasswordHasher` interface (`BcryptHasher`, `Argon2Hasher` implementations) and a `Notifier` interface (`EmailNotifier`, `SmsNotifier`). New algorithms = new classes, no edits.
+
+## L — Liskov Substitution (latent)
+
+Not violated yet, but the hardcoded `SmtpClient` constructor blocks substitution. If you tried to inject a `TestSmtpClient extends SmtpClient` that captures messages instead of sending, the constructor's hardcoded hostname would still try to resolve `mail.example.com`.
+
+**Fix:** Depend on an interface (`EmailSender`), not a concrete class with side-effecting constructor.
+
+## I — Interface Segregation (latent)
+
+When we extract `UserRepository`, resist the urge to dump every user-table method into it. `register` only needs `save(User)`. A `UserAuthService` that only authenticates needs `findByEmail(String)`. Two interfaces beat one fat `UserRepository` with twelve methods.
+
+**Fix:** `interface UserRegistrationRepository { void save(User u); }` separately from query-side interfaces.
+
+## D — Dependency Inversion (violated)
+
+`UserService` directly imports and instantiates `Connection` (via `DriverManager`), `SmtpClient`, and `Files`. The high-level *registration policy* depends on three low-level *mechanisms*.
+
+**Fix:** Inject all of them via constructor as interfaces. The service no longer imports `java.sql`, `Files`, or the SMTP library.
+
+## The refactored class
+
+```java
+public class UserService {
+    private final EmailValidator validator;
+    private final PasswordHasher hasher;
+    private final UserRepository repo;
+    private final Notifier notifier;
+    private static final Logger log = LoggerFactory.getLogger(UserService.class);
+
+    public UserService(EmailValidator v, PasswordHasher h, UserRepository r, Notifier n) {
+        this.validator = v; this.hasher = h; this.repo = r; this.notifier = n;
+    }
+
+    public void register(String email, String password) {
+        validator.validate(email, password);
+        var user = new User(email, hasher.hash(password));
+        repo.save(user);
+        notifier.send(email, WELCOME_MSG);
+        log.info("user registered: {}", email);
+    }
+}
+```
+
+Each concern in its own class behind an interface. Test the orchestration with mocks; test each collaborator in isolation. New hash algorithm? New `PasswordHasher` implementation, zero edits to `UserService`. SMS welcome instead of email? Inject a different `Notifier`. Switch to Postgres? New `UserRepository` implementation.
+
+<Callout kind="tip" title="The litmus test">
+After the refactor, write down the unit tests you'd need. If you can test `UserService.register` with no database, no SMTP server, and no filesystem — and each fix-of-a-bug touches exactly one class — you've applied SOLID correctly.
+</Callout>
+
+<ProbeNote>The interviewer wants to see you systematically walk through each letter and find a real violation. Even if the original class doesn't violate one of them perfectly (LSP and ISP are often latent here), explain *why* the design makes that principle hard to honor and what would protect it. The refactored class with five injected interfaces is the textbook end state.</ProbeNote>

@@ -1,0 +1,71 @@
+**Because a `TreeSet` is a red-black binary search tree, every element must be *orderable* relative to every other element.** The tree decides which subtree to descend into by calling `compareTo` (or the supplied `Comparator.compare`); without a way to produce a total ordering, the structure cannot place, find, or remove elements.
+
+## What the Tree Needs at Every Node
+
+For every operation — `add`, `contains`, `remove`, even iteration via subtree traversal — the tree compares the input to a node and goes **left if less, right if greater, stop if equal**. That algorithm fundamentally requires:
+
+```java
+int cmp = element.compareTo(node.element);
+if (cmp < 0) goLeft();
+else if (cmp > 0) goRight();
+else /* equal */ stop;
+```
+
+With no `Comparable` implementation and no `Comparator`, there's no `cmp` value, so the algorithm can't proceed. The JDK raises `ClassCastException` at runtime the first time you try to add an element to a `TreeSet` whose type isn't `Comparable`.
+
+```java
+class Box { final int n; Box(int n) { this.n = n; } }
+
+NavigableSet<Box> s = new TreeSet<>();
+s.add(new Box(1));
+s.add(new Box(2));   // ClassCastException — Box is not Comparable
+```
+
+## Two Ways to Provide Ordering
+
+**Option A — make the element `Comparable<T>`:**
+
+```java
+record Box(int n) implements Comparable<Box> {
+    public int compareTo(Box other) { return Integer.compare(n, other.n); }
+}
+NavigableSet<Box> s = new TreeSet<>();   // uses natural order
+```
+
+**Option B — supply a `Comparator` at construction:**
+
+```java
+NavigableSet<Box> s = new TreeSet<>(Comparator.comparingInt(Box::n));
+NavigableSet<Box> rev = new TreeSet<>(Comparator.comparingInt(Box::n).reversed());
+```
+
+The Comparator always wins if both are provided — `TreeSet` uses the comparator if non-null, otherwise falls back to natural ordering.
+
+## The Three Properties Your Ordering Must Have
+
+For correctness, the ordering must be a **total order**:
+
+1. **Antisymmetric**: `cmp(a,b) > 0` implies `cmp(b,a) < 0`.
+2. **Transitive**: if `cmp(a,b) < 0` and `cmp(b,c) < 0`, then `cmp(a,c) < 0`.
+3. **Consistent with equals (strongly recommended)**: `cmp(a,b) == 0` iff `a.equals(b)`.
+
+Violating (1) or (2) corrupts the tree silently — you'll get duplicates, miss elements, or see infinite traversals. Violating (3) is *legal* but surprising: `TreeSet` treats two elements as duplicates based on `compareTo == 0`, ignoring `equals`. This causes the famous bug where `CASE_INSENSITIVE_ORDER` makes `"Hello"` and `"HELLO"` collide:
+
+```java
+NavigableSet<String> ci = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+ci.add("Hello");
+ci.add("HELLO");
+System.out.println(ci.size());   // 1 — comparator says they're equal
+```
+
+## Why Not Just Use equals/hashCode Like HashSet?
+
+`HashSet` distributes elements across buckets by hash, so it can find any element in `O(1)` regardless of order. `TreeSet`'s value proposition — sorted iteration, range queries (`subSet`, `headSet`), nearest-neighbor lookup (`floor`, `ceiling`) — only exists if elements are *ordered*. `equals` alone gives you membership; `compareTo` gives you membership *plus* position.
+
+<Callout kind="tip" title="Pick the comparator deliberately">
+Whenever you build a `TreeSet`, decide explicitly: is natural ordering really what I want, or am I about to ship a subtle bug? Often a `Comparator.comparing(...).thenComparing(...)` chain is clearer and safer than relying on `Comparable`.
+</Callout>
+
+<ProbeNote>
+The interviewer wants to see you understand the **structural difference** between hash-based and tree-based sets, and articulate the **total-order requirement** with its three properties. The killer follow-up is the "consistent with equals" trap — knowing that `TreeSet` uses `compareTo == 0` for duplicate detection (and the `CASE_INSENSITIVE_ORDER` example that breaks naive expectations) demonstrates real experience.
+</ProbeNote>

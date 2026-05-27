@@ -1,0 +1,71 @@
+`removeEldestEntry(Map.Entry eldest)` is a **protected hook** that `LinkedHashMap` calls after every `put` (and `putAll`), passing the current head of the access chain. If you return `true`, that entry is evicted before `put` returns. The default returns `false`, so a plain `LinkedHashMap` never evicts.
+
+## The signature
+
+```java
+protected boolean removeEldestEntry(Map.Entry<K,V> eldest) {
+    return false;
+}
+```
+
+## When it fires
+
+Inside `LinkedHashMap.afterNodeInsertion`:
+
+```java
+void afterNodeInsertion(boolean evict) {
+    Entry<K,V> first;
+    if (evict && (first = head) != null && removeEldestEntry(first)) {
+        K key = first.key;
+        removeNode(hash(key), key, null, false, true);
+    }
+}
+```
+
+`evict` is `true` for `put`/`putAll` but `false` when entries are loaded by `readObject` during deserialisation — you don't want to evict half your map while restoring it from disk.
+
+## Why a hook at all?
+
+`LinkedHashMap` doesn't want to bake a single eviction policy into the class. Different callers want different rules — size cap, weight cap, time-based, condition-based. By exposing the decision as a hook with the head entry in scope, the class stays simple and the subclass picks the policy:
+
+```java
+// Size-based cap
+@Override protected boolean removeEldestEntry(Map.Entry<K, V> e) {
+    return size() > capacity;
+}
+
+// Memory-based cap (rough)
+@Override protected boolean removeEldestEntry(Map.Entry<K, V> e) {
+    return Runtime.getRuntime().freeMemory() < threshold;
+}
+
+// Time-based: evict if the eldest is older than 5 minutes
+@Override protected boolean removeEldestEntry(Map.Entry<K, V> e) {
+    return e.getValue() instanceof Stamped<?> s
+        && s.insertedAt().isBefore(Instant.now().minus(Duration.ofMinutes(5)));
+}
+```
+
+## Gotchas
+
+- **Called once per put**. If you insert in a tight loop and need to evict many entries (say, the cap was lowered at runtime), you'll need to loop yourself — `removeEldestEntry` only ever removes one entry per `put`.
+- **You can ignore the argument**. The `eldest` parameter is provided for inspection; whether you return `true` based on it or on global state (like `size()`) is up to you.
+- **Don't mutate the map inside it**. Returning `true` is the only sanctioned side-effect; modifying the map directly from within the hook risks `ConcurrentModificationException` or corrupting the chain.
+
+## Listening to evictions
+
+There's no built-in listener for eviction. If you need one, log inside `removeEldestEntry` before returning `true`:
+
+```java
+@Override protected boolean removeEldestEntry(Map.Entry<K, V> e) {
+    boolean evict = size() > capacity;
+    if (evict) log.debug("evicting {}", e.getKey());
+    return evict;
+}
+```
+
+<Callout kind="tip" title="Production caches">
+For real eviction listeners, statistics, async loading, and TTL — use Caffeine, which was literally written by the maintainer of Guava's cache, with bounded-cache semantics done right.
+</Callout>
+
+<ProbeNote>The interviewer wants you to see that `removeEldestEntry` is a *strategy hook* — the class enforces "evict the head if you say so", the subclass decides "when to say so". Mentioning the `evict` flag and deserialisation safety is a strong detail.</ProbeNote>

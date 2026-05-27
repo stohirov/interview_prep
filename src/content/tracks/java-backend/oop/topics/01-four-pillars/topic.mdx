@@ -1,0 +1,38 @@
+The **four pillars** — encapsulation, inheritance, polymorphism, abstraction — are not four independent slogans but four facets of the same idea: *give a name to a contract and hide the machinery behind it*. Every senior interview opens here, and the candidates who stumble are the ones who recite textbook definitions without showing how the four interlock in real code.
+
+## What each one really means
+
+- **Encapsulation** is bundling state with the operations that mutate it, and exposing only what callers need. The *hidden* part is the representation choice — not just whether a field is `private`.
+- **Inheritance** is the language mechanism that lets one class reuse and specialize another's structure. It models an *is-a* relationship and is the riskiest pillar — easy to overuse, easy to break with the fragile base class problem.
+- **Polymorphism** is one name, many forms: the same call site (`shape.area()`) dispatches to different code depending on the runtime type. It's what lets the JVM execute `invokevirtual` and pick the right `area()` at runtime.
+- **Abstraction** is the act of designing the *contract* — what a type promises and what it deliberately omits. It's the pillar that lives in your head before you write a line of code.
+
+## How they interact in a real hierarchy
+
+Consider a tiny `Shape` design:
+
+```java
+public sealed interface Shape permits Circle, Square {
+    double area();                      // abstraction: the contract
+}
+
+public record Circle(double radius) implements Shape {
+    @Override public double area() { return Math.PI * radius * radius; }
+}
+
+public record Square(double side) implements Shape {
+    @Override public double area() { return side * side; }
+}
+
+double total(List<Shape> shapes) {
+    return shapes.stream().mapToDouble(Shape::area).sum();   // polymorphism
+}
+```
+
+Every pillar is present: `Shape` is the **abstraction**; the records **inherit** the contract and **encapsulate** their fields (records make components private final automatically); `total()` exploits **polymorphism** to treat circles and squares uniformly. Remove any one pillar and the design degrades — drop polymorphism and you're back to `if (s instanceof Circle c) ... else if ...` chains.
+
+<Callout kind="tip" title="The interview hook">
+When asked to "explain OOP," don't just list the four. Show them collaborating on a small example. Interviewers infer experience from how naturally you sketch the interaction, not from how crisply you recite the definitions.
+</Callout>
+
+The questions that follow drill into each pillar's sharp edges — where definitions blur, where Java's choices differ from C++ or Smalltalk, and where junior intuitions get punished.

@@ -1,0 +1,81 @@
+`HashSet` only needs `equals` and `hashCode` because it identifies elements by **bucket + equality**, not by ordering. `TreeSet` needs `Comparable` (or an explicit `Comparator`) because it stores elements in a **sorted balanced tree** and must answer "is x less than, equal to, or greater than y" at every node to position new elements.
+
+## What each set type needs from its element type
+
+| Collection | Requires `equals` | Requires `hashCode` | Requires `compareTo` or `Comparator` |
+| --- | --- | --- | --- |
+| `HashSet` | Yes | Yes | No |
+| `LinkedHashSet` | Yes | Yes | No |
+| `TreeSet` | No* | No* | **Yes** |
+| `EnumSet` | (uses ordinal) | (uses ordinal) | No |
+| `CopyOnWriteArraySet` | Yes | No (linear search) | No |
+
+\*TreeSet uses compareTo for membership, so `equals`/`hashCode` are technically irrelevant for set semantics — but you should still implement them consistently with compareTo to avoid surprises.
+
+## HashSet internals (why compareTo isn't needed)
+
+```java
+// Conceptual HashSet.contains
+int h = element.hashCode();           // pick a bucket
+Bucket b = table[h & (table.length - 1)];
+for (var entry : b) {
+    if (entry.equals(element)) return true; // bucket-local equality check
+}
+return false;
+```
+
+No ordering question is ever asked. Two elements only meet when they hash to the same bucket — and then `equals` decides. Position in the bucket is insertion order (or unordered), not sorted.
+
+## TreeSet internals (why compareTo IS needed)
+
+`TreeSet` is backed by a red-black tree. To insert an element, the tree must compare it against the root, then recursively against the chosen child, until it finds the right leaf position. **Every step asks "less, equal, or greater?"** That's the compareTo contract.
+
+<Diagram caption="TreeSet insertion walks the tree via compareTo">{`Insert 7 into:
+       5
+      / \\
+     3   8
+    /   / \\
+   1   6   9
+
+compareTo(7, 5) -> positive, go right
+compareTo(7, 8) -> negative, go left
+compareTo(7, 6) -> positive, become 6's right child
+
+Result:
+       5
+      / \\
+     3   8
+    /   / \\
+   1   6   9
+        \\
+         7`}</Diagram>
+
+Without `compareTo`, the tree can't decide left/right at any node. There's no fallback to "any position" — sorted means sorted.
+
+## What about LinkedHashSet?
+
+`LinkedHashSet` extends `HashSet` and additionally maintains a doubly-linked list of insertion order. Membership still uses bucket+equals. No `compareTo` needed.
+
+## The TreeSet without Comparable error
+
+```java
+class Person { String name; int age; }
+
+var set = new TreeSet<Person>(); // compiles fine
+set.add(new Person("Alice", 30));
+set.add(new Person("Bob", 25));  // throws ClassCastException
+```
+
+The exception is **runtime**, not compile-time, because `TreeSet<E>` is parameterized as `TreeSet<E>` — the constraint is enforced only when you call `add` (which casts the element to `Comparable`).
+
+Fix by either implementing `Comparable<Person>` or passing a `Comparator`:
+
+```java
+var set = new TreeSet<Person>(Comparator.comparing(p -> p.name));
+```
+
+<Callout kind="tip" title="Compile-time vs runtime">
+You can put `non-Comparable` types in a `TreeSet` declaration. The error surfaces at the second `add` (the first may succeed because there's nothing to compare against). Always pass a Comparator if your type doesn't implement Comparable.
+</Callout>
+
+<ProbeNote>Probe: "Why does the first add to an empty TreeSet succeed?" (No existing element to compare against; the first element just becomes the root.) "Is `new TreeSet<>(Comparator.comparing(...))` better than implementing Comparable?" (For one-off needs yes; for natural ordering of a domain type, Comparable is cleaner because all sorted collections pick it up automatically.) "What if you mix compareTo and Comparator?" (Constructor argument wins — TreeSet uses the explicit comparator, ignoring compareTo even if implemented.)</ProbeNote>

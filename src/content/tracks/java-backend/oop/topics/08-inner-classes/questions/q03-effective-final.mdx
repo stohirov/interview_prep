@@ -1,0 +1,104 @@
+**Captured locals must be effectively final because the JVM captures them by *value* into a synthetic field — if the local could keep changing, the inner instance would see a stale snapshot and writes would diverge between the two storages.** Languages that allow capture of mutable locals (Kotlin, Scala, C#) do so by silently allocating a heap cell to hold the value; Java's designers chose to make the rule explicit instead.
+
+## What "effectively final" means
+
+A local variable (or method parameter) is *effectively final* if it is assigned exactly once and never reassigned. You don't have to write the `final` keyword — the compiler infers it. Either of these forms works:
+
+```java
+final int x = 5;        // explicitly final
+int y = 5;              // effectively final — never reassigned
+// y = 6;               // would make it NOT effectively final
+```
+
+If a captured variable is reassigned anywhere in the enclosing method, the inner class/lambda fails to compile with "Variable used in lambda expression should be final or effectively final."
+
+## Why the JVM works this way
+
+```java
+void example(List<String> items) {
+    int counter = 0;
+    items.forEach(s -> counter++);   // COMPILE ERROR
+}
+```
+
+Suppose the language allowed this. Where would `counter` live?
+
+- **In the stack frame** of `example`. But `example` returns and its frame disappears; the lambda may outlive it. Reading the variable later would dereference a dead stack slot — undefined behavior.
+- **In the lambda's heap object**. Then the *outer* `counter` and the lambda's copy diverge: the lambda increments its copy, but `example` (and any later reads outside the lambda) still see `0`.
+
+Both choices are broken. Java's solution: capture by value into the lambda's heap object, and forbid the divergence by requiring the source to be immutable in the enclosing method.
+
+## How it actually compiles
+
+```java
+String prefix = "[hi] ";
+Runnable r = () -> System.out.println(prefix + Thread.currentThread().getName());
+```
+
+javac generates something like:
+
+```java
+class Outer$$Lambda {
+    private final String prefix;             // captured by value
+    Outer$$Lambda(String prefix) { this.prefix = prefix; }
+    void run() { System.out.println(prefix + ...); }
+}
+Runnable r = new Outer$$Lambda(prefix);     // pass current value into the cell
+```
+
+The captured value is stored in the lambda object's final field. The enclosing local is irrelevant after capture.
+
+## How Kotlin and Scala "fix" it
+
+They don't really fix the problem — they hide it. A captured mutable in Kotlin becomes an `IntRef` (a one-field heap object) that both the enclosing method and the closure see by reference:
+
+```kotlin
+fun example(items: List<String>) {
+    var counter = 0                   // compiled as Ref.IntRef
+    items.forEach { counter++ }       // closures over the Ref
+    println(counter)                  // reads through the Ref
+}
+```
+
+The cost: extra allocation, extra indirection on every read. Java chose to expose the trade-off rather than silently pay it. The official workaround is an explicit container:
+
+```java
+int[] counter = { 0 };
+items.forEach(s -> counter[0]++);     // array reference is effectively final;
+                                      // the element is mutable
+```
+
+Or, more cleanly, use a stream reduction or an `AtomicInteger`.
+
+## Local *classes* follow the same rule
+
+The rule applies to all three: local classes, anonymous classes, and lambdas. All three capture locals by value into synthetic fields.
+
+```java
+void demo() {
+    int n = 10;
+    class C { int read() { return n; } }    // n captured into synthetic field
+    new C().read();
+}
+```
+
+If `n` is later reassigned, the local class fails to compile.
+
+## Captured `this` is not subject to the rule
+
+The enclosing instance itself isn't a "local" — it's the `this$0` synthetic field of the inner instance. So inside a lambda you can freely read and mutate `this.field`:
+
+```java
+class Counter {
+    int n = 0;
+    Runnable incr = () -> n++;    // fine — n is a field of the enclosing class
+}
+```
+
+Only *local variables and parameters* are subject to effectively-final.
+
+<Callout kind="tip" title="The compiler error is your friend">
+"Local variable X defined in an enclosing scope must be final or effectively final" is one of the most precise error messages in javac. If you see it, the fix is usually to extract the mutation into a stream operation or use a dedicated mutable container (`AtomicReference`, `int[]`).
+</Callout>
+
+<ProbeNote>The interviewer wants the JVM-level reason: captures are by value into synthetic fields, so the source must be immutable to keep both storages consistent. Bonus: contrast with Kotlin's silent `Ref` allocation and explain why Java chose the explicit rule.</ProbeNote>

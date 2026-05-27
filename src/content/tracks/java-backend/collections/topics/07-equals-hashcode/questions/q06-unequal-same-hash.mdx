@@ -1,0 +1,59 @@
+**Two unequal objects CAN share a hashCode** (collisions are allowed and unavoidable). **Two equal objects CANNOT have different hashCodes** — that violates rule 2 of the hashCode contract and silently breaks every hash-based collection.
+
+## Short table
+
+| Scenario | Allowed? | Why |
+| --- | --- | --- |
+| `a.equals(b)` AND `a.hashCode() == b.hashCode()` | Yes | Required by contract. |
+| `a.equals(b)` AND `a.hashCode() != b.hashCode()` | **NO** | Contract violation. Breaks HashMap. |
+| `!a.equals(b)` AND `a.hashCode() == b.hashCode()` | Yes | Legal collision. Causes slowdown, not bugs. |
+| `!a.equals(b)` AND `a.hashCode() != b.hashCode()` | Yes | Ideal case. |
+
+## Why unequal-but-same-hash is unavoidable
+
+`int` has 2^32 possible values. The number of distinct `String`s alone is unbounded. By pigeonhole, **infinite inputs must collide into 4 billion buckets** sometimes. A famous example:
+
+```java
+"Aa".hashCode() == "BB".hashCode(); // true — both are 2112
+"FB".hashCode() == "Ea".hashCode(); // true — both are 2236
+```
+
+`String.hashCode` is `31 * h + c` per character, and `'A' * 31 + 'a' = 'B' * 31 + 'B' = 2112`. This isn't a bug; it's a pigeonhole consequence.
+
+## What "collisions are OK" really means
+
+Collisions degrade performance, not correctness. In a `HashMap` with N entries and bucket count M:
+
+- **Average lookup** is O(1 + N/M), where N/M is the load factor.
+- **Worst case** before Java 8 was O(N) — all keys in one bucket = a linked list walk.
+- **Worst case since Java 8** is O(log N) — buckets with 8+ entries convert to red-black trees (TreeNode bin).
+
+So even adversarial collisions (string hash flooding attacks, anyone?) stay logarithmic.
+
+## What equal-with-different-hashes does
+
+```java
+class Buggy {
+    final int id;
+    Buggy(int id) { this.id = id; }
+    @Override public boolean equals(Object o) {
+        return o instanceof Buggy b && b.id == id;
+    }
+    @Override public int hashCode() {
+        return System.identityHashCode(this); // BUG: not based on id
+    }
+}
+
+var m = new HashMap<Buggy, String>();
+m.put(new Buggy(1), "hello");
+m.get(new Buggy(1));    // null — different identityHashCode, different bucket
+m.containsKey(new Buggy(1)); // false
+```
+
+The map *has* the entry but can never find it. Memory leak in disguise: entries are never reachable via lookup but consume memory until the map itself is GC'd.
+
+<Callout kind="warn" title="Mutable fields in equals are a trap">
+If you compute `hashCode` from a field that mutates after the object is in a HashMap, the object's bucket location is now stale. The map can't find it on a `get` because the new hash points to a different bucket. Effective Java's advice: never use mutable state in equals/hashCode for keys.
+</Callout>
+
+<ProbeNote>Probe: "If hashCode collisions are O(log N) since Java 8, why bother with a good hash function?" (Tree-bin conversion has overhead, and tree comparisons use compareTo or System.identityHashCode as a tiebreaker. Also, many small bins outperform a few large trees.) "Name a real-world hash flooding attack." (CVE-2011-4858 — Tomcat/Jetty form parsing exploited String.hashCode collisions to DoS servers; the fix was randomized hash seeds for some hash maps.)</ProbeNote>

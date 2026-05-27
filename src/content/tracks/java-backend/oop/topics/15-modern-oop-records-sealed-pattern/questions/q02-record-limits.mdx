@@ -1,0 +1,72 @@
+A record is a **transparent, shallowly immutable carrier** for its components. Every limitation falls out of that one design choice — the JEP authors traded flexibility for a strong contract that callers and tools (serializers, debuggers, pattern matchers) can rely on absolutely.
+
+## The hard limits
+
+### 1. A record cannot extend a class
+
+Every record implicitly extends `java.lang.Record`. Java has no multiple inheritance for classes, so there's no slot left for your superclass.
+
+```java
+class Animal {}
+public record Dog(String name) extends Animal {} // compile error
+```
+
+*Why*: `Record` itself overrides `equals`/`hashCode`/`toString` semantics in a way the JVM and serialization rely on. If your record inherited from `Animal` with its own `equals`, the contract would fracture. Implement interfaces freely — that's allowed.
+
+### 2. Record components are implicitly final
+
+You can't reassign them and you can't add a setter. The whole point of a record is "value-class identity" — two records with equal components must always remain equal. Mutating one mid-life would break that for every cached hash, every `Set` membership, every `Map` key.
+
+### 3. You can't declare additional instance fields
+
+```java
+public record Point(int x, int y) {
+    private int cachedHash; // compile error
+}
+```
+
+*Why*: a record is supposed to be its components, *only* its components. Adding a hidden field would break the "transparent" promise — `toString`, `equals`, serialization, and pattern destructuring all assume the visible header is the whole state. **Static** fields are allowed (constants, factories) because they don't belong to instances.
+
+### 4. No non-trivial instance initializer blocks
+
+```java
+public record Point(int x, int y) {
+    { System.out.println("init"); } // compile error
+}
+```
+
+*Why*: instance state is exactly the component fields, assigned by the canonical constructor. There's no other place for instance setup. Use the compact constructor for validation; use static factories or static blocks if you need module-level initialization.
+
+### 5. The record is implicitly final
+
+You can't have `public final class Sub extends Point {}` or `public record Sub extends Point {}`. Final by language design.
+
+*Why*: extending a record would let a subclass add state, breaking the "components are the whole story" guarantee. If you need an "extensible" carrier, you're really asking for a sealed interface with multiple record implementations.
+
+## What you *can* do
+
+Records aren't crippled — just disciplined:
+
+- **Implement interfaces** (including `Comparable`, `Serializable`, your own sealed interfaces).
+- **Add instance methods** that compute over components (`distanceFromOrigin()`).
+- **Add static members** (constants, factories, helpers).
+- **Have a compact constructor** for validation and normalization.
+- **Override the canonical constructor** for defensive copying.
+- **Be nested inside classes/interfaces** (and they're implicitly static when nested).
+- **Have generic parameters** (`record Pair<A, B>(A first, B second) {}`).
+
+<Callout kind="tip" title="When the limits hurt — sealed interface to the rescue">
+If you need polymorphism over records, use a sealed interface:
+```java
+sealed interface Event permits Login, Logout {}
+record Login(String user, Instant at) implements Event {}
+record Logout(String user, Instant at) implements Event {}
+```
+You get inheritance-like dispatch with `switch`, *plus* exhaustiveness checking — without the records giving up their value-class identity.
+</Callout>
+
+## The mental model
+
+Every limitation is a consequence of one rule: **a record is its components, nothing more, nothing less, and forever**. If a feature would let a record have hidden state, mutate after construction, or fork into subclasses with extra state — the language disallows it. The strong contract is what lets pattern matching, serialization, and equality work without surprises.
+
+<ProbeNote>Two beats: the limits (no class extension, no extra fields, no instance initializers, implicitly final), and the *reason* — all of them protect the "transparent shallowly immutable carrier" contract. Bonus: pivoting to "if I needed this, I'd use a sealed interface with records as implementations" shows you understand the modern Java design vocabulary.</ProbeNote>

@@ -1,0 +1,34 @@
+`ConcurrentHashMap` (CHM) is the JDK's go-to thread-safe map. It allows concurrent reads with no locking and concurrent writes to different buckets — a dramatic improvement over `Hashtable` or `Collections.synchronizedMap`, which serialize every operation through a single monitor.
+
+## Two major design eras
+
+**Java 7 — segments.** The map was an array of 16 (default) `Segment` objects, each a small `HashMap` guarded by its own `ReentrantLock`. Concurrency level was bounded by the number of segments: at most 16 writers in parallel.
+
+**Java 8+ — node-level locking.** Segments are gone. The map is a single `Node[] table`. Writes use:
+- **CAS** (`Unsafe.compareAndSwapObject`) to install the first node in an empty bucket — lock-free in the common case.
+- **`synchronized` on the bucket head** when there's a collision — fine-grained, one lock per bucket.
+
+A bucket holds a singly-linked list of `Node`s; once it grows past `TREEIFY_THRESHOLD` (8) *and* the table is large enough (≥ 64 entries), it's converted to a red-black tree. Read operations (`get`) traverse the bucket without locking — they rely on `volatile` reads and final-field semantics.
+
+## Headline guarantees
+
+- **No null keys or values** — at all, ever. Disambiguation in concurrent code is the reason.
+- **Atomic compound ops** via `compute`, `computeIfAbsent`, `computeIfPresent`, `merge`.
+- **Weakly consistent iterators** — never throw `ConcurrentModificationException`.
+- **`size()` is best-effort** — uses a striped counter, returns `int`. Use `mappingCount()` (returns `long`) for very large maps.
+
+## When CHM is the right tool
+
+- Multi-threaded caches and rate limiters (`computeIfAbsent` is gold).
+- Counters and accumulators (`merge`, or `LongAdder` values).
+- Any shared map where reads dominate but writes happen from many threads.
+
+## When it's not
+
+- You need transactional multi-key updates → external lock or another structure.
+- You need ordering → `ConcurrentSkipListMap`.
+- You have a single writer → a plain `HashMap` with `volatile` reference flips is often simpler.
+
+<Callout kind="info" title="Read the source">
+`java.util.concurrent.ConcurrentHashMap` is one of the most carefully optimized files in the JDK — Doug Lea's commentary in the source is a graduate course in concurrent data structures.
+</Callout>

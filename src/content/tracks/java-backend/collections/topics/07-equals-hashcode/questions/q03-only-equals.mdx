@@ -1,0 +1,52 @@
+If you override `equals` but not `hashCode`, hash-based collection lookups silently fail. Equal objects land in **different buckets** because they inherit `Object.hashCode`'s identity-based hash, so `HashMap.get` and `HashSet.contains` can't find them.
+
+## The bug in action
+
+```java
+class Point {
+    final int x, y;
+    Point(int x, int y) { this.x = x; this.y = y; }
+
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof Point p && p.x == x && p.y == y;
+    }
+    // hashCode NOT overridden — inherits Object.hashCode (identity)
+}
+
+var set = new HashSet<Point>();
+set.add(new Point(1, 2));
+set.contains(new Point(1, 2)); // false (!)
+set.size();                    // 1
+set.add(new Point(1, 2));      // adds again
+set.size();                    // 2 — duplicates!
+```
+
+Two `Point(1, 2)` instances are `.equals` to each other, but `Object.hashCode` returns a different int for each (it's based on the object's memory address / identity). So they hash to different buckets, and `HashSet` never even *gets* to call `equals`.
+
+## What `HashMap.put` does, step by step
+
+<Diagram caption="HashMap lookup flow when hashCode is broken">{`put(key, value):
+  h = key.hashCode()              <- identity hash, different per instance
+  bucket = h & (table.length - 1) <- different bucket each time
+  walk bucket, compare with equals  <- bucket is empty, no comparison
+  insert new entry                  <- duplicate!`}</Diagram>
+
+## Why the JDK can't catch this for you
+
+`Object.hashCode` returns a valid `int`. The compiler can't know your override of `equals` is semantically incompatible with the inherited `hashCode` — both methods exist and type-check. IDEs and linters (SpotBugs, Error Prone's `EqualsHashCode`) detect it; the language doesn't.
+
+<Callout kind="tip" title="Always pair them">
+The IDE menu is literally "Generate equals() and hashCode()" — a single action. Use it. Or use a `record`, which generates both.
+</Callout>
+
+## Effect on each collection type
+
+- `HashSet` — duplicates accumulate.
+- `HashMap` — `get(key)` returns null right after `put(key, v)`.
+- `LinkedHashMap` — same as HashMap, plus iteration order is broken.
+- `ConcurrentHashMap` — same plus race conditions during resize.
+- `TreeSet` / `TreeMap` — unaffected; they use `compareTo` or `Comparator`, not hashCode.
+- `ArrayList` / `LinkedList` — unaffected; `contains` does linear scan with `equals`.
+
+<ProbeNote>Probe: "What if you override hashCode but not equals?" (Hash collections work via collisions falling back to Object.equals, which is reference equality — so still broken: contains returns false for equal-by-value objects.) "How would you detect this in CI?" (SpotBugs rule HE_EQUALS_NO_HASHCODE, or Error Prone's EqualsHashCode check.)</ProbeNote>

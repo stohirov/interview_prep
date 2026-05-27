@@ -1,0 +1,76 @@
+**`modCount` is a counter on `AbstractList` (and similar fields on `HashMap`, `ArrayDeque`, etc.) that increments on every structural modification. Iterators snapshot it at construction as `expectedModCount` and compare on every `next()` — mismatch throws `ConcurrentModificationException`.**
+
+## The mechanism
+
+```java
+// Roughly what AbstractList.Itr looks like
+private class Itr implements Iterator<E> {
+    int cursor;
+    int lastRet = -1;
+    int expectedModCount = modCount;   // snapshot at construction
+
+    public E next() {
+        checkForComodification();
+        int i = cursor;
+        Object[] elementData = ArrayList.this.elementData;
+        cursor = i + 1;
+        return (E) elementData[lastRet = i];
+    }
+
+    public void remove() {
+        if (lastRet < 0) throw new IllegalStateException();
+        checkForComodification();
+        try {
+            ArrayList.this.remove(lastRet);
+            cursor = lastRet;
+            lastRet = -1;
+            expectedModCount = modCount;   // re-sync
+        } catch (IndexOutOfBoundsException e) {
+            throw new ConcurrentModificationException();
+        }
+    }
+
+    final void checkForComodification() {
+        if (modCount != expectedModCount)
+            throw new ConcurrentModificationException();
+    }
+}
+```
+
+## What counts as "structural"
+
+A **structural modification** changes the size or rehashes the table:
+
+- `add`, `remove`, `clear` — yes
+- `addAll`, `removeIf`, `removeAll` — yes
+- `set(i, e)` on a list — **no** (replaces in place)
+- `put(k, v)` on existing key in a `HashMap` — **no**
+- `put(k, v)` on a new key in a `HashMap` — **yes**
+
+## Why iterator.remove() works
+
+`Iterator.remove()` performs the structural change *and* updates `expectedModCount = modCount` in the same call, keeping the iterator in sync. The collection's own `remove()` does not — the iterator has no idea it happened.
+
+## Concrete example
+
+```java
+ArrayList<Integer> list = new ArrayList<>(List.of(1, 2, 3, 4));
+Iterator<Integer> it = list.iterator();   // expectedModCount = 0
+it.next();                                 // ok, modCount still 0
+list.add(5);                               // modCount -> 1
+it.next();                                 // CME: 1 != 0
+```
+
+## Subtle traps
+
+- **Single-threaded code throws CME too.** It's just a `==` check on an `int`.
+- **The check is best-effort.** In multi-threaded code, you can race past it without a CME — see `modCount` written non-atomically.
+- **`AbstractList.subList` shares the parent's `modCount`.** Mutating the parent invalidates the sub-list and vice versa — both throw CME on next access.
+
+<Callout kind="tip" title="Modern replacements">
+- `list.removeIf(predicate)` — handles the iteration safely.
+- `iterator.forEachRemaining(...)` — bulk consumption.
+- `map.entrySet().removeIf(e -> ...)` — works on `HashMap` too.
+</Callout>
+
+<ProbeNote>Probe: "What if I use `iterator.remove()` then `list.add()` then call `iterator.next()` again?" CME — `add` bumped `modCount`, iterator's `expectedModCount` is stale. Even one rogue mutation outside the iterator breaks the contract.</ProbeNote>

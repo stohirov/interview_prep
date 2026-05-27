@@ -1,0 +1,55 @@
+`java.util.Collections` is the JDK's grab-bag of static helpers for collections: factory methods for empty/singleton/unmodifiable instances, synchronized and checked wrappers, and algorithms like `sort`, `binarySearch`, `shuffle`, and `frequency`. Most of it predates streams and modern factory methods, but a surprising amount is still the cleanest way to express common tasks — especially the wrapper views.
+
+## Categories
+
+### Empty and singleton constants
+
+```java
+Collections.emptyList();        // shared singleton, immutable
+Collections.emptySet();
+Collections.emptyMap();
+Collections.singletonList("x"); // one-element immutable list
+Collections.singletonMap(k, v);
+```
+
+Zero allocation for empties (always the same instance). Useful as return values when there are no results — avoids `null` and avoids allocating an `ArrayList`.
+
+### Wrapper views
+
+- `unmodifiableList/Set/Map(c)` — read-only **view** over a backing collection. The backing collection can still be mutated through other references; the view sees those changes but rejects its own mutators with `UnsupportedOperationException`.
+- `synchronizedList/Set/Map(c)` — wraps every method in `synchronized`. Iteration is **not** wrapped — callers must lock manually around `for`/iterator loops.
+- `checkedList/Set/Map(c, Class)` — runtime type-checks every `add`. Catches "heap pollution" from unchecked casts at the source instead of at a distant `ClassCastException`.
+
+### Algorithms (operate on `List`)
+
+```java
+Collections.sort(list);                         // TimSort
+Collections.sort(list, Comparator.reverseOrder());
+Collections.binarySearch(sortedList, key);      // requires sorted input
+Collections.reverse(list);
+Collections.shuffle(list);                      // uses ThreadLocalRandom
+Collections.rotate(list, 3);                    // shift right by 3
+Collections.frequency(list, target);            // count occurrences
+Collections.disjoint(c1, c2);                   // true if no element in common
+Collections.min(c), Collections.max(c);
+Collections.swap(list, i, j);
+Collections.fill(list, value);
+Collections.copy(dest, src);
+```
+
+## What's still useful in 2026
+
+- `Collections.emptyList()` / `emptySet()` / `emptyMap()` — zero-allocation, immutable singletons.
+- `Collections.unmodifiableMap(navMap)` — `List.of` and friends don't have `NavigableMap` equivalents.
+- `Collections.frequency` / `disjoint` — quick reads without writing a stream.
+- `Collections.synchronizedXxx` — still occasionally easier than introducing concurrent collections for legacy code.
+
+## What to skip in favor of modern alternatives
+
+- Prefer `List.of(...)` over `Collections.unmodifiableList(Arrays.asList(...))`.
+- Prefer `Stream.toList()` (Java 16+) over `stream.collect(toUnmodifiableList())` in most cases.
+- Prefer `ConcurrentHashMap` over `Collections.synchronizedMap(new HashMap<>())` for concurrent code.
+
+<Callout kind="info" title="Naming convention">
+`Collections` (plural, `java.util.Collections`) is the utility class. `Collection` (singular, `java.util.Collection`) is the root interface. Same names, very different roles.
+</Callout>

@@ -1,0 +1,77 @@
+`SortedMap` (Java 1.2) is the basic sorted-map contract — keys are kept in order, with `firstKey`, `lastKey`, `headMap`, `tailMap`, `subMap`. `NavigableMap` (Java 1.6) extends it with **neighbour lookups** (`floor`, `ceiling`, `higher`, `lower`), **descending views**, and **`pollFirstEntry`/`pollLastEntry`**.
+
+## SortedMap (the original)
+
+```java
+public interface SortedMap<K, V> extends Map<K, V> {
+    Comparator<? super K> comparator();
+    SortedMap<K,V> subMap(K fromKey, K toKey);
+    SortedMap<K,V> headMap(K toKey);
+    SortedMap<K,V> tailMap(K fromKey);
+    K firstKey();
+    K lastKey();
+}
+```
+
+You get ordered iteration, two endpoint accessors, and three view methods — all half-open `[from, to)`. That's it. No "find the entry just below this value" — you have to fake it with `tailMap(k).keySet().iterator()`.
+
+## NavigableMap (the upgrade)
+
+Added in Java 6 to expose what `TreeMap` already supported internally. The new methods come in pairs:
+
+```java
+public interface NavigableMap<K, V> extends SortedMap<K, V> {
+    // Neighbour lookups
+    Map.Entry<K,V> floorEntry(K key);     K floorKey(K key);       // <= key
+    Map.Entry<K,V> ceilingEntry(K key);   K ceilingKey(K key);     // >= key
+    Map.Entry<K,V> lowerEntry(K key);     K lowerKey(K key);       // <  key (strict)
+    Map.Entry<K,V> higherEntry(K key);    K higherKey(K key);      // >  key (strict)
+
+    // Endpoint pull (remove + return)
+    Map.Entry<K,V> pollFirstEntry();
+    Map.Entry<K,V> pollLastEntry();
+
+    // Descending views
+    NavigableMap<K,V> descendingMap();
+    NavigableSet<K> descendingKeySet();
+    NavigableSet<K> navigableKeySet();
+
+    // Inclusive/exclusive submaps
+    NavigableMap<K,V> subMap(K fromKey, boolean fromInclusive,
+                              K toKey, boolean toInclusive);
+    NavigableMap<K,V> headMap(K toKey, boolean inclusive);
+    NavigableMap<K,V> tailMap(K fromKey, boolean inclusive);
+}
+```
+
+The boolean-inclusive overloads of `subMap`/`headMap`/`tailMap` are a meaningful upgrade — the `SortedMap` versions are always `[from, to)`, which forced awkward workarounds for "give me everything `<= X`".
+
+## When the distinction matters
+
+In application code you typically declare variables as `NavigableMap`:
+
+```java
+NavigableMap<LocalDate, Report> reports = new TreeMap<>();
+reports.put(LocalDate.of(2026, 1, 1), report1);
+reports.put(LocalDate.of(2026, 4, 1), report2);
+
+// "Most recent report at or before today"
+Map.Entry<LocalDate, Report> latest = reports.floorEntry(LocalDate.now());
+```
+
+You'd lose `floorEntry` if the variable were typed `SortedMap`. The wider API is almost free to expose, since `TreeMap` and `ConcurrentSkipListMap` both implement `NavigableMap`.
+
+## Implementations
+
+| Interface | JDK implementations |
+| --- | --- |
+| `SortedMap` | `TreeMap`, `ConcurrentSkipListMap` (both also implement `NavigableMap`) |
+| `NavigableMap` | `TreeMap`, `ConcurrentSkipListMap` |
+
+There is no `SortedMap`-only implementation in the JDK — `NavigableMap` is the de-facto base. The `SortedMap` interface mostly exists for API stability and historical reasons.
+
+<Callout kind="info" title="Same pattern for sets">
+`SortedSet` -> `NavigableSet` with the same upgrade (`floor`, `ceiling`, `higher`, `lower`, descending iterators). `TreeSet` implements `NavigableSet`.
+</Callout>
+
+<ProbeNote>The interviewer wants you to know `NavigableMap` exists and adds the floor/ceiling/poll/descending operations. Bonus points for noting that all JDK implementations of `SortedMap` are actually `NavigableMap`, and the inclusive submap overloads were a real DX win.</ProbeNote>

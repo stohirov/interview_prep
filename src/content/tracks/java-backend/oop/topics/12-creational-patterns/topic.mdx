@@ -1,0 +1,31 @@
+**Creational patterns** decouple *what* you build from *how* you build it. In a `new MyClass(...)` call, the construction strategy is baked into every call site — change the class, edit every caller. The five GoF creational patterns (Singleton, Factory Method, Abstract Factory, Builder, Prototype) each move that decision somewhere more flexible: a method, a separate class, a hierarchy, or a clone of an existing object. Choose based on what varies in your domain.
+
+## The five at a glance
+
+| Pattern          | The problem it solves                                                                  |
+| ---------------- | -------------------------------------------------------------------------------------- |
+| Singleton        | Exactly one instance, globally accessible.                                              |
+| Factory Method   | Subclasses decide which concrete class to instantiate.                                  |
+| Abstract Factory | Create whole families of related products without coupling to their concrete classes.   |
+| Builder          | Construct an immutable object that has many (often optional) parameters, step by step.  |
+| Prototype        | Build a new object by copying an existing prototype, when construction is expensive.    |
+
+## When each fits
+
+- **Singleton**: registries, caches, factories, loggers — anywhere "one and only one" is the natural cardinality. Often overused; Spring's container handles most of these cases without you naming the pattern. In modern Java, prefer `enum`-based singletons (Bloch Item 3).
+
+- **Factory Method**: when you want to defer the type decision to a subclass. The classic example: a `Document` base class with a `createPage()` factory method; `WordDocument.createPage()` returns a `WordPage`, `PdfDocument.createPage()` returns a `PdfPage`. The framework calls `createPage()` and gets the right kind.
+
+- **Abstract Factory**: when products come in *consistent sets*. `UiFactory.createButton()`, `UiFactory.createMenu()` — and `MacUiFactory` always returns Mac-themed widgets while `WindowsUiFactory` returns Windows ones. You can't accidentally mix a Mac button with a Windows menu.
+
+- **Builder**: when a constructor would have 5+ parameters, several optional, and you want the result immutable. `HttpRequest.newBuilder().uri(...).GET().timeout(...).build()` from `java.net.http`.
+
+- **Prototype**: when constructing the object is expensive or its initial state is complex — e.g., a fully-loaded `GameLevel` you want to spawn enemies from. In Java, `clone()` is broken (Item 13), so use copy constructors, copy factories, or serialization-based deep copies. Records make the easy case trivial: `new MyRecord(old.field1(), old.field2())` is your "clone".
+
+## What ties them together
+
+All five share a goal: **separate construction concerns from use concerns**. After you apply them, calling code says "give me a configured X" rather than spelling out the recipe. That decoupling is what lets you swap implementations, test with fakes, and evolve construction logic without editing dozens of call sites.
+
+<Callout kind="tip" title="Static factories before patterns">
+Before reaching for any of these, ask whether a simple static factory method (Item 1) suffices. `List.of(...)`, `Optional.of(...)`, `Files.readAllLines(...)` are static factories — no pattern, just better-named constructors. They handle 80% of cases.
+</Callout>

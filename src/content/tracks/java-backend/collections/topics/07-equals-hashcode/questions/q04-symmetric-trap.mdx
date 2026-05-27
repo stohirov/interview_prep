@@ -1,0 +1,76 @@
+Adding a value component in a subclass and using `instanceof` in `equals` **breaks symmetry**. This is the classic Point/ColorPoint trap from *Effective Java* (Item 10), and it's the reason value classes should be `final` or use composition.
+
+## The setup
+
+```java
+public class Point {
+    final int x, y;
+    Point(int x, int y) { this.x = x; this.y = y; }
+
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof Point p && p.x == x && p.y == y;
+    }
+
+    @Override
+    public int hashCode() { return Objects.hash(x, y); }
+}
+
+public class ColorPoint extends Point {
+    final Color color;
+    ColorPoint(int x, int y, Color color) {
+        super(x, y);
+        this.color = color;
+    }
+
+    // Naive override: also check color
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof ColorPoint cp
+            && super.equals(cp)
+            && cp.color == color;
+    }
+}
+```
+
+## The trap
+
+```java
+Point p = new Point(1, 2);
+ColorPoint cp = new ColorPoint(1, 2, Color.RED);
+
+p.equals(cp);   // true  — Point.equals checks (x,y) only, sees instanceof Point pass
+cp.equals(p);   // false — ColorPoint.equals checks instanceof ColorPoint, p is just a Point
+```
+
+**Symmetry is broken.** Now `HashSet.contains` is non-deterministic: depending on which object is the receiver, you get different answers.
+
+## "Fix" attempt that creates a new bug
+
+Use `getClass()` instead of `instanceof`:
+
+```java
+@Override
+public boolean equals(Object o) {
+    return o != null && o.getClass() == getClass()
+        && ((Point) o).x == x && ((Point) o).y == y;
+}
+```
+
+Now `p.equals(cp)` is false (different classes), and so is `cp.equals(p)` — symmetric again. But this **violates the Liskov Substitution Principle**: a `ColorPoint` can no longer be used wherever a `Point` is expected for equality purposes. If a method takes a `Set<Point>` and you pass a set built from `ColorPoint`s, lookups with plain `Point` keys silently fail.
+
+<Callout kind="danger" title="There is no clean fix">
+Effective Java's verdict: "There is no way to extend an instantiable class and add a value component while preserving the equals contract." You must choose: break symmetry, break Liskov, or don't extend.
+</Callout>
+
+## What to do instead
+
+1. **Make value classes `final`** so they can't be subclassed.
+2. **Use composition** — ColorPoint *has* a Point, doesn't *extend* one. (See the next question.)
+3. **Use records** — records are implicitly final and auto-generate a correct equals.
+
+```java
+public record ColorPoint(Point location, Color color) {} // safe, final, symmetric
+```
+
+<ProbeNote>Probe: "What about asPoint() — a view method on ColorPoint?" (That's the composition fix: expose a Point view for interop without inheriting.) "Why does using getClass break Liskov?" (Because a subclass can never be equal to its superclass, violating substitutability.)</ProbeNote>

@@ -1,0 +1,60 @@
+**Implementation inheritance violates encapsulation** — the subclass becomes coupled to internal details of the superclass that the superclass never contracted to preserve. The relationship is "white-box" reuse: the subclass sees through the superclass, depends on its self-use patterns, and breaks when those patterns change. Composition is "black-box" reuse: the wrapper sees only the public contract, the same surface every other client sees.
+
+## The four concrete problems
+
+**1. Subclass depends on superclass internals.** A subclass override may be called by other superclass methods in ways the docs don't promise. Override one method, accidentally affect three.
+
+**2. Superclass evolution breaks subclasses.** Adding a method to `Super` may collide with a same-named method already defined in `Sub`. If signatures differ, you get a compile error; if they match, you've silently changed the subclass's behavior.
+
+**3. Inherited API surface.** Every public method of the superclass leaks into the subclass — including ones the subclass author doesn't want exposed. You can't subtract from an inherited interface.
+
+**4. Tight coupling defeats polymorphism.** A class that extends `ArrayList` can't be swapped for `LinkedList` without a rewrite. A class that *holds* a `List<T>` can.
+
+## The canonical example
+
+```java
+// BROKEN: extends instead of wraps
+public class InstrumentedHashSet<E> extends HashSet<E> {
+    private int addCount = 0;
+
+    @Override public boolean add(E e)              { addCount++; return super.add(e); }
+    @Override public boolean addAll(Collection<? extends E> c) {
+        addCount += c.size();
+        return super.addAll(c);
+    }
+    public int addCount() { return addCount; }
+}
+
+var s = new InstrumentedHashSet<String>();
+s.addAll(List.of("a", "b", "c"));
+System.out.println(s.addCount());   // expected 3, got 6
+```
+
+`HashSet.addAll` calls `this.add` internally, so each element is counted twice. Nothing in the `Set` contract said this would happen — the subclass made an assumption about an implementation detail and got punished for it.
+
+## The fix — composition
+
+Wrap a `Set`, forward unchanged methods, intercept the ones you care about:
+
+```java
+public class InstrumentedSet<E> implements Set<E> {
+    private final Set<E> s;
+    private int addCount = 0;
+    public InstrumentedSet(Set<E> s) { this.s = s; }
+    @Override public boolean add(E e)            { addCount++; return s.add(e); }
+    @Override public boolean addAll(Collection<? extends E> c) {
+        addCount += c.size(); return s.addAll(c);
+    }
+    // forward everything else to s
+}
+
+new InstrumentedSet<>(new HashSet<>()).addCount();   // counts correctly for ANY Set
+```
+
+Bonus: this works over `TreeSet`, `LinkedHashSet`, `ConcurrentSkipListSet`, anything implementing `Set`. The inheritance version locked you to `HashSet`.
+
+<Callout kind="info" title="The is-a test isn't enough">
+"A square is-a rectangle" is true in geometry and false in code (LSP violation, see the SOLID topic). "A stack is-a vector" is what Java's `Stack` says, and it's universally considered a design mistake. The is-a test is necessary but not sufficient.
+</Callout>
+
+<ProbeNote>The interviewer wants the `InstrumentedSet` story or an equivalent. Bonus points for naming the underlying reason ("self-use of overridable methods is an implementation detail") and for noting that composition makes the wrapper work over the whole interface family, not one concrete class.</ProbeNote>

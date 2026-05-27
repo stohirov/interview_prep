@@ -1,0 +1,88 @@
+**SRP says: a class should have one reason to change.** The "reason" is a stakeholder or axis of change — not "one method" or "one thing it does". A class with three responsibilities has three groups of people who might ask you to modify it, three sets of dependencies it pulls in, and three opportunities for unrelated changes to collide.
+
+## The misquote to avoid
+
+People often say "a class should do one thing." That's misleading — a `Report` class that gathers, formats, and persists data does three things, but the test is whether those three things change *for the same reasons by the same people*. If the data team owns the gathering, the design team owns the formatting, and ops owns the persistence, you have three responsibilities.
+
+## A violating `Report`
+
+```java
+public class Report {
+    private final DataSource db;
+
+    public Report(DataSource db) { this.db = db; }
+
+    public List<Row> fetch() {                          // data team's concern
+        try (var conn = db.getConnection()) {
+            // SQL, mapping, etc.
+            return ...;
+        }
+    }
+
+    public String formatHtml(List<Row> rows) {          // design team's concern
+        var sb = new StringBuilder("<table>");
+        for (var r : rows) sb.append("<tr>...</tr>");
+        return sb.append("</table>").toString();
+    }
+
+    public void save(String html, Path file) throws IOException {  // ops concern
+        Files.writeString(file, html);
+    }
+}
+```
+
+Three reasons to change: schema migration, redesign, switching to S3. Three sets of imports (`java.sql`, HTML/templating, `java.nio.file`). Tests have to mock the DB and the filesystem just to test the formatter.
+
+## Refactor to three classes
+
+```java
+public class ReportFetcher {
+    private final DataSource db;
+    public ReportFetcher(DataSource db) { this.db = db; }
+    public List<Row> fetch() { /* ... */ }
+}
+
+public class ReportFormatter {
+    public String formatHtml(List<Row> rows) { /* ... */ }
+}
+
+public interface ReportStore {
+    void save(String content, String id) throws IOException;
+}
+
+public class FilesystemReportStore implements ReportStore { /* ... */ }
+public class S3ReportStore         implements ReportStore { /* ... */ }
+```
+
+Now each class has one reason to change. Tests for `ReportFormatter` need no DB or filesystem. And we've already set up for OCP — adding S3 storage requires zero edits to the existing fetcher or formatter.
+
+A thin orchestrator ties them together:
+
+```java
+public class ReportPipeline {
+    private final ReportFetcher fetcher;
+    private final ReportFormatter formatter;
+    private final ReportStore store;
+    // ctor injection ...
+    public void run(String id) throws IOException {
+        var rows = fetcher.fetch();
+        var html = formatter.formatHtml(rows);
+        store.save(html, id);
+    }
+}
+```
+
+The pipeline *does* depend on all three, but its single responsibility is *coordination*. That's still one reason to change: the workflow.
+
+## The smell to watch for
+
+- The class imports from three unrelated packages (`java.sql`, `java.nio`, `org.thymeleaf`).
+- Method names cluster: `fetchX`, `formatX`, `saveX`.
+- Two unrelated git history paths edit the same file frequently.
+- A teammate has to learn three subsystems to make one change.
+
+<Callout kind="info" title="SRP scales: classes, modules, services">
+SRP isn't only about classes. The same logic applies to packages (one reason to recompile), modules (one reason to redeploy), and microservices (one reason to release). It's a fractal principle.
+</Callout>
+
+<ProbeNote>The interviewer wants the precise definition ("one reason to change") and a concrete refactor. A common trap follow-up: "Isn't `ReportPipeline` doing three things?" — no, it's orchestrating one workflow. The three concerns are *delegated*. SRP doesn't mean every class has one method; it means every class has one *axis of variation*.</ProbeNote>

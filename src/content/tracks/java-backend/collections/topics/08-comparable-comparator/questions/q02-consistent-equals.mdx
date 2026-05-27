@@ -1,0 +1,57 @@
+A `compareTo` is **consistent with equals** when `a.compareTo(b) == 0` if and only if `a.equals(b)`. The contract *recommends* this but doesn't *require* it. `BigDecimal` is the canonical violator: `new BigDecimal("2.0").equals(new BigDecimal("2.00"))` is `false` (different scale), but `compareTo` returns `0` (same numeric value).
+
+## The BigDecimal mismatch
+
+```java
+var a = new BigDecimal("2.0");
+var b = new BigDecimal("2.00");
+
+a.equals(b);     // false — scale differs (1 vs 2)
+a.compareTo(b);  // 0     — numeric value is identical
+a.hashCode() == b.hashCode(); // false (consistent with equals)
+```
+
+`BigDecimal` deliberately keeps scale in `equals` to distinguish `2.0` from `2.00` (they have different "precision"), but `compareTo` ignores scale because numerically they're the same.
+
+## Why this breaks sorted collections
+
+Sorted collections (`TreeSet`, `TreeMap`) treat elements as equal when **compareTo returns 0**, not when **equals returns true**. Hash collections do the opposite.
+
+```java
+var hashSet = new HashSet<BigDecimal>();
+hashSet.add(new BigDecimal("2.0"));
+hashSet.add(new BigDecimal("2.00"));
+hashSet.size(); // 2 — equals + hashCode say "different"
+
+var treeSet = new TreeSet<BigDecimal>();
+treeSet.add(new BigDecimal("2.0"));
+treeSet.add(new BigDecimal("2.00"));
+treeSet.size(); // 1 — compareTo says "same"
+```
+
+**Same elements, same code path, different collection types, different sizes.** Move from `HashSet` to `TreeSet` (or back) during a refactor and you can lose data without any warning.
+
+## The Set interface violation
+
+`Set` is contractually defined in terms of `equals`. `TreeSet` is a `Set` but uses `compareTo` for membership. So `TreeSet` technically violates the `Set` interface contract when its element type's `compareTo` is inconsistent with `equals`. The Javadoc warns about exactly this:
+
+> A sorted set [...] is well-behaved even when its ordering is inconsistent with equals; it just fails to obey the general contract of the `Set` interface.
+
+## Other types with the same trap
+
+- `BigDecimal` — scale-sensitive equals, scale-insensitive compareTo (described above).
+- Case-insensitive `String` comparators — `Comparator.CASE_INSENSITIVE_ORDER` says `"hello".compareTo("HELLO") == 0` but `"hello".equals("HELLO") == false`.
+- Most user-defined `Comparator`s — most comparators sort by a subset of fields, so two objects with different "other" fields compare as 0.
+
+## How to be safe
+
+1. **Document inconsistency** — if your type has `compareTo` inconsistent with `equals`, say so in the Javadoc. Effective Java Item 14.
+2. **Prefer `HashSet`/`HashMap` when membership matters** — they use `equals`, which is what programmers usually expect.
+3. **Use `TreeSet(Comparator)` explicitly** when you want compareTo-based deduplication. Then it's an intentional design choice.
+4. **Normalize before insertion** — call `bigDecimal.stripTrailingZeros()` before adding to a `HashSet` if you want `2.0` and `2.00` treated as duplicates.
+
+<Callout kind="warn" title="The BigDecimal trap is exam-favorite">
+This is one of the most asked Java collection questions. Memorize: equals checks scale, compareTo doesn't, TreeSet uses compareTo, HashSet uses equals.
+</Callout>
+
+<ProbeNote>Probe: "Why does BigDecimal define equals this way?" (To preserve scale information — `2.0` and `2.00` are different scale, which matters for precision in financial calculations.) "Show a test case where this bites you." (Above: same data, HashSet has 2 elements, TreeSet has 1.) "What's the fix?" (Either use `stripTrailingZeros` normalization or document the inconsistency and pick a collection that matches the desired semantics.)</ProbeNote>

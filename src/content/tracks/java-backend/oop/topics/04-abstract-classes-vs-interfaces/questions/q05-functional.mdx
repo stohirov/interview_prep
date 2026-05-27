@@ -1,0 +1,83 @@
+**A functional interface is any interface with exactly one abstract method (SAM — Single Abstract Method). `@FunctionalInterface` is a compile-time check that asserts this property, so accidentally adding a second abstract method becomes a build error instead of breaking every lambda call site.** It also documents intent to readers and tools.
+
+## The definition
+
+```java
+@FunctionalInterface
+public interface Predicate<T> {
+    boolean test(T t);                     // the single abstract method
+
+    default Predicate<T> and(Predicate<T> other) {    // OK, default doesn't count
+        return v -> test(v) && other.test(v);
+    }
+
+    static <T> Predicate<T> isEqual(Object target) {  // OK, static doesn't count
+        return target == null ? Objects::isNull : target::equals;
+    }
+}
+```
+
+What counts as "abstract" for the SAM rule:
+
+- `default` methods don't count.
+- `static` methods don't count.
+- `private` methods don't count.
+- Methods that override `Object` methods (`equals`, `hashCode`, `toString`) don't count.
+
+Only "new" abstract methods that an implementer must supply count toward the SAM total.
+
+## What the annotation buys you
+
+Without `@FunctionalInterface`:
+
+```java
+public interface Calculator {
+    int compute(int a, int b);
+    void log(String msg);                  // someone adds this later
+}
+
+Calculator add = (a, b) -> a + b;          // compile error: not a functional interface
+```
+
+You'd discover the breakage at every call site that used a lambda. With `@FunctionalInterface`, the error happens at the interface declaration — you fix it once and lambdas keep working (or you intentionally promote it to a non-functional interface).
+
+```java
+@FunctionalInterface
+public interface Calculator {
+    int compute(int a, int b);
+    void log(String msg);                  // compile error: multiple non-overriding abstract methods
+}
+```
+
+## The Object-methods exception
+
+```java
+@FunctionalInterface
+public interface Comparator<T> {
+    int compare(T a, T b);                 // SAM
+    boolean equals(Object o);              // re-declared from Object — doesn't count
+}
+```
+
+`Comparator.equals` is declared so the interface can document a stricter contract (two comparators are equal only if they impose the same ordering), but it doesn't add a second abstract method — implementers already have `equals` from `Object`.
+
+## Why lambdas need SAM
+
+A lambda is shorthand for an instance of a functional interface. The compiler infers *which* method the lambda implements from the target type. With multiple abstract methods, the inference is ambiguous — there's no way to know which one your lambda body is supposed to be.
+
+```java
+Runnable r = () -> System.out.println("hi");    // -> Runnable.run
+Callable<Integer> c = () -> 42;                  // -> Callable.call
+```
+
+Both `Runnable` and `Callable` are functional interfaces with one abstract method each. The lambda becomes the body of that one method; the variable type tells the compiler which.
+
+## Common functional interfaces in `java.util.function`
+
+`Function<T,R>`, `Predicate<T>`, `Consumer<T>`, `Supplier<T>`, `BiFunction<T,U,R>`, `UnaryOperator<T>`, `BinaryOperator<T>`, plus primitive-specialized versions (`IntFunction`, `ToIntFunction`, etc.) to dodge boxing in hot loops.
+
+<Callout kind="tip" title="When to roll your own">
+Use `Function`/`Predicate`/`Consumer` for ad-hoc one-shots. Define a custom functional interface (with `@FunctionalInterface`) when (a) the method name carries domain meaning, (b) you want a checked-exception signature, or (c) you want named default methods to compose them.
+</Callout>
+
+<ProbeNote>The interviewer wants the SAM definition, the annotation's purpose (compile-time enforcement, intent documentation), and awareness of the carve-outs (default, static, Object methods don't count). Bonus: connecting lambdas' need for SAM to the compiler's target-type inference. Weak candidates describe `Function<T,R>` and stop there.</ProbeNote>

@@ -1,0 +1,92 @@
+**OCP says: you should be able to add new behavior without modifying existing tested code.** The canonical violation is a `switch` (or `if/else` chain) over a type tag — every new variant forces you to edit, re-test, and re-deploy the dispatching code. The polymorphic refactor moves the new variant into a new class that the existing code never has to know about.
+
+## The violating switch
+
+```java
+public enum ShapeKind { CIRCLE, SQUARE, TRIANGLE }
+
+public class Shape {
+    public final ShapeKind kind;
+    public final double a, b;             // re-used per kind
+    public Shape(ShapeKind k, double a, double b) { this.kind = k; this.a = a; this.b = b; }
+}
+
+public class AreaCalculator {
+    public double area(Shape s) {
+        return switch (s.kind) {
+            case CIRCLE   -> Math.PI * s.a * s.a;
+            case SQUARE   -> s.a * s.a;
+            case TRIANGLE -> 0.5 * s.a * s.b;
+        };
+    }
+}
+```
+
+Adding `HEXAGON` means:
+
+1. Edit `ShapeKind`.
+2. Edit `AreaCalculator.area` — a new case.
+3. Re-test `AreaCalculator`.
+4. Hope no other `switch` over `ShapeKind` exists (spoiler: there will be three).
+
+`AreaCalculator` is *not closed for modification*.
+
+## The polymorphic refactor
+
+Move each kind's behavior into its own class. The calculator becomes trivial — or disappears entirely.
+
+```java
+public interface Shape {
+    double area();
+}
+
+public record Circle(double r)             implements Shape {
+    @Override public double area() { return Math.PI * r * r; }
+}
+public record Square(double side)          implements Shape {
+    @Override public double area() { return side * side; }
+}
+public record Triangle(double base, double h) implements Shape {
+    @Override public double area() { return 0.5 * base * h; }
+}
+
+// Caller:
+Shape s = new Circle(3);
+double a = s.area();
+```
+
+Adding `Hexagon`:
+
+```java
+public record Hexagon(double side) implements Shape {
+    @Override public double area() { return 1.5 * Math.sqrt(3) * side * side; }
+}
+```
+
+No existing class is touched. No retesting. Strict OCP.
+
+## What about *new operations*?
+
+OCP via polymorphism is great for adding new *types*. It's worse for adding new *operations* — adding `perimeter()` means editing every existing shape. This is the [expression problem](https://en.wikipedia.org/wiki/Expression_problem). The choices are:
+
+- **Visitor pattern** — pulls the operations out into separate classes (one `AreaVisitor`, one `PerimeterVisitor`).
+- **Sealed types + exhaustive switch** — Java 21+ pattern matching brings the switch back, but checked exhaustively so the compiler catches missed cases. This is modern Java's escape hatch when the set of types is known and small.
+
+```java
+public sealed interface Shape permits Circle, Square, Triangle {}
+
+double area(Shape s) {
+    return switch (s) {
+        case Circle c   -> Math.PI * c.r() * c.r();
+        case Square sq  -> sq.side() * sq.side();
+        case Triangle t -> 0.5 * t.base() * t.h();
+        // adding Hexagon is a compile error here AND in permits — intentional
+    };
+}
+```
+
+<Callout kind="info" title="Sealed switch vs polymorphism">
+Polymorphism: easy to add types, hard to add operations. Sealed switch: easy to add operations, hard to add types. Choose based on which axis varies more in your domain.
+</Callout>
+
+<ProbeNote>The interviewer wants the switch → polymorphism move with working code. A senior follow-up tests whether you understand the trade-off: "What if I need to add `perimeter` next?" If you say "I'd add it to every Shape," they want to hear that you understand the cost — and ideally name visitor or sealed-switch as alternatives.</ProbeNote>

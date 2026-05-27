@@ -1,0 +1,65 @@
+A **Facade** provides one simple entry point in front of a tangled subsystem. It's appropriate when callers don't need (and shouldn't depend on) the internals; it slides into anti-pattern territory when it becomes the *only* way to use the subsystem and starts accumulating logic that doesn't belong there.
+
+## When it belongs
+
+The classic case: a third-party library or legacy module exposes ten classes with subtle ordering requirements, and 90% of callers do the same five-call sequence. Wrap that sequence behind one method.
+
+```java
+// Subsystem: subtitles, audio, video, codec, projector...
+public class HomeTheaterFacade {
+    private final Amp amp;
+    private final Player player;
+    private final Projector projector;
+    private final Lights lights;
+
+    public HomeTheaterFacade(Amp a, Player p, Projector pr, Lights l) {
+        this.amp = a; this.player = p; this.projector = pr; this.lights = l;
+    }
+
+    public void watchMovie(String title) {
+        lights.dim(10);
+        projector.on();
+        amp.on();
+        amp.setVolume(5);
+        player.on();
+        player.play(title);
+    }
+
+    public void endMovie() {
+        player.stop();
+        amp.off();
+        projector.off();
+        lights.dim(100);
+    }
+}
+```
+
+The caller writes `theater.watchMovie("Dune")` and never thinks about the projector. But the subsystem classes remain `public` — power users can still skip the facade and call the parts directly.
+
+## Real-world facades in the JDK and Spring
+
+- `javax.faces.context.FacesContext` — facade over the entire JSF request lifecycle.
+- `org.springframework.jdbc.core.JdbcTemplate` — facade over `DataSource`, `Connection`, `Statement`, `ResultSet`, exception translation.
+- `java.util.logging.Logger` — facade over handlers, formatters, filters.
+
+Each one buys callers a 10x simpler API without taking away the underlying types when somebody actually needs them.
+
+## When it becomes an anti-pattern: the "God Facade"
+
+The facade hardens into an anti-pattern when:
+
+1. **It absorbs business logic.** A `UserFacade` that started as a thin wrapper grows authorization checks, validation, persistence orchestration, email sending, and metrics — turning into the application's entire service layer with the wrong name.
+2. **Callers can't bypass it.** Subsystem classes are made package-private to "force" everyone through the facade, and now legitimate edge cases need ugly workarounds.
+3. **It's the only API.** Every change to any subsystem class also changes the facade signature, and you end up with a facade that has 80 methods and 4,000 lines.
+
+The smell: a single class that any team can plausibly say they "depend on" because everything funnels through it.
+
+<Callout kind="warn" title="Facade vs Mediator">
+A Facade hides a subsystem from outside callers but the subsystem objects don't know the facade exists. A Mediator coordinates *between* objects that all reference it. If your "facade" is the only thing the inner objects call, you've actually built a mediator and may have inverted the dependency.
+</Callout>
+
+## The refactor when a facade has grown too large
+
+Split by use case, not by subsystem. A `HomeTheaterFacade` that does `watchMovie`, `playMusic`, and `videoCall` is three facades fighting for one class. Extract `MovieController`, `MusicController`, `CallController`, each reusing the same subsystem objects.
+
+<ProbeNote>The interviewer wants you to articulate that Facade is *opt-in convenience*, not enforced encapsulation. The follow-up they're hunting for: "what if the facade keeps growing?" — you should pivot immediately to splitting by use case or extracting domain services. Naming "God Facade" as the anti-pattern shows you've seen it in production.</ProbeNote>

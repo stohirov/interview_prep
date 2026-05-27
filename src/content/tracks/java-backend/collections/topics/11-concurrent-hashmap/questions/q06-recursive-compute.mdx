@@ -1,0 +1,84 @@
+**Calling `computeIfAbsent` (or any `compute*`/`merge`) on the same `ConcurrentHashMap` from inside the mapping function is undefined behavior. In practice the JDK detects the same-key case and throws `IllegalStateException`; the *different*-key case can either deadlock the bucket or corrupt internal counters. The fix is to compute the dependent value outside, then put it in.**
+
+## The trap
+
+```java
+ConcurrentHashMap<String, Integer> map = new ConcurrentHashMap<>();
+
+// BAD — recursive call on the SAME map
+map.computeIfAbsent("a", k -> {
+    return map.computeIfAbsent("b", k2 -> 42) + 1;
+});
+```
+
+If `b` happens to hash to the *same bucket* as `a`, the second call tries to re-enter the `synchronized` block on the bucket head — and since the JDK explicitly checks for this case, you get:
+
+```
+java.lang.IllegalStateException: Recursive update
+```
+
+If `b` hashes to a *different* bucket, you might "get away with it" — but the spec is explicit: the behavior is undefined. Future JDKs are free to detect and reject this too.
+
+## The official rule
+
+From the `ConcurrentHashMap.computeIfAbsent` Javadoc:
+
+> The mapping function **must not modify this map** during computation.
+
+This isn't a HashMap-style suggestion — it's a hard rule for CHM. The bucket is locked while your lambda runs; any operation that needs to traverse, resize, or lock the map can deadlock or see partially-constructed state.
+
+## Why even different keys are dangerous
+
+CHM's `transfer` (resize) and `treeifyBin` operations may need to acquire multiple bucket heads. A recursive call holding bucket A while reaching for bucket B that's mid-resize can stall indefinitely. The same-key check is just the easy detection — different-key recursion is the silent killer.
+
+## The fix: separate the steps
+
+```java
+// GOOD — load dependencies first, no recursion under the lambda
+int bVal = map.computeIfAbsent("b", k -> 42);
+map.computeIfAbsent("a", k -> bVal + 1);
+```
+
+## Real-world example: graph caches
+
+A common bug: caching node values in a graph where each node depends on its children.
+
+```java
+// BAD — recursive
+private final ConcurrentHashMap<Node, Long> sizes = new ConcurrentHashMap<>();
+
+long size(Node n) {
+    return sizes.computeIfAbsent(n, k ->
+        1L + n.children().stream().mapToLong(this::size).sum()
+        // ^ recursive computeIfAbsent on the same map
+    );
+}
+```
+
+Fix by recursing *outside* the cache:
+
+```java
+// GOOD — compute child sizes first
+long size(Node n) {
+    Long cached = sizes.get(n);
+    if (cached != null) return cached;
+
+    long total = 1 + n.children().stream().mapToLong(this::size).sum();
+    sizes.putIfAbsent(n, total);
+    return total;
+}
+```
+
+You may compute the same value twice under contention, but the map never deadlocks.
+
+## Symptoms in production
+
+- `IllegalStateException: Recursive update` — at least it's loud.
+- A thread "stuck" forever in `compute` — likely a different-key recursion deadlock.
+- Heisenbugs that only appear under load — racy resize interactions.
+
+<Callout kind="warn" title="HashMap has a softer version of this bug">
+Plain `HashMap.computeIfAbsent` has the same restriction (per Javadoc) but the symptoms are different — infinite loops during resize, lost entries. Same principle: never touch the map you're computing into from within the lambda.
+</Callout>
+
+<ProbeNote>Probe: "What about reading from the same map inside the lambda — `map.get(otherKey)`?" Strictly, reads are allowed by the Javadoc only if they don't trigger mutation, but they can still observe transient state. Safer rule: do all map access outside the lambda; pass any inputs in by closure.</ProbeNote>

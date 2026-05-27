@@ -1,0 +1,86 @@
+`PriorityQueue.iterator()` returns elements in **no guaranteed order** — it walks the internal heap array, which is NOT a sorted sequence. To consume elements in priority order, you must call `poll()` repeatedly until the queue is empty.
+
+## The trap
+
+```java
+var pq = new PriorityQueue<Integer>();
+pq.offer(5);
+pq.offer(1);
+pq.offer(3);
+pq.offer(2);
+pq.offer(4);
+
+// Looks reasonable... but is wrong
+for (Integer x : pq) {
+    System.out.print(x + " ");
+}
+// Possible output: 1 2 3 5 4
+// NOT 1 2 3 4 5
+```
+
+You expected sorted output (1, 2, 3, 4, 5). You got 1 2 3 5 4 — the heap array's storage order.
+
+## Why this happens
+
+`PriorityQueue` is a **binary min-heap** stored in an array. The heap property guarantees only that **each parent is no greater than its children**, not that the array is fully sorted. The minimum is always at index 0, but index 1 might be larger than index 3.
+
+<Diagram caption="Binary min-heap stored as an array — array order != sort order">{`Heap (array index in parens):
+              1 (0)
+            /       \\
+          2 (1)    3 (2)
+         /   \\     /
+       5 (3) 4(4) ...
+
+Array representation: [1, 2, 3, 5, 4]
+
+iterator() walks array left-to-right: 1, 2, 3, 5, 4
+poll() pops the root each time, re-heapifying: 1, 2, 3, 4, 5`}</Diagram>
+
+## The correct way to iterate in priority order
+
+```java
+// Destructive: drains the queue
+while (!pq.isEmpty()) {
+    System.out.print(pq.poll() + " ");
+}
+
+// Non-destructive: copy first
+var copy = new PriorityQueue<>(pq);
+while (!copy.isEmpty()) {
+    System.out.print(copy.poll() + " ");
+}
+```
+
+Or use a sorted view:
+
+```java
+pq.stream()
+  .sorted()                 // sorts on consumption
+  .forEach(System.out::println);
+```
+
+Note: `pq.stream().sorted()` works because `stream()` walks `iterator()` (heap order), then `sorted()` re-sorts. It's correct but redundant — you're paying for both heap maintenance and a re-sort.
+
+## Why was it designed this way?
+
+Maintaining sorted iteration would require keeping a separate sorted view, doubling memory, or re-sorting on every iterator request (O(n log n) per iteration). The heap structure is optimized for `O(log n)` insert and `O(log n)` extract-min, not iteration.
+
+`TreeSet` and `TreeMap` *do* iterate in sorted order — because their underlying red-black tree maintains sort invariants on every operation. They trade slower inserts (O(log n) plus rebalancing) for sorted iteration.
+
+<Callout kind="warn" title="forEach, toArray, toString are all heap-order">
+The trap extends to `pq.forEach(...)`, `pq.toArray()`, `pq.toString()`, `pq.stream()`, and `Collectors.toList()` over a PQ stream. **Any traversal that doesn't go through poll() returns heap order, not priority order.**
+</Callout>
+
+## Real-world consequence: bug pattern
+
+```java
+// Bug: prints tasks NOT in priority order
+PriorityQueue<Task> tasks = ...;
+for (Task t : tasks) {
+    log.info("Pending: {}", t);  // misleading order in logs
+}
+```
+
+The fix: clone and poll, or use a TreeMap from the start.
+
+<ProbeNote>Probe: "What's the time complexity of polling the entire queue?" (O(n log n) — n polls, each O(log n).) "Can I get sorted iteration efficiently?" (Yes — use a TreeMap or TreeSet if you need both ordered iteration AND ordered insertion. Or copy the PQ contents into a sorted list once when you need it.) "Does PriorityBlockingQueue have the same iterator behavior?" (Yes — same heap structure.)</ProbeNote>

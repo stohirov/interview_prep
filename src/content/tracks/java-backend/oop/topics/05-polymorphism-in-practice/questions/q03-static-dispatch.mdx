@@ -1,0 +1,55 @@
+**Static methods are bound to the class at compile time, not to an instance at runtime — so the reference type, not the object's runtime type, picks which method runs.** This is called *static dispatch* (or *method hiding* when a subclass declares a same-signature static method) and is the most common interview gotcha around polymorphism.
+
+## Demo
+
+```java
+class Parent {
+    static String who() { return "Parent"; }
+    String greet() { return "hi from " + who(); }
+}
+
+class Child extends Parent {
+    static String who() { return "Child"; }       // hides, not overrides
+}
+
+Parent p = new Child();
+System.out.println(p.who());     // "Parent"  <- reference type wins
+System.out.println(((Child) p).who()); // "Child"
+
+Child c = new Child();
+System.out.println(c.greet());   // "hi from Parent"  <-- !!
+```
+
+The last line is the kicker. Even though we called `greet()` on a `Child`, `greet` itself calls `who()` — and *inside* `Parent.greet` the receiver of `who()` is the class `Parent`. There's no vtable lookup to redirect it.
+
+## Why the JVM works this way
+
+Static methods have no `this`. The bytecode is `invokestatic`, which takes a fully-qualified `Class.method` reference at the constant pool and jumps directly there — no dispatch table, no receiver lookup. The class is hardcoded into the call site by the compiler.
+
+Compare to instance dispatch:
+
+```text
+invokevirtual:  load receiver -> read class pointer -> vtable[slot] -> jump
+invokestatic:   jump directly to resolved method
+```
+
+There is literally no mechanism by which `invokestatic` could pick the subclass implementation; the subclass isn't even part of the instruction.
+
+## Static methods aren't *overridden* — they're *hidden*
+
+```java
+class Parent { static void log() { System.out.println("p"); } }
+class Child extends Parent { static void log() { System.out.println("c"); } }  // legal — but no @Override
+```
+
+You can declare a same-signature static in a subclass; the compiler accepts it. But you cannot mark it `@Override` (the annotation explicitly rejects statics) because the subclass version *hides* the parent version when accessed through the subclass — it does not replace it via a vtable slot.
+
+<Callout kind="warn" title="`@Override` is your seatbelt">
+Always annotate intended overrides with `@Override`. The compiler will reject it on a static method, making the mistake impossible. This is one of the cheapest defensive habits in Java.
+</Callout>
+
+## When you actually want polymorphic class-level behavior
+
+Use an instance method on a singleton, an enum, or pass a `Supplier<T>` / strategy. Anything where the call goes through a *receiver* gets the dispatch you want.
+
+<ProbeNote>The clean answer names the bytecode (`invokestatic` vs `invokevirtual`), shows the demo where the parent's `greet()` calls the parent's `who()` even when invoked on a child, and concludes that statics belong to the class, not the instance. A weaker answer just says "statics can't be overridden" without explaining the mechanism.</ProbeNote>

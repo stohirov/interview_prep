@@ -1,0 +1,87 @@
+**The `hashCode` contract has three rules, the second of which is the one that bites: equal objects must produce equal hash codes.** Unequal objects are *allowed* to share a hash (collisions are fine), but if two objects are `equals` and their hashes differ, every hash-based collection in the JDK silently breaks.
+
+## The three rules
+
+1. **Consistency** — `hashCode()` must return the same value on repeated calls within one execution, provided no information used by `equals` changes.
+2. **Equals implies equal hash** — if `a.equals(b)` then `a.hashCode() == b.hashCode()`.
+3. **Unequal objects may collide** — `!a.equals(b)` does *not* require different hash codes. Better hash distribution improves performance, but correctness only requires the second rule.
+
+## Why rule 2 is load-bearing
+
+Hash collections find a key in two steps:
+
+```text
+HashMap.get(key):
+  bucket = key.hashCode() & (table.length - 1)    // pick the bucket
+  for each entry in table[bucket]:                // walk the chain
+      if entry.key.equals(key) return entry.value
+  return null
+```
+
+If the inserted key's hash differs from the lookup key's hash, they land in different buckets and the `equals` walk never runs. `HashMap.get(key)` returns `null` for a key you literally just `put`.
+
+## The deadly anti-pattern
+
+```java
+class Money {
+    long cents;
+    String currency;
+
+    @Override public boolean equals(Object o) {
+        return o instanceof Money m && m.cents == cents && m.currency.equals(currency);
+    }
+    // hashCode forgotten — inherits Object's identity hash
+}
+
+var map = new HashMap<Money, String>();
+map.put(new Money(100, "USD"), "rent");
+map.get(new Money(100, "USD"));  // null — different identity hashes
+```
+
+Two `Money(100, "USD")` instances are `equals`, but `Object.hashCode` returns the JVM identity hash — different for each `new`. Rule 2 violated; the map appears to lose its entries.
+
+## The canonical implementation
+
+```java
+@Override
+public int hashCode() { return Objects.hash(cents, currency); }
+```
+
+`Objects.hash` is a varargs helper that mixes its arguments with `Arrays.hashCode`. For hot paths where you want to avoid the array allocation, do it by hand:
+
+```java
+@Override
+public int hashCode() {
+    int result = Long.hashCode(cents);
+    result = 31 * result + currency.hashCode();
+    return result;
+}
+```
+
+The `31 * result + field` pattern (Effective Java Item 11) uses an odd prime to spread bits well and is cheap because `31 * x == (x << 5) - x` (HotSpot rewrites it).
+
+## Records get this right for free
+
+```java
+record Money(long cents, String currency) {}
+// hashCode generated, all three rules satisfied.
+```
+
+## When mutability bites
+
+If you include a mutable field in `equals`/`hashCode` and then mutate it after inserting the key:
+
+```java
+var key = new Bag(List.of("a"));
+map.put(key, "v");
+key.add("b");          // bucket placement is now stale
+map.get(key);          // null — hashes to a different bucket
+```
+
+The entry is still physically in the map, just unreachable through any lookup. **Never use mutable state as a hash key.** This is why most hash-keyable types are immutable (`String`, `Integer`, records).
+
+<Callout kind="warn" title="Override both or neither">
+The IDE generator (and Lombok's `@EqualsAndHashCode`) always emit them as a pair. If you ever write one by hand, write the other in the same commit.
+</Callout>
+
+<ProbeNote>The interviewer wants the three rules, the asymmetry (equals ⇒ same hash, but unequal does not require different hash), and a concrete failure scenario when rule 2 is broken. Strong candidates also explain the bucket lookup and mention the mutable-key bug.</ProbeNote>

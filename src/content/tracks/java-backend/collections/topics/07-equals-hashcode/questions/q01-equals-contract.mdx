@@ -1,0 +1,47 @@
+The `equals` contract has **five properties**: reflexive, symmetric, transitive, consistent, and non-null. Any class that overrides `equals` must satisfy all five for hash collections, lists, and `Object`-method clients to work correctly.
+
+## The five properties
+
+1. **Reflexive** — `x.equals(x)` must return `true` for every non-null `x`.
+2. **Symmetric** — `x.equals(y)` must return `true` if and only if `y.equals(x)` returns `true`.
+3. **Transitive** — If `x.equals(y)` and `y.equals(z)`, then `x.equals(z)`.
+4. **Consistent** — Multiple invocations of `x.equals(y)` must return the same result, provided no information used in the comparison changes.
+5. **Non-null** — `x.equals(null)` must return `false` (never throw `NullPointerException`).
+
+## Canonical implementation
+
+```java
+public final class Money {
+    private final long cents;
+    private final String currency;
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;                  // reflexive shortcut
+        if (!(o instanceof Money other)) return false; // non-null + type check
+        return cents == other.cents
+            && currency.equals(other.currency);       // field-by-field
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(cents, currency);
+    }
+}
+```
+
+The `instanceof` check handles the null case for free: `null instanceof Money` is always `false`.
+
+## Why each property matters
+
+- **Reflexive** failure breaks `List.contains(x)` when `x` is in the list — it walks elements calling `e.equals(x)`, but the implementation might recurse `x.equals(x)` internally.
+- **Symmetric** failure breaks bidirectional searches. `set.contains(colorPoint)` may behave differently from `colorPointSet.contains(point)`.
+- **Transitive** failure means `HashSet` may contain three pairwise-equal-ish objects that aren't all considered duplicates.
+- **Consistent** failure (e.g., using `System.currentTimeMillis()` in equals) makes keys "disappear" from `HashMap`.
+- **Non-null** failure throws NPE during collection operations, since collections routinely test against null.
+
+<Callout kind="tip" title="Pattern matching for instanceof">
+Java 16+'s pattern matching (`o instanceof Money other`) replaces the old cast and is the modern idiom.
+</Callout>
+
+<ProbeNote>Probe: "Which property does the Point/ColorPoint inheritance trap violate?" (Symmetric.) "Why is using a mutable field in equals bad?" (Breaks consistent — and worse, breaks `HashMap` if the key mutates after insertion.)</ProbeNote>

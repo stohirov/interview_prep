@@ -1,0 +1,74 @@
+**Java has two flavors of polymorphism: compile-time (overloading, generics) and runtime (overriding via dynamic dispatch).** The difference matters because compile-time polymorphism is resolved against the *declared* type, while runtime polymorphism follows the *actual* object — which is the most common source of "why isn't my method being called?" bugs.
+
+## Compile-time: overloading
+
+The compiler picks an overload based on the *static* types of the arguments:
+
+```java
+class Printer {
+    void print(Object o) { System.out.println("Object: " + o); }
+    void print(String s) { System.out.println("String: " + s); }
+}
+
+Printer p = new Printer();
+Object x = "hello";
+p.print(x);     // prints "Object: hello" — chosen at compile time
+```
+
+Even though `x` *holds* a `String` at runtime, the compiler only knows it's an `Object` and bakes that overload choice into the bytecode. Overloading is also called **ad-hoc polymorphism**.
+
+## Runtime: overriding
+
+Overriding picks the implementation based on the *runtime* type of the receiver:
+
+```java
+class Animal { String sound() { return "..."; } }
+class Dog extends Animal { @Override String sound() { return "woof"; } }
+class Cat extends Animal { @Override String sound() { return "meow"; } }
+
+Animal a = new Dog();
+System.out.println(a.sound());     // "woof" — chosen at runtime
+```
+
+The JVM emits `invokevirtual` for instance method calls. At dispatch time it consults the object's vtable and jumps to `Dog.sound()`. This is **subtype polymorphism**, the workhorse of OO.
+
+## Generics: parametric polymorphism
+
+A third flavor often grouped with compile-time:
+
+```java
+class Box<T> {
+    private final T value;
+    Box(T value) { this.value = value; }
+    T get()      { return value; }
+}
+
+Box<String>  s = new Box<>("hi");
+Box<Integer> n = new Box<>(42);
+```
+
+One class, many element types — without writing one class per type and without losing type safety. The JVM erases the parameter at runtime (type erasure), so the polymorphism is purely compile-time.
+
+## Why the distinction matters
+
+```java
+void render(Object o) { System.out.println("any"); }
+void render(String s) { System.out.println("string"); }
+
+Object o = "hi";
+render(o);        // "any" — overload picked at compile time
+render((String)o); // "string" — different static type, different overload
+```
+
+Contrast with overriding, where casting the receiver changes nothing:
+
+```java
+Animal a = new Dog();
+((Animal) a).sound();    // still "woof" — dispatch is on the object
+```
+
+<Callout kind="info" title="Mental model">
+Overloading asks the compiler "which method shape best fits these *declared* arguments?" Overriding asks the JVM "for this *actual* object, where is its `sound`?"
+</Callout>
+
+<ProbeNote>The interviewer wants both flavors named and shown in code, plus the awareness that overload resolution is static while override dispatch is dynamic. Bonus points for mentioning generics as parametric polymorphism and connecting `invokevirtual` to the runtime mechanism. Candidates who only describe one flavor get classified as junior.</ProbeNote>

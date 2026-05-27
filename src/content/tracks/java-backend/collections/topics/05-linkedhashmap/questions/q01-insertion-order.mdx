@@ -1,0 +1,61 @@
+`LinkedHashMap` threads a **doubly-linked list** through every entry. Each `Entry` extends `HashMap.Node` with `before` and `after` references; the map itself holds `head` and `tail` pointers. When you `put` a new key, it's appended to the tail; iteration walks the chain from `head` to `tail`, giving you insertion order regardless of bucket layout.
+
+## The entry node
+
+```java
+static class Entry<K,V> extends HashMap.Node<K,V> {
+    Entry<K,V> before, after;
+    Entry(int hash, K key, V value, Node<K,V> next) {
+        super(hash, key, value, next);
+    }
+}
+```
+
+The bucket-chain `next` pointer (inherited from `HashMap.Node`) is independent of `before`/`after`. So an entry simultaneously sits in two structures: the hash bucket (collision chain) and the access/insertion chain.
+
+## What happens on `put`
+
+`LinkedHashMap` overrides `HashMap`'s factory methods so the table holds `LinkedHashMap.Entry` instances. The general flow on insert:
+
+1. `HashMap.putVal` does the normal hash-table work and creates the node via `newNode(...)`.
+2. `newNode(...)` is overridden to build a `LinkedHashMap.Entry` and call `linkNodeLast(p)`, which appends it to the tail.
+3. `afterNodeAccess(p)` fires on updates; `afterNodeInsertion(evict)` fires after inserts (the hook that drives `removeEldestEntry`).
+
+```java
+// inside LinkedHashMap
+private void linkNodeLast(Entry<K,V> p) {
+    Entry<K,V> last = tail;
+    tail = p;
+    if (last == null) head = p;
+    else { p.before = last; last.after = p; }
+}
+```
+
+## Iteration
+
+`entrySet().iterator()` walks the chain via `after`, not the bucket array. This makes iteration over a partly-filled `LinkedHashMap` faster than over a `HashMap` of the same size — you visit n nodes instead of (n + capacity) slots.
+
+```java
+Map<String, Integer> m = new LinkedHashMap<>();
+m.put("b", 1);
+m.put("a", 2);
+m.put("c", 3);
+m.put("b", 99); // updates value; does NOT move "b" in default mode
+
+m.forEach((k, v) -> System.out.println(k + "=" + v));
+// b=99
+// a=2
+// c=3
+```
+
+In **insertion-order mode** (default, `accessOrder=false`), updating an existing key replaces the value but does *not* touch the chain. Switch to access-order mode and the same `put("b", 99)` would move "b" to the tail.
+
+## Removal
+
+`remove(k)` unlinks the entry from both the bucket chain (HashMap logic) and the access chain (`unlink` adjusts `before`/`after` neighbours and possibly `head`/`tail`).
+
+<Callout kind="info" title="Why doubly-linked?">
+A singly-linked list would force O(n) removal. Doubly-linked lets `remove` and `move-to-tail` operations be O(1) — essential for the access-order/LRU use case.
+</Callout>
+
+<ProbeNote>The interviewer wants to confirm you know there are two parallel structures (hash buckets *and* a doubly-linked chain), not just one. Mentioning that iteration walks the chain (faster than `HashMap`'s slot scan) is a nice extra.</ProbeNote>

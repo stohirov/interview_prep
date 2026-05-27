@@ -1,0 +1,52 @@
+**Object construction in Java is a precisely-ordered choreography across at least two phases — class initialization (once per classloader) and instance initialization (per `new`).** Interviewers probe this because subtle bugs (`NullPointerException` from a method called by a superclass constructor, a static field that's `null` when you expected a value) all trace back to mis-modeling the order.
+
+## The two phases
+
+**Class initialization** runs the first time the JVM "actively uses" the class — typically the first `new`, the first static method call, or the first static field read of a non-constant. Inside this phase: static fields are set to their default values (`0`, `null`, `false`), then static field initializers and `static { }` blocks run *in source order*.
+
+**Instance initialization** runs on every `new`. Per object: instance fields default to zero values, `super(...)` is invoked (recursively, all the way up to `Object`), then instance field initializers and `{ }` blocks run in source order, then the constructor body runs.
+
+## The exact order with a hierarchy
+
+<Diagram caption="Initialization order for `new Child()` where Child extends Parent">{`Phase 1 — class init (once per class, child first triggers parent)
+  Parent: static fields default values
+  Parent: static initializers (fields + static blocks) in source order
+  Child:  static fields default values
+  Child:  static initializers (fields + static blocks) in source order
+
+Phase 2 — instance init (every new Child())
+  allocate Child object; all instance fields default values
+  enter Child constructor
+    super() — implicit or explicit, must be first
+      enter Parent constructor
+        super() — up to Object
+        Parent: instance field initializers + { } blocks in source order
+        Parent: constructor body
+      exit Parent constructor
+    Child: instance field initializers + { } blocks in source order
+    Child: constructor body
+  exit Child constructor`}</Diagram>
+
+## Why this matters in practice
+
+Calling an overridable method from a constructor is the classic landmine:
+
+```java
+class Parent {
+    Parent() { init(); }                      // dispatches to Child.init()
+    void init() { System.out.println("parent init"); }
+}
+
+class Child extends Parent {
+    private final String name = "child";       // not yet assigned!
+    @Override void init() { System.out.println("init: " + name); }
+}
+
+new Child();   // prints "init: null"
+```
+
+When `Parent()` calls `init()`, dynamic dispatch picks `Child.init()`, but `Child`'s field initializers haven't run yet — `name` is still `null`. *Effective Java* item 19 is unambiguous: never call an overridable method from a constructor.
+
+## What happens if something throws
+
+A throw inside any of these steps aborts construction. The half-built object is not assigned to your reference; it becomes eligible for garbage collection — *unless* you leaked `this` somewhere along the way. The questions below pull on each thread.

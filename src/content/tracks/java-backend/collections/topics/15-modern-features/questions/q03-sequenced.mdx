@@ -1,0 +1,116 @@
+**Sequenced Collections (JEP 431, Java 21) unify the "ordered collection" concept across the JDK. Before 21, `List`, `LinkedHashSet`, `LinkedHashMap`, and `Deque` all had encounter order but exposed it inconsistently — there was no shared API for `getFirst`, `getLast`, or `reversed`. Sequenced Collections fix that gap.**
+
+## The problem it solves
+
+Pre-Java-21, asking "what's the first element?" looked different for every encounter-ordered collection:
+
+```java
+// "First element" — pre-21
+list.get(0);                                       // List
+linkedHashSet.iterator().next();                   // LinkedHashSet
+linkedHashMap.entrySet().iterator().next().getKey();  // LinkedHashMap
+deque.peekFirst();                                 // Deque
+
+// "Reversed view" — pre-21
+// List: Collections.reverse(copy) — copies and mutates
+// LinkedHashSet: manually iterate into LinkedList from the end — no clean API
+// Deque: descendingIterator() — but it's an Iterator, not a Collection
+```
+
+Three different idioms, none of them obvious, no way to write generic code over "ordered collections." Iterating in reverse was even worse — `LinkedHashSet` and `LinkedHashMap` had no built-in reverse iteration at all.
+
+## The new hierarchy
+
+```
+Collection
+  +-- SequencedCollection         <-- new in 21
+        +-- List
+        +-- Deque (and LinkedList, ArrayDeque)
+        +-- SequencedSet          <-- new in 21
+              +-- LinkedHashSet
+              +-- (NavigableSet — TreeSet, etc.)
+
+Map
+  +-- SequencedMap                <-- new in 21
+        +-- LinkedHashMap
+        +-- (NavigableMap — TreeMap, etc.)
+```
+
+`SequencedCollection`, `SequencedSet`, and `SequencedMap` are new interfaces retrofitted onto every existing collection that has a defined encounter order. `HashSet` and `HashMap` are not sequenced (no defined order). `NavigableMap`/`NavigableSet` are sequenced (order = sort order).
+
+## The new API
+
+```java
+interface SequencedCollection<E> extends Collection<E> {
+    E getFirst();
+    E getLast();
+    void addFirst(E e);
+    void addLast(E e);
+    E removeFirst();
+    E removeLast();
+    SequencedCollection<E> reversed();   // live view, not a copy
+}
+
+interface SequencedMap<K, V> extends Map<K, V> {
+    Map.Entry<K, V> firstEntry();
+    Map.Entry<K, V> lastEntry();
+    Map.Entry<K, V> pollFirstEntry();
+    Map.Entry<K, V> pollLastEntry();
+    V putFirst(K, V);
+    V putLast(K, V);
+    SequencedMap<K, V> reversed();
+    SequencedSet<K> sequencedKeySet();
+    SequencedCollection<V> sequencedValues();
+    SequencedSet<Map.Entry<K, V>> sequencedEntrySet();
+}
+```
+
+## What you can now write
+
+```java
+// Generic "first element of any ordered collection"
+public static <E> E head(SequencedCollection<E> c) {
+    return c.getFirst();
+}
+
+head(List.of(1, 2, 3));                              // 1
+head(new LinkedHashSet<>(List.of("a", "b")));        // "a"
+head(new ArrayDeque<>(List.of(true, false)));        // true
+
+// Reverse iteration over a LinkedHashSet (impossible cleanly before)
+LinkedHashSet<String> ordered = new LinkedHashSet<>(List.of("a", "b", "c"));
+for (String s : ordered.reversed()) {
+    System.out.println(s);   // c, b, a
+}
+
+// LRU-style "promote on access"
+LinkedHashMap<String, Long> lru = new LinkedHashMap<>();
+lru.put("k", System.nanoTime());
+// Promote: putLast moves the entry to the end without removing it
+lru.putLast("k", System.nanoTime());
+```
+
+## Important: `reversed()` is a live view
+
+```java
+List<Integer> xs = new ArrayList<>(List.of(1, 2, 3));
+List<Integer> rev = xs.reversed();   // [3, 2, 1]
+
+xs.add(4);
+System.out.println(rev);             // [4, 3, 2, 1] — sees the update
+
+rev.add(0);                          // adds at the *end* of rev = *front* of xs
+System.out.println(xs);              // [0, 1, 2, 3, 4]
+```
+
+No copy. Modifications through either reference are visible to the other.
+
+## What it doesn't change
+
+`HashSet`, `HashMap`, `ConcurrentHashMap`, `TreeSet`, `TreeMap` — `TreeSet`/`TreeMap` *are* sequenced (sort order is an encounter order), but `HashSet`/`HashMap` are not, and never will be — they have no defined order.
+
+<Callout kind="info" title="Source compatibility">
+Adding `SequencedCollection` as a supertype of `List` is a source-compatible change because the new default methods (like `reversed()`) don't conflict with anything in pre-21 `List`. Existing code recompiles unchanged.
+</Callout>
+
+<ProbeNote>Easy probe: "How did you get the last element of a `LinkedHashSet` before Java 21?" — answer: there was no clean way; common workarounds were converting to `List` or maintaining a parallel `Deque`. That's why JEP 431 exists.</ProbeNote>

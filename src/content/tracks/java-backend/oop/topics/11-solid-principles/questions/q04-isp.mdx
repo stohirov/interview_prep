@@ -1,0 +1,79 @@
+**ISP says: clients should not be forced to depend on methods they don't use.** A "fat" interface mashes unrelated capabilities together, forcing every implementer to either supply meaningful behavior for every method or stub the irrelevant ones with `UnsupportedOperationException` / no-ops. Either way, the interface is coupling clients to methods they have no business knowing about, and any change to those methods ripples to every implementer.
+
+## The fat interface
+
+```java
+public interface Worker {
+    void work();
+    void eat();
+    void sleep();
+}
+
+public class HumanWorker implements Worker {
+    public void work()  { /* ... */ }
+    public void eat()   { /* ... */ }
+    public void sleep() { /* ... */ }
+}
+
+public class RobotWorker implements Worker {
+    public void work()  { /* ... */ }
+    public void eat()   { throw new UnsupportedOperationException(); }    // smell
+    public void sleep() { throw new UnsupportedOperationException(); }    // smell
+}
+```
+
+The robot pays for capabilities it doesn't have. A `WorkScheduler` that only cares about `work()` still gets dragged into recompiles if `Worker.eat()` changes signature. And every `if (worker instanceof RobotWorker)` check that callers now need is a sign the abstraction is wrong.
+
+## Segregated interfaces
+
+Split by client need:
+
+```java
+public interface Workable { void work(); }
+public interface Eatable  { void eat(); }
+public interface Sleepable { void sleep(); }
+
+public class HumanWorker implements Workable, Eatable, Sleepable {
+    public void work()  { /* ... */ }
+    public void eat()   { /* ... */ }
+    public void sleep() { /* ... */ }
+}
+
+public class RobotWorker implements Workable {     // honest
+    public void work() { /* ... */ }
+}
+```
+
+Now `WorkScheduler` depends only on `Workable`. `CafeteriaManager` depends only on `Eatable`. Neither cares whether the other interface changes. A new `DroneWorker implements Workable` doesn't need to lie about eating.
+
+## Real JDK examples — and counter-examples
+
+- **`java.util.Iterator`** is well-segregated: `hasNext`, `next`, `remove`. Even so, `remove` is an "optional operation" that throws `UnsupportedOperationException` from many implementations — a JCF historical compromise that's mildly anti-ISP.
+- **`java.util.Collection`** mashes `add`, `remove`, `contains`, `stream`, `parallelStream`, `iterator`, `forEach`, `removeIf` together. Pragmatic, but a strict reading would split read-only vs mutable.
+- **`Closeable` / `AutoCloseable`** is a deliberately tiny interface — pure ISP done right.
+
+## When NOT to over-segregate
+
+ISP is not "every method gets its own interface." That's how you end up with 30 single-method interfaces and a constructor that takes 30 arguments. The right granularity is **per client use case** — group methods that are always used together by the same callers.
+
+If the codebase has three places that consume `Workable`, three that consume `Eatable`, three that consume `Sleepable`, those are three real client groups. If 95% of consumers use all three, leave them in one interface — segregation isn't free.
+
+## The Java 8+ default-method trap
+
+`default` methods make fat interfaces feel cheap because implementers don't *have* to override. That doesn't make the design right — the clients still get the methods in their type, and the signal that something is wrong with the abstraction is gone.
+
+```java
+public interface Worker {
+    void work();
+    default void eat()   {}   // looks free, isn't
+    default void sleep() {}
+}
+```
+
+`RobotWorker implements Worker` now compiles silently with no-op `eat`/`sleep`. Tests pass. But `someoneFromBackend.feed(worker)` quietly does nothing for robots.
+
+<Callout kind="tip" title="A heuristic">
+If you see `throws UnsupportedOperationException` in an implementation, ISP is being violated. The method is in the interface for someone else's benefit, not yours.
+</Callout>
+
+<ProbeNote>The interviewer wants the Worker → Workable/Eatable/Sleepable split and the rationale: forcing implementers to support methods they don't need couples clients to changes they shouldn't care about. The mature follow-up is "but don't go too far" — granularity should match real client groupings.</ProbeNote>

@@ -1,0 +1,87 @@
+**No. `ConcurrentHashMap` throws `NullPointerException` on null keys *or* null values. The reason is ambiguity: in a concurrent context, `get(k) == null` cannot distinguish "key absent" from "key present, value is null", and there is no atomic `containsKey` + `get` to resolve it.**
+
+## The behavior
+
+```java
+ConcurrentHashMap<String, String> m = new ConcurrentHashMap<>();
+m.put(null, "x");      // NullPointerException
+m.put("x", null);      // NullPointerException
+m.putIfAbsent("y", null); // NullPointerException
+```
+
+`HashMap` allows both: one null key, any number of null values. `Hashtable` and `ConcurrentHashMap` forbid both.
+
+## The disambiguation argument
+
+With `HashMap`, the standard "absent vs. null-value" idiom is:
+
+```java
+V v = map.get(k);
+if (v == null && !map.containsKey(k)) {
+    // truly absent
+} else if (v == null) {
+    // present, value is null
+} else {
+    // present, value is v
+}
+```
+
+This works because nothing modifies the map between `get` and `containsKey`. In a concurrent map, **another thread could `put` or `remove` `k` between those two calls**, making the answer meaningless. Even an atomic `containsKey` would race with subsequent `get`.
+
+The CHM designers picked the only sound option: disallow null values entirely. Then `get(k) == null` unambiguously means "not present".
+
+## Why ban null *keys* too?
+
+Less fundamental — could in principle be allowed — but Doug Lea's rationale (paraphrased from the OpenJDK lists):
+
+- It avoids special-casing the null key in every hash/equals path.
+- It keeps the API symmetric with the value restriction.
+- It catches a category of bugs early (forgetting to validate input).
+- `Hashtable`, the predecessor, also banned them.
+
+## Real-world implications
+
+```java
+// BAD — null-pollution from optional fields
+chm.put(user.id, user.profilePictureUrl); // NPE if profilePictureUrl is null
+
+// FIX 1: use Optional
+ConcurrentMap<UserId, Optional<URL>> m = new ConcurrentHashMap<>();
+m.put(user.id, Optional.ofNullable(user.profilePictureUrl));
+
+// FIX 2: use a sentinel
+private static final URL NO_AVATAR = URI.create("about:blank").toURL();
+m.put(user.id, user.profilePictureUrl == null ? NO_AVATAR : user.profilePictureUrl);
+
+// FIX 3: just remove the key
+if (user.profilePictureUrl == null) m.remove(user.id);
+else m.put(user.id, user.profilePictureUrl);
+```
+
+`Optional` values are the cleanest pattern when "absent in map" and "present-but-null" need to be distinguished.
+
+## Other concurrent maps with the same restriction
+
+| Map                         | Null keys? | Null values? |
+|-----------------------------|------------|--------------|
+| `HashMap`, `LinkedHashMap`  | yes (1)    | yes          |
+| `TreeMap`                   | no (NPE in Comparator) | yes |
+| `Hashtable`                 | no         | no           |
+| `ConcurrentHashMap`         | no         | no           |
+| `ConcurrentSkipListMap`     | no         | no           |
+
+All concurrent maps in `java.util.concurrent` ban nulls — same reasoning.
+
+## What `getOrDefault` does
+
+```java
+chm.getOrDefault("missing", "fallback");  // returns "fallback"
+```
+
+This is the cleanest way to "return X if not present" — unambiguous because the default is non-null.
+
+<Callout kind="tip" title="If you really need a 3-state map">
+Use `ConcurrentHashMap<K, Optional<V>>` and treat `Optional.empty()` as "explicit null". You give up a tiny bit of memory for a totally unambiguous, concurrent-safe API.
+</Callout>
+
+<ProbeNote>Probe: "Could a future JDK add null support if absent/null was distinguished by a special sentinel?" Doug Lea has rejected this multiple times on the OpenJDK lists — the existing code is heavily optimized around the non-null invariant, and an `Optional<V>` wrapper costs essentially nothing for callers who need three-state semantics. Treat the restriction as permanent.</ProbeNote>

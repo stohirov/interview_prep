@@ -1,0 +1,48 @@
+`TREEIFY_THRESHOLD = 8` is the chain length that promotes a bucket to a red-black tree. `UNTREEIFY_THRESHOLD = 6` is the size that demotes it back to a linked list during resize. The **gap of 2** prevents thrashing.
+
+## The constants
+
+```java
+static final int TREEIFY_THRESHOLD    = 8;
+static final int UNTREEIFY_THRESHOLD  = 6;
+static final int MIN_TREEIFY_CAPACITY = 64;
+```
+
+## Why a gap?
+
+If both thresholds were the same — say 8 — a bucket sitting right at the boundary would flip between list and tree on every insert/remove. Each conversion involves walking the bucket, allocating `TreeNode` wrappers (or unwrapping them), and re-linking pointers. That's pure overhead.
+
+By making demotion happen at 6 instead of 8, the bucket has to *meaningfully* shrink — by at least 2 entries — before paying the cost of going back to a list. This is classic **hysteresis**: the same idea used in thermostats, voltage regulators, and any feedback loop where you don't want oscillation at the threshold.
+
+<Diagram caption="Hysteresis prevents flipping at the boundary">{`chain length:   ... 5  6  7  8  9 ...
+                       ^     ^
+                       |     |
+              UNTREEIFY     TREEIFY
+              (6)           (8)
+              
+once a tree, stays a tree until size drops to 6
+once a list, stays a list until size grows to 8`}</Diagram>
+
+## When does untreeify actually run?
+
+Only during `resize()`. When the table doubles, each bucket is split via the `(hash & oldCap)` bit. If a tree bucket splits into pieces of size ≤ 6, those pieces become linked lists again. Untreeify does not happen on plain `remove` — a tree that drops to 5 entries after a deletion stays a tree until the next resize touches it.
+
+```java
+// pseudo-flow inside resize() for a treeified bucket
+if (loTreeSize <= UNTREEIFY_THRESHOLD) {
+    convertLoToList();
+} else {
+    treeifyLo();
+}
+// same for the hi half
+```
+
+## Why exactly 8 and 6?
+
+8 falls into the Poisson tail where natural collisions vanish (probability < 10⁻⁷ per bucket at load factor 0.75), so reaching 8 strongly implies bad keys — exactly when you want a tree's worst-case bound. 6 is a comfortable margin below that: small enough that a list is clearly cheaper than tree overhead, large enough that small fluctuations don't trigger a flip.
+
+<Callout kind="tip" title="In practice">
+You will almost never observe treeification in production with `String`-keyed maps and reasonable inputs. It's a safety net.
+</Callout>
+
+<ProbeNote>Naming both numbers is good. Explaining *why they differ* (hysteresis) is what distinguishes someone who memorised constants from someone who understands engineering trade-offs.</ProbeNote>

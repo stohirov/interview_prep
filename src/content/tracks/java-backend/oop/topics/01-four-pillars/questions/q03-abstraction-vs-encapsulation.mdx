@@ -1,0 +1,70 @@
+**Abstraction is about *what* a type exposes; encapsulation is about *how* its internals stay hidden.** They show up together — every well-encapsulated class has an abstraction — but they answer different design questions and live at different layers of the codebase.
+
+## Two questions, two answers
+
+| Concern        | Question it answers                                    | Lives where                  |
+|----------------|--------------------------------------------------------|------------------------------|
+| Abstraction    | *What* concepts and operations do we expose to users?  | Interface / method signatures |
+| Encapsulation  | *How* do we protect the implementation from misuse?    | Inside the class             |
+
+Abstraction happens at design time, before you write the class. Encapsulation happens at implementation time, inside it.
+
+## Abstraction without encapsulation
+
+You can define a clean abstraction and still encapsulate poorly:
+
+```java
+public interface UserRepository {        // good abstraction
+    Optional<User> findById(UUID id);
+    void save(User user);
+}
+
+public class JdbcUserRepository implements UserRepository {
+    public Connection conn;              // leaked internal — no encapsulation
+    public PreparedStatement findStmt;   // anyone can mutate
+    // ...
+}
+```
+
+The *contract* is fine. The *implementation* leaks JDBC plumbing.
+
+## Encapsulation without abstraction
+
+Conversely, a tightly-encapsulated class with a sloppy public surface still hurts callers:
+
+```java
+public final class CartManagerHelperServiceImpl {   // no clear abstraction
+    private final Map<String,Object> state = new HashMap<>();
+    public void doStuff(Map<String,Object> data) { /* ... */ }
+}
+```
+
+Fields are private and final; nothing is leaked. But the API tells callers nothing — `doStuff(Map)` could mean anything. Encapsulation without abstraction gives you safe garbage.
+
+## The two-layer view
+
+```java
+// ABSTRACTION layer: the public interface
+public interface PaymentGateway {
+    Receipt charge(Money amount, Card card);
+}
+
+// ENCAPSULATION layer: an implementation that hides its mechanics
+public final class StripeGateway implements PaymentGateway {
+    private final HttpClient http;        // hidden
+    private final String     apiKey;      // hidden
+
+    @Override public Receipt charge(Money amount, Card card) {
+        // network calls, retries, idempotency keys — all hidden
+        return new Receipt(/* ... */);
+    }
+}
+```
+
+Abstraction = the `PaymentGateway` interface. Encapsulation = the private fields and the absence of a `getApiKey()` method.
+
+<Callout kind="info" title="One-liner">
+Abstraction picks the contract. Encapsulation defends it.
+</Callout>
+
+<ProbeNote>This is a classic trick question because the two concepts are taught together and the words feel synonymous. The interviewer wants to hear you separate *contract design* from *internal protection* and give an example where one is present without the other. If you only define the words, you've failed the test.</ProbeNote>

@@ -1,0 +1,52 @@
+**Public fields are a mistake because they surrender every future ability to add invariants, lazy computation, observers, polymorphism, or thread safety — and you cannot take any of it back without breaking your callers.** A method is a one-line wrapper today and an extension point tomorrow; a field is a permanent commitment to a memory layout.
+
+## What you lose, concretely
+
+```java
+public class Account {
+    public BigDecimal balance;   // looks innocent
+}
+```
+
+The day someone asks you to:
+
+1. **Reject negative balances** — you can't, there's no setter to validate in.
+2. **Audit every read** — you can't, there's no getter to log from.
+3. **Make balance lazy or computed** — you can't, the field is a slot, not a function.
+4. **Add a listener** for changes — you can't, writes go straight to memory.
+5. **Synchronize access** — you can't, you can't intercept the read or write.
+6. **Polymorphically override** — fields are not virtual; a subclass can only *hide* them.
+7. **Switch storage** (cents-as-long, BigDecimal, BigInteger) — every caller breaks.
+
+Every one of these is a normal evolution of a domain object. Methods preserve all of them; fields preserve none.
+
+## Even `public final` is not safe
+
+```java
+public class Constants {
+    public static final int LIMIT = 100;
+}
+```
+
+Looks immutable, looks safe. Two problems:
+
+- For primitives and `String`, the compiler **inlines** the value at the call site. If you ship a new JAR with `LIMIT = 200`, *callers compiled against the old JAR still see 100* until they recompile. This is the classic "binary compatibility but not behaviorally compatible" trap.
+- A `public final` reference to a *mutable* object (`public final List<String> items = new ArrayList<>();`) is even worse — `final` blocks reassignment but not mutation. The list is fully exposed.
+
+## When public fields are arguably OK
+
+The narrowest acceptable cases are:
+
+- **Constants** — `public static final` of a deeply immutable type (primitive, `String`, an enum). Keep them in a dedicated class so the inlining behavior is predictable.
+- **Records** — but you don't *write* `public` on a record component; the accessor is generated for you, and the underlying field is `private final`. So records are *not* an exception to this rule.
+- **PODs in tightly controlled code** like internal AST nodes inside one compilation unit. Even then, prefer package-private.
+
+## The economic argument
+
+A getter/setter pair is six lines. Even six hundred lines of getters across a class are nothing compared to the cost of a public-field migration after the class has 200 callers. Modern IDEs and Lombok make the boilerplate disappear. Records eliminate it entirely for value types. There is essentially no scenario in 2026 where a public field beats a method.
+
+<Callout kind="info" title="The historical exception that proves the rule">
+`java.awt.Point` has `public int x, y` and is the textbook example of a field-exposure mistake that the JDK could never undo. Joshua Bloch cites it in Effective Java Item 16. The fix in modern code is to use a record like `record Point(int x, int y) {}` — same ergonomics, no exposed state.
+</Callout>
+
+<ProbeNote>The interviewer is checking whether you grasp encapsulation as *evolvability* rather than secrecy. Weak answers say "you can't add validation"; strong answers tour the five evolutionary options you lose, mention the inlining trap for `public static final` primitives, and point to records as the modern fix for the legitimate use case (data carriers).</ProbeNote>

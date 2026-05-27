@@ -1,0 +1,92 @@
+**Six implementations, each optimized for a different workload. The key axes are: bounded vs unbounded, single vs split lock, ordering policy, and whether the queue holds elements at all.**
+
+## Comparison table
+
+| Queue                     | Capacity         | Locking                          | Ordering            | Iterator       | Best for                                |
+|---------------------------|------------------|----------------------------------|---------------------|----------------|-----------------------------------------|
+| `ArrayBlockingQueue`      | bounded (fixed)  | 1 `ReentrantLock` + 2 conditions | FIFO                | weakly consistent | Predictable, bounded pipelines       |
+| `LinkedBlockingQueue`     | optional bound (default `MAX_VALUE`) | 2 locks: `takeLock`, `putLock` | FIFO    | weakly consistent | High-throughput producer/consumer    |
+| `SynchronousQueue`        | **0** — no storage | lock-free handoff (TransferStack/TransferQueue) | direct handoff | always empty | Pure handoff, `newCachedThreadPool`     |
+| `PriorityBlockingQueue`   | unbounded (grows) | 1 `ReentrantLock`               | by `Comparator`     | weakly consistent | Priority work scheduling             |
+| `DelayQueue`              | unbounded         | 1 `ReentrantLock`               | by `getDelay()`     | weakly consistent | Scheduled tasks, expiring caches     |
+| `LinkedTransferQueue`     | unbounded         | lock-free (CAS)                 | FIFO + `transfer()` | weakly consistent | Low-latency handoff, mixed workloads |
+
+## Details
+
+### `ArrayBlockingQueue`
+
+A circular array with `head`/`tail` indices, one `ReentrantLock`, and two `Condition`s (`notEmpty`, `notFull`). Capacity is fixed at construction. Single-lock means put and take serialize against each other — fine for moderate throughput, predictable memory footprint.
+
+```java
+BlockingQueue<Task> q = new ArrayBlockingQueue<>(1024);
+```
+
+### `LinkedBlockingQueue`
+
+Linked nodes with **separate** locks for head (take) and tail (put). Producers and consumers can proceed truly in parallel — much higher throughput than `ArrayBlockingQueue` under heavy load. Default capacity is `Integer.MAX_VALUE` — **bound it explicitly** in production.
+
+```java
+BlockingQueue<Task> q = new LinkedBlockingQueue<>(1024);  // BOUND IT
+```
+
+### `SynchronousQueue`
+
+Zero capacity. Every `put` blocks until a matching `take`, and vice versa — it's a rendezvous, not a queue. Used by `Executors.newCachedThreadPool()`: if no thread is currently idle and available to grab the task, the executor creates a new one. There is literally nowhere to "queue" tasks.
+
+```java
+SynchronousQueue<Job> q = new SynchronousQueue<>();
+// producer: q.put(j);   // blocks until a consumer is calling q.take()
+```
+
+Fair (`new SynchronousQueue<>(true)`) gives FIFO matching of waiters; unfair (the default) uses a stack — better throughput, possible starvation.
+
+### `PriorityBlockingQueue`
+
+Binary heap, unbounded (grows). Elements are dequeued in priority order per a `Comparator` (or natural ordering). **Iterator is not in priority order** — only `poll`/`take` honor priority.
+
+```java
+PriorityBlockingQueue<Job> q = new PriorityBlockingQueue<>(64,
+    Comparator.comparingInt(Job::priority));
+```
+
+Note: no blocking on `put` (it's unbounded), but `take` blocks when empty.
+
+### `DelayQueue`
+
+Heap of `Delayed` elements. `take()` only returns elements whose `getDelay(...)` ≤ 0 — others stay in the queue. Used internally by `ScheduledThreadPoolExecutor`. Element type must implement `Delayed`.
+
+```java
+class TimedJob implements Delayed {
+    private final long readyAt;       // nanos
+    public long getDelay(TimeUnit u) { return u.convert(readyAt - System.nanoTime(), NANOSECONDS); }
+    public int compareTo(Delayed o) { ... }
+}
+```
+
+### `LinkedTransferQueue`
+
+Lock-free (uses CAS heavily), unbounded, FIFO. Adds `transfer(e)` — block until a consumer takes the element, like `SynchronousQueue.put`, but the queue can also hold elements when no consumer is waiting. `tryTransfer(e)` is the non-blocking variant. Often the highest-throughput option on modern multi-core hardware.
+
+```java
+LinkedTransferQueue<Event> q = new LinkedTransferQueue<>();
+q.transfer(e);   // blocks until taken — handoff
+q.put(e);        // enqueues — does not block
+```
+
+## Quick chooser
+
+```
+Need priorities?           -> PriorityBlockingQueue
+Need scheduling/delays?    -> DelayQueue
+Need pure handoff?         -> SynchronousQueue (or LinkedTransferQueue.transfer)
+Need lock-free low latency?-> LinkedTransferQueue
+General-purpose, bounded?  -> ArrayBlockingQueue or LinkedBlockingQueue
+   - tight memory bound?   -> ArrayBlockingQueue
+   - highest throughput?   -> LinkedBlockingQueue (bounded!)
+```
+
+<Callout kind="tip" title="LinkedBlockingDeque exists too">
+`LinkedBlockingDeque` is the double-ended version — supports both ends as producer or consumer. Useful for work-stealing patterns, though `ForkJoinPool` has its own internal deques.
+</Callout>
+
+<ProbeNote>Probe: "Why does `SynchronousQueue.size()` always return 0?" Because the queue genuinely holds nothing — every element is handed directly producer→consumer. `isEmpty()` is always `true`, iterators are always empty. It's a synchronization primitive disguised as a `Queue`.</ProbeNote>

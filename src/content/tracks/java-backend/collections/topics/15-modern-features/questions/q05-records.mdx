@@ -1,0 +1,124 @@
+**Records (Java 16+) auto-generate `equals` and `hashCode` from their components, which makes them ideal `HashMap` keys and `HashSet` elements out of the box — no manual override needed, no chance of getting it wrong. The one subtlety: deep equality only works if the component types themselves implement `equals` properly, which gets interesting when components are themselves collections.**
+
+## The auto-generated contract
+
+For a record `record Point(int x, int y) {}`, the compiler synthesizes:
+
+```java
+public boolean equals(Object o) {
+    if (o == this) return true;
+    if (!(o instanceof Point p)) return false;
+    return x == p.x && y == p.y;
+}
+
+public int hashCode() {
+    return Objects.hash(x, y);   // or equivalent
+}
+
+public String toString() {
+    return "Point[x=" + x + ", y=" + y + "]";
+}
+```
+
+This is precisely the contract you'd write by hand. No `transient` slip-ups, no "forgot to update equals after adding a field" bugs, no inheritance hazards.
+
+## Records as map keys
+
+```java
+record OrderKey(String customerId, LocalDate date) {}
+
+Map<OrderKey, Order> orders = new HashMap<>();
+orders.put(new OrderKey("alice", LocalDate.of(2025, 1, 1)), order1);
+
+OrderKey lookup = new OrderKey("alice", LocalDate.of(2025, 1, 1));
+Order found = orders.get(lookup);   // finds order1 — equals/hashCode just work
+```
+
+Before records, you'd write a value class with `@EqualsAndHashCode` (Lombok), or hand-roll it, or — worst — use a `Map<String, Map<LocalDate, Order>>` to avoid the boilerplate. Records make composite keys frictionless.
+
+## Records as set elements
+
+```java
+record Tag(String namespace, String name) {}
+
+Set<Tag> tags = new HashSet<>();
+tags.add(new Tag("env", "prod"));
+tags.add(new Tag("env", "prod"));   // de-duplicated — equals returns true
+System.out.println(tags.size());    // 1
+```
+
+## The collection-components caveat
+
+If a record component is itself a collection, equality follows the collection's `equals` contract:
+
+```java
+record Bag(List<String> items) {}
+
+Bag a = new Bag(List.of("x", "y"));
+Bag b = new Bag(List.of("x", "y"));
+System.out.println(a.equals(b));    // true — List.equals is element-wise
+```
+
+But if the component is a `Set` and order doesn't matter, `Set.equals` is also element-wise (good). If it's an array, `Object[].equals` is reference identity (bad):
+
+```java
+record Bad(String[] items) {}
+
+Bad a = new Bad(new String[] {"x"});
+Bad b = new Bad(new String[] {"x"});
+System.out.println(a.equals(b));    // FALSE — array equality is reference identity
+```
+
+So don't use arrays as record components if you need value equality — use `List`. Or, if you must, override `equals`/`hashCode` manually using `Arrays.equals`/`Arrays.hashCode`.
+
+## Mutability hazard
+
+Records are *shallowly* immutable — the reference is final, but the referenced object may be mutable:
+
+```java
+record Snapshot(List<String> items) {}
+
+List<String> live = new ArrayList<>(List.of("a", "b"));
+Snapshot s1 = new Snapshot(live);
+
+live.add("c");
+System.out.println(s1.items());   // [a, b, c] — mutated through outside reference!
+```
+
+If you want defensive copies, do it in a compact constructor:
+
+```java
+record Snapshot(List<String> items) {
+    Snapshot {   // compact constructor — runs before field assignment
+        items = List.copyOf(items);   // immutable snapshot
+    }
+}
+```
+
+This makes the record genuinely immutable end-to-end and safe as a map key even if the original list mutates.
+
+## Records with pattern matching for collection traversal
+
+Records pair beautifully with switch pattern matching when traversing polymorphic collections:
+
+```java
+sealed interface Shape permits Circle, Rect {}
+record Circle(double r) implements Shape {}
+record Rect(double w, double h) implements Shape {}
+
+List<Shape> shapes = List.of(new Circle(2), new Rect(3, 4));
+double total = shapes.stream()
+    .mapToDouble(s -> switch (s) {
+        case Circle(var r)        -> Math.PI * r * r;
+        case Rect(var w, var h)   -> w * h;
+    })
+    .sum();
+```
+
+The record deconstruction patterns (`case Circle(var r)`) destructure the components inline — concise and exhaustive.
+
+<Callout kind="tip" title="Compact constructor for normalization">
+Use the compact constructor to validate or normalize components. It runs before the implicit field assignment, so you can reassign parameters: `items = List.copyOf(items);`.
+</Callout>
+
+<ProbeNote>Watch for "are records suitable as keys in `ConcurrentHashMap`?" — yes, perfectly. The contract is the same; the auto-generated equals/hashCode satisfy the requirements. Just make sure components are themselves safe (preferably immutable).</ProbeNote>

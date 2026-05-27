@@ -1,0 +1,64 @@
+The Java Collections hierarchy has **two roots**: `Iterable` (everything you can `for-each`) and `Map` (a parallel tree because entries aren't single elements). Below `Iterable` sits `Collection`, which branches into `List`, `Set`, and `Queue`.
+
+## The Full Tree
+
+<Diagram caption="Java Collections Framework hierarchy (interfaces in bold conceptually)">
+{`Iterable<E>
+  |
+  +-- Collection<E>
+        |
+        +-- List<E>                ArrayList, LinkedList, Vector, CopyOnWriteArrayList
+        |
+        +-- Set<E>
+        |     |
+        |     +-- SortedSet<E>
+        |           |
+        |           +-- NavigableSet<E>   TreeSet, ConcurrentSkipListSet
+        |     HashSet, LinkedHashSet, CopyOnWriteArraySet, EnumSet
+        |
+        +-- Queue<E>
+              |
+              +-- Deque<E>          ArrayDeque, LinkedList
+              |
+              +-- BlockingQueue<E>  ArrayBlockingQueue, LinkedBlockingQueue
+              PriorityQueue, ConcurrentLinkedQueue
+
+Map<K,V>                            HashMap, LinkedHashMap, WeakHashMap, IdentityHashMap
+  |
+  +-- SortedMap<K,V>
+        |
+        +-- NavigableMap<K,V>       TreeMap, ConcurrentSkipListMap
+  ConcurrentMap<K,V>                ConcurrentHashMap`}
+</Diagram>
+
+## Walking Down From Iterable
+
+**`Iterable<E>`** is the most general contract — anything with an `iterator()` method. The `for-each` loop only requires `Iterable`, not `Collection`.
+
+**`Collection<E>`** adds `size`, `isEmpty`, `add`, `remove`, `contains`, `clear`, plus bulk operations (`addAll`, `removeAll`, `retainAll`). It's the lowest common denominator for "a group of things."
+
+**`List<E>`** adds *positional access*: `get(int)`, `set(int, E)`, `add(int, E)`, `indexOf`, plus a richer `ListIterator`. Order is preserved and duplicates are allowed.
+
+**`Set<E>`** adds the *no duplicates* invariant — `add` returns `false` if the element is already present (by `equals`). `SortedSet` extends it with `first`, `last`, `headSet`, `tailSet`. `NavigableSet` (Java 6+) adds `floor`, `ceiling`, `higher`, `lower`, `descendingSet`.
+
+**`Queue<E>`** adds FIFO semantics with `offer`, `poll`, `peek`. `Deque<E>` (Java 6+) extends it for double-ended use — push/pop on both sides. `BlockingQueue` (in `java.util.concurrent`) adds blocking `put`/`take`.
+
+```java
+Iterable<String>  it    = List.of("a", "b");
+Collection<String> col  = new HashSet<>(it instanceof Collection c ? c : List.of());
+List<Integer>     list  = new ArrayList<>();
+NavigableSet<Integer> ns = new TreeSet<>();
+Deque<Integer>    stack = new ArrayDeque<>();
+```
+
+## The Map Side
+
+`Map<K,V>` is separate. `SortedMap` adds key ordering; `NavigableMap` adds key-relative navigation (`floorKey`, `ceilingKey`). `ConcurrentMap` is an orthogonal interface adding atomic operations like `putIfAbsent` and `compute`.
+
+<Callout kind="info" title="Quirky placement">
+`LinkedList` implements **both** `List` and `Deque` — that's why some textbooks put it under each. Stack is a legacy class that extends `Vector`; modern code uses `ArrayDeque` as a stack.
+</Callout>
+
+<ProbeNote>
+Interviewers use this as a quick litmus test: candidates who can name `Iterable` as the true root, point to `NavigableSet`/`NavigableMap` (Java 6 additions), and note that `Map` is a separate hierarchy demonstrate they've actually read Javadoc rather than memorized a cheat sheet. Bonus points for mentioning `ConcurrentMap` as an orthogonal capability interface.
+</ProbeNote>

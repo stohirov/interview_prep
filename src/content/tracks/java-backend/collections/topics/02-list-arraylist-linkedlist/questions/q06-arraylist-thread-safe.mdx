@@ -1,0 +1,78 @@
+**`ArrayList` is not thread-safe because none of its mutating methods are synchronized, and its internal `size` field plus the backing array can be observed in inconsistent states across threads.** Concurrent mutation can corrupt the array, lose updates, or throw `ConcurrentModificationException` from iterators. To make it safe you either wrap it (`Collections.synchronizedList`), swap to `CopyOnWriteArrayList`, or pick a fundamentally concurrent structure.
+
+## Why It's Unsafe
+
+`ArrayList.add` does roughly:
+
+```java
+elementData[size] = e;   // 1. write to backing array
+size = size + 1;         // 2. increment size
+```
+
+Two threads running `add` concurrently can:
+
+- Both read `size = 7`, both write to slot 7 (one element lost).
+- One thread reads the old `elementData` reference just before `grow()` replaces it (writing into the obsolete array).
+- An iterator created during a mutation can read a stale `modCount` and throw `ConcurrentModificationException` — or worse, silently see torn state.
+
+There's also no happens-before guarantee on `elementData` reads from another thread, so even reads need synchronization to be reliable.
+
+## Option 1: Collections.synchronizedList
+
+The simplest fix — wraps every method in `synchronized(this)`:
+
+```java
+List<String> shared = Collections.synchronizedList(new ArrayList<>());
+shared.add("a");   // atomic individual call
+
+// BUT — compound operations still need external sync:
+synchronized (shared) {
+    for (String s : shared) {       // iteration must be guarded
+        System.out.println(s);
+    }
+}
+```
+
+Two warts: (1) every single method takes the lock, so contention can be brutal; (2) **iteration is not protected** by the wrapper — you must hold the lock manually.
+
+## Option 2: CopyOnWriteArrayList
+
+A `java.util.concurrent` list optimized for **read-heavy, write-rare** workloads. Every mutation copies the entire backing array:
+
+```java
+List<String> events = new CopyOnWriteArrayList<>();
+events.add("click");                    // O(n) — copies the array
+for (String e : events) { ... }         // iterator over snapshot, no lock needed
+```
+
+Properties:
+
+- **Reads are lock-free** and see a stable snapshot — the iterator never throws `ConcurrentModificationException`.
+- **Writes are O(n)** and allocate a new array — disastrous for write-heavy workloads.
+- Iterators are **snapshot-based**: they don't see mutations made after the iterator was created.
+
+Use it for listener/observer lists, configuration that rarely changes, or any "1000 reads per write" pattern.
+
+## Option 3: Pick a Different Structure
+
+If you really need concurrent reads and writes, you usually don't want a `List` at all:
+
+- **`ConcurrentLinkedQueue`** — lock-free unbounded queue.
+- **`BlockingQueue`** family — for producer-consumer.
+- **`ConcurrentHashMap`** — when you can model the data as keyed.
+
+## Quick Comparison
+
+| Choice                       | Reads | Writes      | Iteration                    | Best for                            |
+| ---------------------------- | ----- | ----------- | ---------------------------- | ----------------------------------- |
+| `ArrayList` (no sync)        | Fast  | Fast        | Fail-fast — **not thread-safe** | Single-threaded code             |
+| `Collections.synchronizedList` | Slow (locks) | Slow (locks) | Manual external lock     | Low contention, simple needs        |
+| `CopyOnWriteArrayList`       | Fast  | Slow (copy) | Snapshot, lock-free          | Read-heavy, write-rare              |
+
+<Callout kind="warn" title="The 'thread-safe' wrapper trap">
+`Collections.synchronizedList` makes *individual* method calls atomic. Compound operations like `if (!list.contains(x)) list.add(x)` are still races — you must wrap them in `synchronized(list) { ... }`.
+</Callout>
+
+<ProbeNote>
+Interviewers want to see you (1) explain *why* it's unsafe at the field level (`size`, `elementData`, `modCount`), (2) name all three remediation strategies, and (3) understand the **read/write trade-offs** of `CopyOnWriteArrayList`. The killer follow-up is "what about iteration?" — make sure you mention the manual locking requirement for `synchronizedList` iterators.
+</ProbeNote>

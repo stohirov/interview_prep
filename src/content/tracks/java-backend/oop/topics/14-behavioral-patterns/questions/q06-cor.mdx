@@ -1,0 +1,101 @@
+**Chain of Responsibility** lets a request walk a linked sequence of handlers, each of which can process the request, stop the chain, or hand it down the line. Modern web middleware — Servlet filters, Spring interceptors, Express middleware — is exactly this pattern.
+
+## The handler interface
+
+```java
+public interface RequestHandler {
+    void handle(Request request, Chain chain);
+}
+
+public interface Chain {
+    void proceed(Request request);
+}
+```
+
+A handler receives the request *and* a reference to the rest of the chain. It can:
+
+- Decide the request is invalid and not call `chain.proceed()` (short-circuit).
+- Do work, then call `chain.proceed()` to pass control along.
+- Call `chain.proceed()` first, then do work after — useful for logging or wrapping a response.
+
+## A minimal chain
+
+```java
+public final class HandlerChain implements Chain {
+    private final List<RequestHandler> handlers;
+    private final int index;
+
+    public HandlerChain(List<RequestHandler> handlers) { this(handlers, 0); }
+    private HandlerChain(List<RequestHandler> handlers, int i) {
+        this.handlers = handlers; this.index = i;
+    }
+
+    public void proceed(Request request) {
+        if (index >= handlers.size()) return; // end of chain
+        Chain next = new HandlerChain(handlers, index + 1);
+        handlers.get(index).handle(request, next);
+    }
+}
+```
+
+Each `proceed()` constructs a tiny `HandlerChain` pointing one step further. This makes the chain naturally re-entrant and stateless across requests.
+
+## Three handlers — auth, logging, business
+
+```java
+public final class AuthHandler implements RequestHandler {
+    public void handle(Request req, Chain chain) {
+        if (!req.headers().containsKey("Authorization")) {
+            req.reject(401, "missing auth"); // short-circuit, don't proceed
+            return;
+        }
+        chain.proceed(req);
+    }
+}
+
+public final class LoggingHandler implements RequestHandler {
+    public void handle(Request req, Chain chain) {
+        long start = System.nanoTime();
+        try {
+            chain.proceed(req); // run the rest first
+        } finally {
+            long ms = (System.nanoTime() - start) / 1_000_000;
+            log.info("{} {} -> {} in {}ms", req.method(), req.path(), req.status(), ms);
+        }
+    }
+}
+
+public final class BusinessHandler implements RequestHandler {
+    public void handle(Request req, Chain chain) {
+        req.respond(200, doWork(req));
+        // terminal handler: doesn't proceed
+    }
+    private String doWork(Request r) { return "ok"; }
+}
+
+// Wire them up — order matters
+new HandlerChain(List.of(
+    new LoggingHandler(),  // outermost: wraps everything for timing
+    new AuthHandler(),     // gate
+    new BusinessHandler()  // terminal
+)).proceed(request);
+```
+
+The composition order is the request-flow order. Logging is outermost because it must observe both the auth rejection and the successful business response.
+
+## Where Spring and Servlet use this
+
+- **Servlet `FilterChain`**: identical shape. Each `Filter.doFilter(req, res, chain)` chooses whether to call `chain.doFilter(req, res)`. The container builds the chain once per request from configured filters.
+- **Spring `HandlerInterceptor`**: similar but with three hooks — `preHandle` (return false to abort), `postHandle` (after controller, before view), `afterCompletion` (final cleanup). Spring drives the chain internally.
+- **Spring Security `FilterChainProxy`**: a chain of `SecurityFilter`s — every authentication mechanism, CSRF check, and authorization rule is one link.
+- **Netty `ChannelPipeline`**: same pattern for inbound/outbound network events.
+
+## Why the pattern, not a list of `if`s
+
+A linear `if (auth) { if (rate) { if (...)` couples every check to the next and forces one team to own them all. Chain of Responsibility lets each handler be a separate class (separate test, separate team, separate deployment) and lets the runtime choose composition order. Adding a new check is one new class plus a registration — no edits to the existing handlers. Open/Closed in its purest form.
+
+<Callout kind="info" title="CoR vs Decorator">
+Both wrap and forward. The difference is intent: Decorator's wrappers each *enrich* the same logical operation; CoR's handlers each *decide* whether the request is theirs and may stop the chain. CoR handlers commonly short-circuit (auth rejection); decorators almost never do.
+</Callout>
+
+<ProbeNote>The interviewer is checking whether you recognize that you've been using CoR for years under the name "middleware" or "filter chain" — and whether you can explain why this beats nested `if`s (Open/Closed, separate testability, runtime composition). Bonus: noting that the order of handlers is itself a design decision and pointing out Servlet `FilterChain` as the JDK's blessed implementation.</ProbeNote>

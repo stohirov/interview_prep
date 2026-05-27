@@ -1,0 +1,87 @@
+**The diamond problem is the ambiguity that arises when a type inherits the same method through two different paths. Java's resolution rule is: *class wins over interface, more specific interface wins over less specific, and otherwise the implementer must override and disambiguate explicitly with `Interface.super.method()`.*** Without those rules, `default` methods would have re-opened C++'s classic multiple-inheritance mess.
+
+## The classic shape
+
+```java
+interface A { default String hello() { return "A"; } }
+interface B { default String hello() { return "B"; } }
+
+class C implements A, B {
+    // compile error: types A and B contain conflicting default methods
+}
+```
+
+Java forces `C` to break the tie — silence would mean picking one arbitrarily, which would be a footgun.
+
+## Resolution rule 1: class wins
+
+```java
+class Parent { public String hello() { return "Parent"; } }
+interface I  { default String hello() { return "I"; } }
+
+class Child extends Parent implements I {
+    // no error; Parent.hello wins
+}
+
+new Child().hello();      // "Parent"
+```
+
+If an inherited concrete method (from a class) and a default method (from an interface) collide, the class wins. The rationale: classes have been the source of state and behavior since 1996; introducing default methods in Java 8 must not silently override concrete superclass methods.
+
+## Resolution rule 2: more specific interface wins
+
+```java
+interface A         { default String hello() { return "A"; } }
+interface B extends A { default String hello() { return "B"; } }
+
+class C implements A, B { }    // no conflict
+
+new C().hello();         // "B" — the more specific interface wins
+```
+
+Because `B extends A`, `B`'s `hello()` is a refinement of `A`'s. No ambiguity.
+
+## Resolution rule 3: explicit disambiguation
+
+When the rules don't pick a winner, the implementer must:
+
+```java
+interface A { default String hello() { return "A"; } }
+interface B { default String hello() { return "B"; } }
+
+class C implements A, B {
+    @Override public String hello() {
+        return A.super.hello() + " + " + B.super.hello();
+    }
+}
+
+new C().hello();          // "A + B"
+```
+
+The `InterfaceName.super.method()` syntax explicitly names which inherited default to invoke. You can call one, the other, both, or neither — your choice.
+
+## A diamond with three interfaces
+
+```java
+interface Greeter           { default String greet() { return "hi"; } }
+interface FormalGreeter     extends Greeter { default String greet() { return "good day"; } }
+interface CasualGreeter     extends Greeter { default String greet() { return "yo"; } }
+
+class Person implements FormalGreeter, CasualGreeter {
+    @Override public String greet() {
+        return FormalGreeter.super.greet();
+    }
+}
+```
+
+`FormalGreeter` and `CasualGreeter` both extend `Greeter`, but neither is more specific than the other — the compiler can't pick. `Person` must override and pick a side.
+
+## Why Java handled it this way
+
+C++ has *virtual inheritance* and a single-instance rule for diamonds; that approach interacts poorly with state. Java avoided state on interfaces precisely to keep the diamond manageable: the only thing to resolve is *behavior*, and the rules above give a deterministic answer.
+
+<Callout kind="info" title="Sealed interfaces don't change it">
+Java 17 sealed interfaces constrain *who* can implement a type, but they don't change diamond resolution. The three rules apply identically.
+</Callout>
+
+<ProbeNote>This is a senior-level question. The interviewer wants the three resolution rules named in order, a code snippet showing `InterfaceName.super.method()`, and the historical context that Java avoided state on interfaces to dodge C++'s pain. Candidates who say "Java doesn't have multiple inheritance" miss the point — Java has multiple inheritance of *type and behavior*, just not state.</ProbeNote>

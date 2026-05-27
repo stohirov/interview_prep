@@ -1,0 +1,77 @@
+**An `if/instanceof` chain that picks behavior per subtype is a polymorphism leak — the type-specific code lives outside the type.** The refactor is to push each branch onto its own class as a virtual method, leaving the caller blissfully ignorant of the concrete types.
+
+## Before — a payment fee calculator
+
+```java
+sealed interface Payment permits CardPayment, BankTransfer, CryptoPayment {
+    BigDecimal amount();
+}
+record CardPayment(BigDecimal amount, String network) implements Payment {}
+record BankTransfer(BigDecimal amount, String iban) implements Payment {}
+record CryptoPayment(BigDecimal amount, String chain) implements Payment {}
+
+class FeeService {
+    BigDecimal fee(Payment p) {
+        if (p instanceof CardPayment c) {
+            return c.amount().multiply(new BigDecimal("0.029"));
+        } else if (p instanceof BankTransfer b) {
+            return new BigDecimal("0.30");
+        } else if (p instanceof CryptoPayment x) {
+            return x.amount().multiply(new BigDecimal("0.005"));
+        }
+        throw new IllegalStateException("unknown payment: " + p);
+    }
+}
+```
+
+Three smells: (1) `FeeService` knows every concrete type, (2) every new payment forces an edit in a different file, (3) the final `throw` is dead-but-required code that the compiler can't help you with.
+
+## After — polymorphic, OCP-compliant
+
+```java
+sealed interface Payment permits CardPayment, BankTransfer, CryptoPayment {
+    BigDecimal amount();
+    BigDecimal fee();                       // each type owns its own rule
+}
+
+record CardPayment(BigDecimal amount, String network) implements Payment {
+    public BigDecimal fee() { return amount.multiply(new BigDecimal("0.029")); }
+}
+record BankTransfer(BigDecimal amount, String iban) implements Payment {
+    public BigDecimal fee() { return new BigDecimal("0.30"); }
+}
+record CryptoPayment(BigDecimal amount, String chain) implements Payment {
+    public BigDecimal fee() { return amount.multiply(new BigDecimal("0.005")); }
+}
+
+class FeeService {
+    BigDecimal fee(Payment p) { return p.fee(); }   // 1 line, no instanceof
+}
+```
+
+Adding `WirePayment` is one new file. `FeeService` does not change. The dead `throw` is gone — `p.fee()` is exhaustive by construction.
+
+## When to keep the `switch`
+
+The polymorphic refactor is right when the behavior **belongs to the type** (a fee is conceptually a property of a payment). It's the wrong move when:
+
+- The operation is **external** to the data — e.g. an HTTP serializer, a billing report exporter. You don't want every domain type to know about JSON formatting.
+- The data is **closed** (sealed) and you have many operations over it. AST visitors and protocol decoders fit this shape.
+
+In those cases use Java 21 pattern matching for `switch`, which gives you exhaustive checks without polluting the data types:
+
+```java
+return switch (p) {
+    case CardPayment(var amt, var net)   -> amt.multiply(new BigDecimal("0.029"));
+    case BankTransfer(var amt, var iban) -> new BigDecimal("0.30");
+    case CryptoPayment(var amt, var ch)  -> amt.multiply(new BigDecimal("0.005"));
+};   // no default — sealed makes this exhaustive
+```
+
+## The rule of thumb
+
+- **One type, many operations** that all *belong* to it: virtual methods on the type.
+- **Closed type set, many operations external to the data**: pattern-matching switch.
+- **`if/else instanceof` chain**: almost always a code smell.
+
+<ProbeNote>The interviewer wants you to (a) name the smell, (b) execute the polymorphic refactor cleanly, and (c) acknowledge that pattern matching is the right tool for the *opposite* axis (external operations on closed data). Candidates who reflexively switch every `instanceof` chain to virtual methods are missing the second half of the answer.</ProbeNote>

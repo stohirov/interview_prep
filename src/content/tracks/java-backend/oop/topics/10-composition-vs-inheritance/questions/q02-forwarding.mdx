@@ -1,0 +1,83 @@
+**The pattern has three layers.** A reusable `ForwardingSet<E>` that delegates every `Set` method to a wrapped instance, an application-level `InstrumentedSet<E>` that extends `ForwardingSet` and adds the counting behavior, and the wrapped `Set<E>` itself — which can be any implementation. The decoupling is what makes it powerful: the same `InstrumentedSet` works over `HashSet`, `TreeSet`, `LinkedHashSet`, or a custom concurrent set.
+
+## Step 1 — the forwarding base
+
+This is pure boilerplate, written once and reused:
+
+```java
+public class ForwardingSet<E> implements Set<E> {
+    private final Set<E> s;
+    public ForwardingSet(Set<E> s) { this.s = s; }
+
+    @Override public int size()                         { return s.size(); }
+    @Override public boolean isEmpty()                  { return s.isEmpty(); }
+    @Override public boolean contains(Object o)         { return s.contains(o); }
+    @Override public Iterator<E> iterator()             { return s.iterator(); }
+    @Override public Object[] toArray()                 { return s.toArray(); }
+    @Override public <T> T[] toArray(T[] a)             { return s.toArray(a); }
+    @Override public boolean add(E e)                   { return s.add(e); }
+    @Override public boolean remove(Object o)           { return s.remove(o); }
+    @Override public boolean containsAll(Collection<?> c)              { return s.containsAll(c); }
+    @Override public boolean addAll(Collection<? extends E> c)         { return s.addAll(c); }
+    @Override public boolean retainAll(Collection<?> c)                { return s.retainAll(c); }
+    @Override public boolean removeAll(Collection<?> c)                { return s.removeAll(c); }
+    @Override public void clear()                       { s.clear(); }
+    @Override public boolean equals(Object o)           { return s.equals(o); }
+    @Override public int hashCode()                     { return s.hashCode(); }
+    @Override public String toString()                  { return s.toString(); }
+}
+```
+
+## Step 2 — the instrumenting wrapper
+
+Now the interesting class is tiny:
+
+```java
+public class InstrumentedSet<E> extends ForwardingSet<E> {
+    private int addCount = 0;
+
+    public InstrumentedSet(Set<E> s) { super(s); }
+
+    @Override public boolean add(E e) {
+        addCount++;
+        return super.add(e);
+    }
+    @Override public boolean addAll(Collection<? extends E> c) {
+        addCount += c.size();
+        return super.addAll(c);
+    }
+
+    public int addCount() { return addCount; }
+}
+```
+
+## Step 3 — use it
+
+```java
+Set<String> s = new InstrumentedSet<>(new TreeSet<>());
+s.addAll(List.of("c", "a", "b"));
+((InstrumentedSet<String>) s).addCount();   // 3, correctly
+```
+
+The wrapped `TreeSet` could equally be a `HashSet`, a `LinkedHashSet`, or a `Set` returned by some third-party library — `InstrumentedSet` doesn't care.
+
+## Why this beats `extends HashSet`
+
+<Diagram caption="Inheritance vs forwarding wrapper">{`extends HashSet<E>:        wraps Set<E>:
+
+  InstrumentedHashSet         InstrumentedSet
+        |                            |
+        v                            v
+     HashSet                    ForwardingSet
+        |                            |
+        v                            v
+   <coupled to HashSet         <decoupled — any
+    self-use bugs>              Set implementation>`}</Diagram>
+
+The wrapper invokes only the public `Set` API. `addAll`'s internal call to `add` happens *inside* the wrapped instance, where `super.add` doesn't reroute back to the wrapper — so the double-counting bug from the inheritance version disappears.
+
+<Callout kind="warn" title="The one downside: SELF problem">
+The wrapped object doesn't know it's wrapped. If it passes `this` to a callback that expects to see the outer wrapper, the callback sees the raw inner. This is the "SELF problem" and is rare in practice but can bite with listeners and visitors.
+</Callout>
+
+<ProbeNote>The interviewer wants the three-layer separation: pure forwarding base (reusable), thin instrumenting subclass (just the interesting overrides), and the inverted dependency on `Set` rather than `HashSet`. Mentioning the SELF problem is a senior signal.</ProbeNote>

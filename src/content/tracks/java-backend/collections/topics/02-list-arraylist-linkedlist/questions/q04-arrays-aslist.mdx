@@ -1,0 +1,71 @@
+**`Arrays.asList(a, b, c)` returns a fixed-size `List` view backed by the supplied array — and crucially, it is *not* `java.util.ArrayList`.** It's a private nested class, `java.util.Arrays$ArrayList`, that wraps the array. You can `get` and `set`, but any operation that changes the *size* (`add`, `remove`, `clear`) throws `UnsupportedOperationException`.
+
+## What You Actually Get
+
+```java
+Integer[] arr = {1, 2, 3};
+List<Integer> view = Arrays.asList(arr);
+
+System.out.println(view.getClass());
+// class java.util.Arrays$ArrayList   <- NOT java.util.ArrayList
+
+view.set(0, 99);           // OK — mutates the backing array
+System.out.println(arr[0]); // 99
+
+view.add(4);               // throws UnsupportedOperationException
+view.remove(0);            // throws UnsupportedOperationException
+```
+
+The class is a tiny wrapper implementing `List` via `AbstractList`. It overrides only what it needs: `size`, `get`, `set`, `indexOf`, `contains`, `toArray`, and so on. It does **not** override `add(E)` or `remove(int)`, so those fall back to `AbstractList`'s default — which is to throw.
+
+## The Live-Backing Gotcha
+
+Because the list and the array share storage, mutations to either are visible in the other:
+
+```java
+String[] names = {"Ada", "Linus"};
+List<String> live = Arrays.asList(names);
+
+names[0] = "Grace";         // change the array directly
+System.out.println(live.get(0));  // "Grace"
+
+live.set(1, "Dennis");
+System.out.println(names[1]);     // "Dennis"
+```
+
+This makes `Arrays.asList` great for adapting an existing array to a `List` API, and terrible if either side expects independence.
+
+## The Primitive-Array Trap
+
+`Arrays.asList` takes a varargs `T...`, which is reference-typed. Passing a primitive array doesn't do what beginners expect:
+
+```java
+int[] primitives = {1, 2, 3};
+List<int[]> oops = Arrays.asList(primitives);
+// A List with ONE element — the int[] itself, length 1
+System.out.println(oops.size());   // 1
+```
+
+To get a `List<Integer>` from `int[]`, use streams:
+
+```java
+List<Integer> proper = Arrays.stream(primitives).boxed().toList();
+```
+
+## Making It Truly Mutable
+
+If you need a real, growable list:
+
+```java
+List<Integer> mutable = new ArrayList<>(Arrays.asList(1, 2, 3));
+// or, Java 16+:
+List<Integer> mutable2 = new ArrayList<>(Stream.of(1, 2, 3).toList());
+```
+
+<Callout kind="tip" title="Quick rule">
+**`Arrays.asList`** = fixed-size *view*; **`List.of`** = truly immutable, null-hostile; **`new ArrayList<>(Arrays.asList(...))`** = real mutable list.
+</Callout>
+
+<ProbeNote>
+Interviewers ask this to catch two things: (1) you know the class is *not* `java.util.ArrayList` despite the deceptive name, and (2) you understand the **fixed-size, live-backed** semantics. Bonus depth: explaining the primitive-array varargs trap shows you've actually been bitten by it in code review.
+</ProbeNote>

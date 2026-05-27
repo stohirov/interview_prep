@@ -1,0 +1,39 @@
+**`Map` doesn't extend `Collection` because the element models are fundamentally incompatible.** A `Collection<E>` is a group of single elements `E`, while a `Map<K,V>` is a group of `Entry<K,V>` pairs — there is no sensible `add(E)` for a key-value store, and forcing one would break the contract.
+
+## The Contract Mismatch
+
+Look at the `Collection<E>` interface — its core mutator is `boolean add(E e)`. If `Map<K,V>` extended `Collection<???>`, you'd have to pick what `E` is. None of the obvious choices work cleanly:
+
+- `Collection<K>`? You'd lose the value.
+- `Collection<V>`? Multiple keys can share a value, but `add(V)` has no key.
+- `Collection<Entry<K,V>>`? Closer, but then `contains(E)` and `remove(E)` would have to compare entries by both key and value — which is not how maps behave (you typically look up by key alone).
+
+The designers chose conceptual cleanliness: `Map` is its own root, and you can still get `Collection` *views* when you need them.
+
+```java
+Map<String, Integer> ages = Map.of("Ada", 36, "Linus", 54);
+
+Set<String>             keys    = ages.keySet();      // Collection view
+Collection<Integer>     values  = ages.values();      // Collection view
+Set<Map.Entry<String,Integer>> entries = ages.entrySet();
+
+for (var e : ages.entrySet()) {
+    System.out.println(e.getKey() + " -> " + e.getValue());
+}
+```
+
+## Views, Not Copies
+
+Critically, `keySet()`, `values()`, and `entrySet()` return **live views** backed by the map. Removing from the view removes from the map. You cannot, however, `add` to these views — they throw `UnsupportedOperationException` because adding a bare key with no value is meaningless.
+
+## The Historical Angle
+
+Joshua Bloch (the framework's principal designer) has explicitly discussed this: shoe-horning `Map` into `Collection` would have polluted both interfaces with awkward optional operations. Keeping them separate trades a tiny bit of asymmetry for a much cleaner API. The cost is just one extra root in the type hierarchy.
+
+<Callout kind="tip" title="Mental model">
+Think of `Collection` as "a bag of things" and `Map` as "a function from keys to values." A function isn't a bag — it's a different kind of structure that happens to expose bag-like views.
+</Callout>
+
+<ProbeNote>
+The interviewer is testing whether you understand interface design as a deliberate engineering choice, not an accident. Strong candidates connect it to the **Liskov substitution principle** (a `Map` couldn't honor `Collection.add`'s contract) and mention the view methods as the elegant workaround. Weak answers just say "they're different" without explaining *why* the difference matters.
+</ProbeNote>

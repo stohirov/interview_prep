@@ -1,0 +1,63 @@
+**The `equals` contract has five properties: reflexive, symmetric, transitive, consistent, and non-null.** Any class that overrides `equals` must honor all five; violating any one breaks hash collections, lists, and the JDK's own utilities in subtle ways.
+
+## The five properties
+
+1. **Reflexive** — `x.equals(x)` is `true` for every non-null `x`.
+2. **Symmetric** — `x.equals(y) == y.equals(x)` for every non-null `x, y`.
+3. **Transitive** — if `x.equals(y) && y.equals(z)` then `x.equals(z)`.
+4. **Consistent** — repeated calls return the same result as long as the compared state doesn't change.
+5. **Non-null** — `x.equals(null)` returns `false`, never throws `NullPointerException`.
+
+## The canonical hand-written implementation
+
+```java
+public final class Money {
+    private final long cents;
+    private final String currency;
+
+    public Money(long cents, String currency) {
+        this.cents = cents;
+        this.currency = Objects.requireNonNull(currency);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;                           // reflexive fast-path
+        if (!(o instanceof Money other)) return false;        // type + null check
+        return cents == other.cents
+            && currency.equals(other.currency);               // field-by-field
+    }
+
+    @Override
+    public int hashCode() { return Objects.hash(cents, currency); }
+}
+```
+
+The `instanceof` pattern (Java 16+) handles `null` for free: `null instanceof Money` is always `false`.
+
+## Why each property matters in practice
+
+| Property | What breaks when violated |
+|---|---|
+| Reflexive | `List.contains(x)` may return `false` even when `x` is *in* the list. |
+| Symmetric | `set.contains(a)` and `set.contains(b)` give different answers depending on insertion order. |
+| Transitive | A `HashSet` can hold three pairwise-equal objects, all "duplicates" of each other. |
+| Consistent | Using `System.currentTimeMillis()` or a mutable field makes keys "vanish" from `HashMap`. |
+| Non-null | NPE inside `Collection.remove(null)` because the JDK routinely calls `equals(null)`. |
+
+## A subtle violation: comparing a `BigDecimal`
+
+```java
+BigDecimal a = new BigDecimal("1.0");
+BigDecimal b = new BigDecimal("1.00");
+a.equals(b);            // false — different scale
+a.compareTo(b) == 0;    // true — same numeric value
+```
+
+`BigDecimal.equals` checks scale *and* value, so equal-numerically values are not `equals`-equal. This is famously inconsistent with `compareTo` and breaks `TreeSet<BigDecimal>` (which uses `compareTo`) vs `HashSet<BigDecimal>` (which uses `equals`).
+
+<Callout kind="tip" title="Reach for `record` when you can">
+A record's generated `equals` satisfies all five properties by construction. The hand-written form above is only needed when you have a non-trivial superclass, mutable state, or pre-Java-16 code.
+</Callout>
+
+<ProbeNote>The interviewer is testing whether you can recite the five properties *and* connect each to a real-world failure mode. Bonus points for naming the `BigDecimal` inconsistency, or for mentioning that `equals` must also be `null`-safe in a way the parent method does not check — that's why the `instanceof` idiom matters.</ProbeNote>

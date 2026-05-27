@@ -1,0 +1,105 @@
+**There are three idioms worth knowing**: `enum` (Bloch's recommendation, simplest), Bill Pugh's static-holder (lazy + thread-safe with no synchronization), and double-checked locking (the textbook lazy-init, with subtle correctness requirements). Pick `enum` unless you have a specific reason not to — it's correct, terse, and resistant to serialization and reflection attacks that defeat the other two.
+
+## 1. Enum singleton — Bloch Item 3
+
+```java
+public enum DatabaseConfig {
+    INSTANCE;
+
+    private final Properties props = loadProperties();
+
+    public String get(String key) { return props.getProperty(key); }
+    private static Properties loadProperties() { /* ... */ }
+}
+
+// Usage
+DatabaseConfig.INSTANCE.get("db.url");
+```
+
+**Why prefer it:**
+
+- JVM guarantees exactly one instance, even under deserialization and reflection (`Constructor.newInstance` on an enum throws `IllegalArgumentException`).
+- Thread-safe by virtue of class initialization — the JVM holds a lock during `<clinit>`.
+- No boilerplate, no explicit synchronization, no double-check.
+
+**Drawbacks:**
+
+- Can't extend a class (enums can implement interfaces, which is usually enough).
+- Slight feel-mismatch if "I want a singleton, not an enum value."
+
+## 2. Bill Pugh / Initialization-on-demand holder
+
+```java
+public final class DatabaseConfig {
+    private DatabaseConfig() {}
+
+    private static class Holder {
+        static final DatabaseConfig INSTANCE = new DatabaseConfig();
+    }
+
+    public static DatabaseConfig getInstance() { return Holder.INSTANCE; }
+}
+```
+
+**Why it works:**
+
+- The nested `Holder` class isn't loaded until `getInstance()` is called — true lazy initialization.
+- Class initialization itself is thread-safe (JVM holds a per-class lock).
+- No `synchronized`, no `volatile`, no double-check — yet correct on every JVM.
+
+This is the right choice if you really need lazy init and can't use `enum`.
+
+## 3. Double-checked locking
+
+```java
+public final class DatabaseConfig {
+    private static volatile DatabaseConfig instance;   // volatile is mandatory
+    private DatabaseConfig() {}
+
+    public static DatabaseConfig getInstance() {
+        DatabaseConfig local = instance;               // local read for performance
+        if (local == null) {
+            synchronized (DatabaseConfig.class) {
+                local = instance;
+                if (local == null) {
+                    instance = local = new DatabaseConfig();
+                }
+            }
+        }
+        return local;
+    }
+}
+```
+
+**Why it's tricky:**
+
+- The `volatile` is non-negotiable on Java 5+ — without it, another thread can observe a non-null `instance` reference pointing to a *partially constructed* object due to JMM reordering. Pre-Java-5, double-checked locking was provably broken; Java 5 fixed it via the volatile-publication semantics.
+- The local-variable read is a micro-optimization — one volatile read instead of two on the hot path.
+
+**Why it's not preferred today:** The Holder idiom achieves the same lazy + thread-safe result with less code and no JMM subtleties. DCL is mostly historical.
+
+## Comparison
+
+| | Lazy | Thread-safe | Serialization-safe | Reflection-proof | LOC |
+| - | - | - | - | - | - |
+| Enum | No (eager on class load) | Yes | Yes | Yes | 3 |
+| Bill Pugh | Yes | Yes | Manual `readResolve` | No | 5 |
+| DCL | Yes | Yes (with `volatile`) | Manual `readResolve` | No | 10 |
+| Eager `private static final` | No | Yes | Manual `readResolve` | No | 3 |
+
+## Eager vs lazy — does it even matter?
+
+For most singletons (config, logger, registry), eager initialization is fine. Class loading is lazy itself — `DatabaseConfig` isn't loaded until first reference. The "lazy" requirement only matters when the singleton's construction is *expensive* and you might never need it. If you don't need lazy, just:
+
+```java
+public final class DatabaseConfig {
+    public static final DatabaseConfig INSTANCE = new DatabaseConfig();
+    private DatabaseConfig() {}
+}
+```
+
+<Callout kind="warn" title="Singletons are a smell">
+Before adding one, ask: could I inject this through a constructor instead? Most "singletons" are global state that makes testing harder. The DI container (Spring, Guice) gives you "exactly one per context" without the pattern.
+</Callout>
+
+<ProbeNote>The interviewer wants all three variants with working code, and they want to hear *enum* as the recommendation with a one-line reason ("Bloch Item 3: serialization-safe, reflection-proof, free thread safety"). The DCL question is often a follow-up: "Why is `volatile` required?" — JMM reordering of the constructor call vs the reference publication.</ProbeNote>

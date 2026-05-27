@@ -1,0 +1,141 @@
+A rate limiter restricts how often an action can happen — calls per second per user, requests per minute per API key, login attempts per IP. The two canonical algorithms are **token bucket** and **leaky bucket**: same goal, different shape of traffic they allow. Pick token bucket unless the interviewer specifically asks why you'd use leaky.
+
+## Requirements
+
+- Allow at most `R` requests per second per key, with burst tolerance of up to `B`.
+- Operations: `tryAcquire(key)` returns `true` if allowed, `false` if throttled.
+- Single JVM, multi-threaded (many request handlers calling `tryAcquire` concurrently).
+- Out of scope: distributed coordination, retries, backoff suggestions.
+
+## Token bucket vs leaky bucket — the one-line difference
+
+- **Token bucket**: a bucket holds up to `B` tokens, refilled at `R` tokens/second. Each request consumes one token. Idle periods accumulate tokens up to `B` — so bursts are allowed (up to `B` requests in zero time).
+- **Leaky bucket**: requests enter a fixed-capacity queue that drains at `R` requests/second. Overflows are dropped. Idle periods don't earn capacity — output rate is steady, no bursts.
+
+| Property | Token bucket | Leaky bucket |
+|---|---|---|
+| Burst handling | Allows bursts up to `B` | No bursts — steady output rate |
+| Implementation | Counter + timestamp | Queue + scheduler |
+| Memory per key | O(1) | O(queue size) |
+| Most common in practice | Yes (Stripe, AWS, GitHub API) | Rare today |
+
+Token bucket is the right default because real APIs *want* to allow short bursts — users do refresh-twice or open three tabs at once and shouldn't be punished for it.
+
+## Token bucket implementation
+
+```java
+public final class TokenBucket {
+    private final long capacity;       // B: max tokens
+    private final double refillPerSec; // R: refill rate
+
+    private double tokens;             // current count (double for fractional refill)
+    private long lastRefillNanos;      // last update timestamp
+    private final Object lock = new Object();
+
+    public TokenBucket(long capacity, double refillPerSec) {
+        this.capacity = capacity;
+        this.refillPerSec = refillPerSec;
+        this.tokens = capacity;
+        this.lastRefillNanos = System.nanoTime();
+    }
+
+    public boolean tryAcquire() {
+        synchronized (lock) {
+            refill();
+            if (tokens >= 1.0) {
+                tokens -= 1.0;
+                return true;
+            }
+            return false;
+        }
+    }
+
+    private void refill() {
+        long now = System.nanoTime();
+        double elapsedSec = (now - lastRefillNanos) / 1e9;
+        tokens = Math.min(capacity, tokens + elapsedSec * refillPerSec);
+        lastRefillNanos = now;
+    }
+}
+```
+
+Two design choices worth defending:
+
+1. **Lazy refill** instead of a background scheduler. Adding tokens only when somebody calls `tryAcquire` saves a thread per key and avoids drift. The math is just "elapsed time times rate."
+2. **Double instead of long** for `tokens`. With `R = 100` and 1ms between calls, you should add 0.1 tokens — integer truncation would make the bucket never refill in fast-call scenarios.
+
+## Per-key rate limiter
+
+```java
+public final class RateLimiter {
+    private final long capacity;
+    private final double refillPerSec;
+    private final ConcurrentMap<String, TokenBucket> buckets = new ConcurrentHashMap<>();
+
+    public RateLimiter(long capacity, double refillPerSec) {
+        this.capacity = capacity;
+        this.refillPerSec = refillPerSec;
+    }
+
+    public boolean tryAcquire(String key) {
+        return buckets.computeIfAbsent(key, k -> new TokenBucket(capacity, refillPerSec))
+                      .tryAcquire();
+    }
+}
+```
+
+`ConcurrentHashMap` plus `computeIfAbsent` gives lock-free bucket lookup. The per-bucket `synchronized` block inside `tryAcquire` keeps contention bounded to one key.
+
+## Concurrency upgrade: lock-free token bucket
+
+The `synchronized` block above serializes every `tryAcquire` on the same key. For very high QPS, you can replace it with a CAS loop on an `AtomicLong` packing tokens + timestamp into a single 64-bit value. It's harder to get right; mention it as a "I'd reach for it when profiling demanded it" — don't write it on the whiteboard unless asked.
+
+## Memory hygiene
+
+A naive `ConcurrentHashMap` grows forever — every distinct key keeps a bucket alive. Two fixes:
+
+- **TTL the buckets**: wrap each entry with `lastAccessedAt`, sweep with a scheduled cleanup, or use Caffeine's `expireAfterAccess`.
+- **LRU eviction** on the bucket map: bounded total bucket count, evict least-recently-used keys.
+
+## Leaky bucket sketch (for comparison)
+
+```java
+public final class LeakyBucket {
+    private final int capacity;
+    private final long drainIntervalNanos; // 1 / R seconds
+    private final Deque<Long> queue = new ArrayDeque<>();
+    private final Object lock = new Object();
+
+    public boolean tryEnqueue() {
+        synchronized (lock) {
+            drain();
+            if (queue.size() >= capacity) return false;
+            queue.add(System.nanoTime());
+            return true;
+        }
+    }
+
+    private void drain() {
+        long now = System.nanoTime();
+        while (!queue.isEmpty() && now - queue.peek() >= drainIntervalNanos) {
+            queue.poll();
+        }
+    }
+}
+```
+
+Output rate is steady at `R` per second. The queue absorbs bursty input but smooths the rate downstream. Use this when the *downstream* consumer needs steady pacing (e.g. throttling a third-party API that hates bursts).
+
+<Callout kind="warn" title="Distributed rate limiting — say it out loud">
+Single-JVM `ConcurrentHashMap` doesn't work across instances. Use Redis with `INCR + EXPIRE` (fixed window), Lua scripts for token bucket, or a dedicated service (Envoy's rate-limit service). Mention it even if not asked — every real rate limiter eventually goes distributed.
+</Callout>
+
+## Complexity
+
+<ComplexityTable rows={[
+  {op: "tryAcquire (token bucket)", best: "O(1)", average: "O(1)", worst: "O(1)", note: "constant arithmetic"},
+  {op: "tryAcquire (leaky bucket)", best: "O(1)", average: "O(1)", worst: "O(k)", note: "k = queued entries to drain"},
+  {op: "per-key lookup",            best: "O(1)", average: "O(1)", worst: "O(1)", note: "ConcurrentHashMap"}
+]} />
+
+<ProbeNote>The interviewer is grading three beats: knowing the difference between token bucket and leaky bucket (bursts vs steady output), implementing token bucket correctly with *lazy* refill (no scheduler thread), and surfacing the bucket-map memory leak before they have to ask. Bonus credit for mentioning distributed rate limiting with Redis as the production answer.</ProbeNote>

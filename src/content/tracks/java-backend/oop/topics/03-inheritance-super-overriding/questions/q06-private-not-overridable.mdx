@@ -1,0 +1,71 @@
+**Private methods aren't overridable because they aren't visible to subclasses — and the JVM dispatches them via `invokespecial`, which is statically bound at compile time. Declaring a private method with the same signature in a subclass creates a separate, unrelated method.** It's not overriding, not hiding, just two methods that happen to share a name.
+
+## The demo
+
+```java
+class Parent {
+    private String secret()       { return "parent"; }
+    public  String revealSecret() { return secret(); }    // resolves to Parent.secret
+}
+
+class Child extends Parent {
+    private String secret() { return "child"; }            // unrelated method
+}
+
+Parent p = new Child();
+p.revealSecret();   // returns "parent"
+```
+
+Even though the runtime object is a `Child`, `revealSecret()` calls `Parent.secret()` — the private call is bound at compile time, inside `Parent`, with no vtable lookup. `Child.secret()` is invisible to `Parent`'s code.
+
+## Why `invokespecial`?
+
+The JVM has four invocation bytecodes:
+
+| Bytecode          | Used for                              | Dispatch          |
+|-------------------|---------------------------------------|-------------------|
+| `invokevirtual`   | instance methods on classes           | dynamic (vtable)  |
+| `invokeinterface` | instance methods on interfaces        | dynamic (itable)  |
+| `invokestatic`    | static methods                        | static            |
+| `invokespecial`   | constructors, private, `super.x()`    | static            |
+
+Private methods are compiled to `invokespecial` (along with constructors and `super` calls) precisely because they should *not* be polymorphic. The receiver's class is irrelevant — the method to call is decided when the bytecode is emitted.
+
+## The `@Override` test
+
+The compiler enforces this — try to annotate a "private override":
+
+```java
+class Child extends Parent {
+    @Override private String secret() { return "child"; }
+    // compile error: method does not override or implement a method from a supertype
+}
+```
+
+The error message is unambiguous. There is no supertype method to override, because private members aren't inherited.
+
+## Consequence: defensive design
+
+Library authors lean on this. A class can call its own private helpers freely, certain that no subclass can intercept:
+
+```java
+public abstract class Cache {
+    public final V get(K key) {
+        return doGet(normalize(key));
+    }
+    private K normalize(K key) { /* ... */ }    // safe — uninterceptable
+    protected abstract V doGet(K key);          // template method
+}
+```
+
+If `normalize` were `protected`, a malicious or buggy subclass could override it and corrupt the cache. Keeping it private guarantees the contract.
+
+## Java 11 nest mates
+
+A wrinkle: since Java 11, classes in the same *nest* (an outer class and its nested classes) can call each other's private methods directly via `invokespecial`, without the compiler-synthesized accessor methods Java 8 used. This doesn't change overriding semantics — it just removes synthetic bridges. Private is still per-class-private, not per-nest-virtual.
+
+<Callout kind="warn" title="Don't rely on accidental shadowing">
+If you find yourself thinking "I'll override this private method in the subclass," you have a design problem. Make the method `protected` (and document it as a hook), or restructure so the variation lives in a different public method.
+</Callout>
+
+<ProbeNote>This question separates engineers who think of overriding as "any same-named subclass method" from those who understand it as a JVM dispatch mechanism gated on visibility. The strong answer names `invokespecial`, points out that `@Override` won't even compile, and concludes that the "override" is really a fresh, unrelated method.</ProbeNote>

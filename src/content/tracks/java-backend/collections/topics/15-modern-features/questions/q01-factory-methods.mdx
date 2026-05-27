@@ -1,0 +1,75 @@
+**`List.of`, `Set.of`, `Map.of` (Java 9+) build immutable, null-hostile, structurally compact collections in one expression. They are the modern default for any collection that doesn't need to grow.**
+
+## Semantics
+
+- **Immutable** — every mutator throws `UnsupportedOperationException`.
+- **Null-hostile** — null elements, null keys, null values all throw `NullPointerException` at construction. Even `contains(null)` and `equals(null)` throw NPE on these collections.
+- **Set / Map de-duplicate at construction** — duplicate elements/keys throw `IllegalArgumentException` (different from `HashMap.put` which silently overwrites).
+- **Iteration order** — for `Set.of` and `Map.of`, intentionally **unspecified and randomized between JVM runs**, so you can't accidentally rely on it.
+- **Structurally compact** — small sizes (0–2 for sets, 0–10 for lists, 0–10 for maps) use specialized inner classes with fewer pointers than `HashMap`.
+
+## Variants
+
+```java
+List.of();                                       // empty singleton
+List.of("a");                                    // 1 element
+List.of("a", "b", "c");                          // up to 10 fixed-arity overloads
+List.of("a", "b", "c", "d", "e",
+        "f", "g", "h", "i", "j", "k");           // 11+: varargs overload
+
+Set.of("a", "b");                                // dedup at construction
+Set.of("a", "a");                                // IllegalArgumentException
+
+Map.of("k1", 1, "k2", 2);                        // up to 10 entry pairs
+Map.ofEntries(
+    Map.entry("k1", 1),
+    Map.entry("k2", 2),
+    Map.entry("k3", 3)
+);                                               // 11+ entries
+```
+
+The "up to 10" overloads exist to avoid varargs array allocation for common small sizes. For larger maps, `Map.ofEntries(Map.entry(...), ...)` is the canonical form.
+
+## Null hostility — the gotcha
+
+```java
+List.of("a", null);                  // NullPointerException
+Set.of("a", null);                   // NullPointerException
+Map.of("k", null);                   // NullPointerException
+
+List<String> xs = List.of("a", "b");
+xs.contains(null);                   // NullPointerException, NOT false
+xs.indexOf(null);                    // NullPointerException
+```
+
+This is deliberate. Allowing nulls would force every internal method to do null-checking, hurting performance and obscuring bugs. If you genuinely need a list-with-nulls, use `new ArrayList<>(Arrays.asList("a", null))` or `Collections.unmodifiableList(...)` over an `ArrayList`.
+
+## copyOf — snapshot from any source
+
+```java
+List<String> src = new ArrayList<>(List.of("a", "b", "c"));
+List<String> snap = List.copyOf(src);    // immutable snapshot
+
+src.add("d");
+System.out.println(snap);                // [a, b, c] — frozen
+```
+
+`List.copyOf` / `Set.copyOf` / `Map.copyOf` are the right tools for "give me an immutable snapshot of whatever I have." Bonus: if the input is already an immutable JDK collection, `copyOf` returns it as-is without allocating.
+
+## Why not just use `Collections.unmodifiableList`?
+
+| | `Collections.unmodifiableList(x)` | `List.of(...)` |
+|---|---|---|
+| Backing collection can change | Yes | No backing |
+| Null tolerant | Yes | No (NPE) |
+| Specialized small-size layout | No | Yes |
+| API verbosity | Verbose | One call |
+| Available since | Java 1.2 | Java 9 |
+
+For new code, `List.of` is essentially always better unless you specifically need null tolerance or you're producing a *view* over a collection you'll still mutate.
+
+<Callout kind="warn" title="Iteration order is randomized for Set.of / Map.of">
+Tests that depend on iteration order of `Set.of("a", "b")` will pass on your machine, fail in CI, and pass in production. The order is salted per-JVM. Use `LinkedHashSet` or sort explicitly if order matters.
+</Callout>
+
+<ProbeNote>Common trick question: "What does `List.of(arr)` return when `arr` is a `String[]`?" — Returns a `List<String[]>` of size 1 containing the whole array (Java's vararg / generics interaction). Use `List.of(arr[0], arr[1], ...)` or `Arrays.asList(arr)`.</ProbeNote>

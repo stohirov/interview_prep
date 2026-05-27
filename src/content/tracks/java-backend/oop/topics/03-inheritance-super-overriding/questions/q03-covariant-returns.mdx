@@ -1,0 +1,78 @@
+**A covariant return type lets an overriding method return a more specific type than the parent declared — so callers holding the subclass reference get the precise type back without casting.** Java added this in 5.0; before then, every override had to return the parent's exact return type, which forced ugly casts on every caller.
+
+## The basic example
+
+```java
+class Animal {
+    Animal copy() { return new Animal(); }
+}
+
+class Dog extends Animal {
+    @Override
+    Dog copy() {                     // returns Dog, not Animal
+        return new Dog();
+    }
+}
+
+Dog d  = new Dog().copy();           // no cast needed
+Animal a = ((Animal) new Dog()).copy();  // still works
+```
+
+Before Java 5 you'd have written `Dog d = (Dog) new Dog().copy();` — a redundant cast that the compiler couldn't avoid.
+
+## Real-world: `Cloneable.clone()`
+
+The canonical use case is `clone()`. The supertype signature returns `Object`; well-designed clonable classes use a covariant return:
+
+```java
+public class Buffer implements Cloneable {
+    @Override
+    public Buffer clone() {           // covariant: Buffer, not Object
+        try { return (Buffer) super.clone(); }
+        catch (CloneNotSupportedException e) { throw new AssertionError(e); }
+    }
+}
+
+Buffer copy = original.clone();       // no cast
+```
+
+## How the compiler implements it
+
+`Dog.copy()` and `Animal.copy()` look like different methods to the JVM — return type is part of the method descriptor in bytecode. The compiler generates a synthetic **bridge method** in `Dog` to preserve binary compatibility:
+
+```java
+// Conceptually emitted by the compiler in Dog:
+Animal copy() {                  // synthetic bridge
+    return this.copy();          // calls the Dog-returning copy()
+}
+```
+
+This way, code compiled against the old `Animal.copy()` signature still resolves correctly when invoked on a `Dog`. You can see it with `javap -v Dog.class`.
+
+## Builder-pattern fluent APIs
+
+Covariant returns make subclass builders fluent without casts:
+
+```java
+class Builder {
+    Builder name(String n) { /* ... */ return this; }
+}
+
+class UserBuilder extends Builder {
+    @Override UserBuilder name(String n) {           // covariant
+        super.name(n);
+        return this;
+    }
+    UserBuilder age(int a) { /* ... */ return this; }
+}
+
+new UserBuilder().name("Ada").age(36);    // chain stays in UserBuilder
+```
+
+Without the covariant return, `new UserBuilder().name("Ada")` would yield a `Builder`, and the next `.age(36)` call would fail to compile.
+
+<Callout kind="info" title="Limit: only object types">
+Covariance applies to reference return types only. You can't return `Long` from a method that returned `Object`? Actually you can — `Long` is a subtype of `Object`. But you *cannot* return `int` from a method returning `long` — primitives have no subtype relationship.
+</Callout>
+
+<ProbeNote>This is a competence check, not a trick. The interviewer wants you to know what "covariant" means in the type-theory sense (output position can narrow), give a concrete example, and ideally name the bridge-method mechanism. Mentioning `clone()` or fluent builders shows you've used the feature, not just read about it.</ProbeNote>

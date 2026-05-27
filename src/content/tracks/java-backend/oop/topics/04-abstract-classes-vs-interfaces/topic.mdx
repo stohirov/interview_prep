@@ -1,0 +1,47 @@
+**Java 8 blurred the line by giving interfaces default and static methods; Java 9 added private interface methods; modern Java added sealed interfaces. The "abstract class vs interface" answer that worked in 2010 is wrong now.** The remaining real differences are state, constructors, and how each handles multiple inheritance — and those still drive the decision.
+
+## What stayed the same
+
+- An **abstract class** can have instance fields, constructors, and any access modifier on its members. It defines a *partial implementation* of an "is-a" hierarchy. A class extends exactly one.
+- An **interface** defines a *contract*. It has no instance state (only `public static final` constants) and no constructors. A class implements as many as it wants.
+
+Default methods didn't change either of these — they only gave interfaces a way to provide *behavior* alongside the contract, without state.
+
+## What changed since Java 8
+
+```java
+public interface Cache<K, V> {
+    V    get(K key);                                       // abstract
+    void put(K key, V value);
+
+    default V getOrCompute(K key, Function<K, V> loader) {  // default method
+        V v = get(key);
+        if (v == null) { v = loader.apply(key); put(key, v); }
+        return v;
+    }
+
+    static <K, V> Cache<K, V> empty() {                    // static factory
+        return new EmptyCache<>();
+    }
+
+    private V wrap(V value) { return value; }              // private helper (Java 9+)
+}
+```
+
+Interfaces can now ship reusable code. That's why the question "should I use an abstract class for shared behavior?" rarely needs to be answered with *abstract class* anymore — interfaces handle it for stateless behavior.
+
+## When the difference still matters
+
+- **State.** Need fields? Abstract class. (Records or normal classes also work, but if you need a partial hierarchy with shared state, only an abstract class fits.)
+- **Constructors and initialization.** Need to enforce setup logic on every subtype? Abstract class.
+- **Multiple inheritance of *type*.** Need a class to be both `Comparable` and `Serializable`? Interfaces — a class can implement many, extend only one.
+- **Backward-compatible evolution.** Need to add a new method to a long-shipped type without breaking implementers? Default method on an interface.
+
+## A decision rubric
+
+1. Do you need fields or a constructor? → **abstract class**.
+2. Do you need to mix multiple capabilities? → **interfaces**.
+3. Are you adding behavior to an existing type without breaking callers? → **default method on an interface**.
+4. Otherwise: **prefer interfaces** for the contract, abstract base classes only when you need shared state.
+
+The six questions below cover the diamond problem, default vs static methods, why Java 9 added private interface methods, functional interfaces, and marker interfaces.

@@ -1,0 +1,65 @@
+**An immutable object has no writes after construction, so there are no data races to protect against.** Combined with the Java Memory Model's guarantee about `final` fields, the object can be freely shared between threads with no synchronization, no `volatile`, and no locks. That's "thread safety for free" — you pay zero runtime cost for what concurrent code normally needs significant machinery to achieve.
+
+## The two ingredients
+
+**1. No mutators means no write races.** Every thread sees a fixed snapshot. There is no `count++`, no `list.add`, no field reassignment. The only state-change concept — construct a new object with different values — is by definition observed at a single point (when the new reference is published).
+
+**2. The `final`-field JMM guarantee gives safe publication.** The Java Memory Model (JLS §17.5) promises that when a constructor of an object with `final` fields finishes, *every thread that subsequently observes that object via any path* sees the final fields fully initialized. No torn writes, no zero/null reads of fields that should have been set.
+
+```java
+public final class Money {
+    private final long cents;
+    private final Currency currency;
+    public Money(long cents, Currency currency) {
+        this.cents = cents;
+        this.currency = currency;
+    }
+    public long cents() { return cents; }
+    public Currency currency() { return currency; }
+}
+
+// Thread A:
+Money m = new Money(1_000, USD);
+sharedRef = m;                    // unsynchronized publish
+
+// Thread B:
+Money seen = sharedRef;
+if (seen != null) seen.cents();   // guaranteed to see 1_000, not 0
+```
+
+Without `final`, this would be a data race — thread B could see a partially constructed object with `cents == 0`. With `final`, no race exists.
+
+## What it replaces
+
+| Mutable design | Immutable design |
+| -------------- | ---------------- |
+| `synchronized` on every read and write | nothing |
+| `volatile` on each field | `final` |
+| `AtomicReference`, CAS loops | new instance + assign |
+| `Collections.synchronizedList` | `List.copyOf` |
+
+## Update-by-replacement
+
+The corollary: to "change" an immutable object, you build a new one. The mutation is moved from object state to reference assignment.
+
+```java
+public Money plus(Money other) {
+    if (!currency.equals(other.currency)) throw new IllegalArgumentException();
+    return new Money(cents + other.cents, currency);
+}
+
+// Updating a shared "account balance":
+balanceRef.updateAndGet(m -> m.plus(deposit));  // AtomicReference handles the publish
+```
+
+The `AtomicReference` provides the publication for the *slot*, while the immutable `Money` instances themselves need no coordination.
+
+<Callout kind="tip" title="GC and footprint">
+The downside is allocation pressure — every update produces a new object. For hot paths, structural sharing (persistent data structures, see Clojure / Scala collections) limits the cost. For most business code, the GC is happy and the simplicity wins.
+</Callout>
+
+## Why this matters in interviews
+
+When asked "how would you make this class thread-safe?" the senior answer is often "make it immutable" — *not* "add `synchronized` everywhere". The classic JDK examples (`String`, `Integer`, `BigDecimal`, `Instant`, `LocalDate`, `UUID`) are all immutable precisely so they can be passed around the JVM without ceremony.
+
+<ProbeNote>Bonus probe: "Is `String` thread-safe?" — yes, because immutable. "Is `StringBuilder` thread-safe?" — no, mutable + unsynchronized. The candidate who instinctively reaches for "make it immutable" before "add a lock" demonstrates the right priority.</ProbeNote>

@@ -1,0 +1,112 @@
+The **Command** pattern wraps an operation as an object so it can be passed around, queued, logged, and — most importantly here — **undone**. A text editor's undo stack is the canonical demo: every keystroke becomes a `Command` that knows how to reverse itself, and the editor maintains two stacks (history and redo) of those reversible objects.
+
+## The interface
+
+```java
+public interface Command {
+    void execute();
+    void undo();
+}
+```
+
+That's the entire pattern. Two methods. The trick is that each concrete command captures *enough state* in its constructor to be able to undo itself later.
+
+## A text editor
+
+```java
+public final class TextDocument {
+    private final StringBuilder buffer = new StringBuilder();
+
+    public void insert(int pos, String text) { buffer.insert(pos, text); }
+    public void delete(int pos, int len)     { buffer.delete(pos, pos + len); }
+    public String content() { return buffer.toString(); }
+}
+
+public final class InsertCommand implements Command {
+    private final TextDocument doc;
+    private final int pos;
+    private final String text;
+    public InsertCommand(TextDocument d, int p, String t) {
+        this.doc = d; this.pos = p; this.text = t;
+    }
+    public void execute() { doc.insert(pos, text); }
+    public void undo()    { doc.delete(pos, text.length()); }
+}
+
+public final class DeleteCommand implements Command {
+    private final TextDocument doc;
+    private final int pos;
+    private final int len;
+    private String removed; // captured at execute() time so undo can restore it
+    public DeleteCommand(TextDocument d, int p, int l) {
+        this.doc = d; this.pos = p; this.len = l;
+    }
+    public void execute() {
+        removed = doc.content().substring(pos, pos + len);
+        doc.delete(pos, len);
+    }
+    public void undo() { doc.insert(pos, removed); }
+}
+```
+
+Notice the asymmetry: `InsertCommand` knows the text at construction time (the user typed it), so undo is straightforward. `DeleteCommand` doesn't know what's about to be deleted until `execute()` runs, so it captures the removed text inside `execute()` for `undo()` to replay. That distinction — *constructor capture vs execute-time capture* — is the bit that trips candidates up.
+
+## The undo/redo engine
+
+```java
+public final class CommandHistory {
+    private final Deque<Command> history = new ArrayDeque<>();
+    private final Deque<Command> redoStack = new ArrayDeque<>();
+
+    public void run(Command cmd) {
+        cmd.execute();
+        history.push(cmd);
+        redoStack.clear();  // any new action invalidates redo
+    }
+
+    public void undo() {
+        if (history.isEmpty()) return;
+        Command cmd = history.pop();
+        cmd.undo();
+        redoStack.push(cmd);
+    }
+
+    public void redo() {
+        if (redoStack.isEmpty()) return;
+        Command cmd = redoStack.pop();
+        cmd.execute();
+        history.push(cmd);
+    }
+}
+```
+
+Why the redo stack clears on a new action: once you've undone and then typed something different, the old redo path no longer makes sense — the editor's state has branched. This is exactly how every text editor on your computer behaves.
+
+## Putting it together
+
+```java
+var doc = new TextDocument();
+var hist = new CommandHistory();
+hist.run(new InsertCommand(doc, 0, "Hello "));
+hist.run(new InsertCommand(doc, 6, "world"));
+// content: "Hello world"
+hist.undo();
+// content: "Hello "
+hist.redo();
+// content: "Hello world"
+hist.run(new DeleteCommand(doc, 0, 5));
+// content: " world", redo stack cleared
+```
+
+## Where else this pattern lives
+
+- `java.lang.Runnable` is essentially `Command` without `undo` — `executor.submit(runnable)` queues a command for later execution.
+- Message brokers (Kafka, RabbitMQ): every message is a serialized command sent across the wire.
+- Database transactions: each statement is logged so the WAL can roll back on abort. Same idea, different scale.
+- CQRS systems separate Commands (intent to change state) from Queries (read state).
+
+<Callout kind="tip" title="Memento for heavy state">
+For commands whose undo would require recomputing too much, store a memento (snapshot) at execute time and restore it on undo. The trade-off is memory; the upside is correctness for irreversible operations like "apply filter to image".
+</Callout>
+
+<ProbeNote>Interviewers test two things here: that you can articulate why Command is just "operation reified into an object" (and recognize `Runnable` as the same shape), and that you handle the captured-state question correctly — `DeleteCommand` *must* snapshot what it removed inside `execute()` so `undo()` can restore it. Forgetting to clear the redo stack on a new action is the classic bug.</ProbeNote>

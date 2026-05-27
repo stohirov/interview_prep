@@ -1,0 +1,72 @@
+Access-order mode is enabled by the third constructor argument: `new LinkedHashMap<>(initialCapacity, loadFactor, true)`. In this mode every `get`, `getOrDefault`, `put` (on an existing key), `putIfAbsent`, `compute*`, and `merge` moves the touched entry to the **tail** of the chain. The head therefore tracks the least-recently-used entry.
+
+## The constructor
+
+```java
+public LinkedHashMap(int initialCapacity, float loadFactor, boolean accessOrder)
+```
+
+There is no other way to switch modes — `accessOrder` is `final` and there's no setter. You must decide at construction time.
+
+```java
+Map<String, Integer> m = new LinkedHashMap<>(16, 0.75f, true);
+m.put("a", 1);
+m.put("b", 2);
+m.put("c", 3);
+// chain: a, b, c (head -> tail)
+
+m.get("a"); // moves "a" to tail
+// chain: b, c, a
+
+m.get("b"); // moves "b" to tail
+// chain: c, a, b
+```
+
+## How it works
+
+`HashMap.getNode` calls a hook `afterNodeAccess` after a successful lookup. In plain `HashMap` that hook is a no-op; `LinkedHashMap` overrides it:
+
+```java
+void afterNodeAccess(Node<K,V> e) {
+    Entry<K,V> last;
+    if (accessOrder && (last = tail) != e) {
+        Entry<K,V> p = (Entry<K,V>) e, b = p.before, a = p.after;
+        p.after = null;
+        if (b == null) head = a; else b.after = a;
+        if (a != null) a.before = b; else last = b;
+        if (last == null) head = p;
+        else { p.before = last; last.after = p; }
+        tail = p;
+        ++modCount;
+    }
+}
+```
+
+It detaches the node from its current position and re-links it at the tail. O(1), because the list is doubly-linked.
+
+## Why `modCount` increments
+
+A `get` in access-order mode *structurally modifies* the chain. So iterating while another `get` happens will throw `ConcurrentModificationException` — even though no entries were added or removed:
+
+```java
+Map<String, Integer> m = new LinkedHashMap<>(16, 0.75f, true);
+m.put("a", 1); m.put("b", 2);
+
+for (var e : m.entrySet()) {
+    m.get("a"); // CME -- iteration sees modCount change
+}
+```
+
+This surprises people. In access-order mode, **`get` is a mutating operation**.
+
+## What does NOT move the entry
+
+- `containsKey` — does not call `afterNodeAccess`.
+- `putAll` of a key that already exists in *the source* map (the receiving map sees normal `put`).
+- `entrySet().forEach(...)` — iteration itself doesn't touch the chain.
+
+<Callout kind="warn" title="Thread safety">
+Access-order mode mutates on read. So even read-only-looking code paths need synchronisation in multi-threaded use. Wrap with `Collections.synchronizedMap`, or use Caffeine for production caching.
+</Callout>
+
+<ProbeNote>The probe is whether you know access-order makes reads mutating — both the structural effect (chain reorders) and the consequence (CME during iteration, thread-safety issues). Naming the constructor exactly shows you've used it.</ProbeNote>

@@ -1,0 +1,66 @@
+**Java is always pass-by-value. For primitives, the value is the primitive itself; for objects, the value passed is the *reference* (a fixed-size pointer) — not the object.** The confusion arises because mutating the object through that reference is visible to the caller, which *looks* like pass-by-reference. It isn't.
+
+## The proof: reassignment doesn't propagate
+
+If Java were pass-by-reference, this would swap:
+
+```java
+static void swap(String a, String b) {
+    String tmp = a; a = b; b = tmp;
+}
+
+String x = "alpha", y = "beta";
+swap(x, y);
+System.out.println(x + " " + y);    // still "alpha beta"
+```
+
+Inside `swap`, the *local* `a` and `b` are reassigned. The caller's `x` and `y` are untouched. A reference is a value; reassigning the parameter only rebinds the local variable.
+
+## Mutation through the reference *is* visible
+
+```java
+static void addOne(List<Integer> list) {
+    list.add(1);
+}
+
+List<Integer> xs = new ArrayList<>();
+addOne(xs);
+System.out.println(xs);   // [1]
+```
+
+The caller and callee both hold a reference to the *same* `ArrayList` object on the heap. The reference was copied, the object was not. Mutating the object is observable; rebinding the local parameter is not.
+
+## Visual model
+
+<Diagram caption="Caller and callee hold separate copies of the reference value">{`Caller stack          Callee stack          Heap
++----------+          +----------+          +----------+
+| xs  ----+---------> | list ----+---------> | ArrayList |
++----------+          +----------+          | [1]       |
+                                            +----------+
+
+list = null inside callee  =>  caller's xs unaffected
+list.add(2) inside callee  =>  caller sees [1,2]`}</Diagram>
+
+Both variables hold the same bit pattern (the reference). Each lives in its own stack frame.
+
+## Primitives behave identically
+
+```java
+static void inc(int n) { n++; }
+
+int x = 5;
+inc(x);
+System.out.println(x);   // 5
+```
+
+The 32-bit `int` is copied into the callee's frame. The model is the same — copy the value — it's just that the "value" of a primitive is the primitive itself.
+
+## Why people get this wrong
+
+The terminology "pass a reference" colloquially means "pass an object." Programmers from C++ (where `&` truly creates an alias) reach for "pass by reference" to describe what they see in Java. James Gosling has been explicit: Java has no pass-by-reference; it has values, some of which happen to be references.
+
+<Callout kind="tip" title="One-sentence rule">
+Java copies the variable; if the variable holds a reference, both copies aim at the same object.
+</Callout>
+
+<ProbeNote>This is a definitional trap. The interviewer wants the precise answer ("always by value") AND a demonstration that you understand *why* mutation through a reference is not a counterexample. Candidates who say "by reference for objects, by value for primitives" lose senior credibility — that's the C++ model, not Java's.</ProbeNote>

@@ -1,0 +1,81 @@
+**`toString` is two different methods wearing one name: a human-readable debug aid (the safe default), or a machine-parseable representation (a contract you commit to, document, and version).** Mixing them up is how production code ends up with logs that grep can't parse or APIs that break because someone "improved" a debug print.
+
+## The default — and why it's wrong
+
+`Object.toString()` returns `ClassName@hexHash`, e.g. `com.acme.Money@7d4991ad`. Useless in logs, useless in exceptions, useless everywhere — yet still the production behavior of every class that forgets to override it.
+
+The first move on any non-trivial class is to override `toString` to print the fields.
+
+## Human-readable: the default policy
+
+For most domain types, the right `toString` is a debug-friendly snapshot:
+
+```java
+@Override
+public String toString() {
+    return "Money[" + cents + " " + currency + "]";
+}
+
+// or with a record:
+record Money(long cents, String currency) {}
+// generated: "Money[cents=100, currency=USD]"
+```
+
+Guidelines:
+
+- Include all the data you'd want to see in a log line or stack trace.
+- Use a consistent shape (records' `[field=value, field=value]` is fine).
+- **Do not** commit to the exact format in the Javadoc. Reserve the right to improve it.
+- Never include secrets — passwords, tokens, full credit card numbers. Mask them.
+
+## Machine-parseable: opt-in, documented, versioned
+
+Sometimes you genuinely want `toString` to be a stable serialization — typically when the type represents a value with a canonical text form:
+
+- `BigDecimal.toString()` returns a parseable decimal string and the Javadoc *commits* to this.
+- `Instant.toString()` returns ISO-8601, and the inverse is `Instant.parse(...)`.
+- `URI.toString()` returns a parseable URI.
+
+For your own types, this is a real API commitment:
+
+```java
+/**
+ * Returns the canonical string form of this Money as "{cents} {currency}",
+ * e.g. "100 USD". This format is part of the API contract; see
+ * {@link #parse(String)} for the inverse.
+ */
+@Override public String toString() { return cents + " " + currency; }
+public static Money parse(String s) { ... }
+```
+
+If you make this commitment, you owe:
+
+- A `parse(String)` companion so the round-trip is testable.
+- Versioning discipline — changing the format is a breaking change.
+- An explicit note in the Javadoc that calling code may rely on the format.
+
+## The senior heuristic
+
+```text
+Q: Will any production code grep, parse, or split this string?
+   Yes  -> machine-parseable, documented, versioned, with parse() companion
+   No   -> human-readable, free to change between releases
+```
+
+When in doubt, pick human-readable. You can always *add* a `format()` method later for the parseable variant. You cannot un-commit to a `toString` format once tooling depends on it.
+
+## Logging and structured fields
+
+In modern services, `toString` is rarely the right destination for production data anyway. Use a structured logger (SLF4J + JSON, or `System.Logger` with a structured formatter) and pass typed fields:
+
+```java
+log.info("payment.captured", Map.of("amount", money.cents(), "currency", money.currency()));
+```
+
+`toString` then stays a debug convenience without becoming an interop contract by accident.
+
+<Callout kind="warn" title="Don't leak secrets">
+A common production incident: a logger calls `toString` on an object containing a session token, and the token shows up in centralized log search where every engineer can read it. Override `toString` on credential-bearing types to mask the sensitive fields explicitly.
+</Callout>
+
+<ProbeNote>The interviewer is looking for the framing — that there are *two* `toString` policies with very different commitments — and the recognition that committing to a machine-parseable format is an API decision, not a formatting choice. Bonus: name the JDK examples (`BigDecimal`, `Instant`, `URI`) where the contract is explicit.</ProbeNote>

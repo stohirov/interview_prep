@@ -1,0 +1,88 @@
+**Pattern matching for `instanceof`** (JEP 394, finalized Java 16) eliminates the `(Foo) o.method()` cast-and-call ceremony that follows every type check. The check, the cast, and the binding collapse into one expression — and the bound variable is scoped exactly to where the check passed, so the compiler can stop you from using it in branches where it wouldn't be valid.
+
+## Before
+
+```java
+Object o = fetch();
+if (o instanceof String) {
+    String s = (String) o;  // redundant cast — we already know it's a String
+    System.out.println(s.length());
+}
+```
+
+Three lines. The cast duplicates information the compiler already has. The intermediate `s` is throwaway noise. And if you forget the cast on one branch and reach for `o.length()`, the compiler stops you with an error that has nothing to do with what you're trying to express.
+
+## After
+
+```java
+Object o = fetch();
+if (o instanceof String s) {
+    System.out.println(s.length()); // s is in scope, already typed
+}
+```
+
+One line where there used to be two, no cast, no temporary variable in the surrounding scope. The pattern variable `s` exists *only* in the branch where the `instanceof` succeeded.
+
+## Scope is the part everyone misses
+
+The pattern variable's scope is the **flow-typed region where the instanceof is known to be true**:
+
+```java
+if (o instanceof String s) {
+    s.length();           // ok
+} else {
+    // s.length();        // compile error: s not in scope
+}
+
+if (!(o instanceof String s)) {
+    return;               // bail out
+}
+// s is in scope HERE — the only way to reach this line is past a true instanceof
+s.length();
+```
+
+The second form ("if not instanceof, return early") is the most useful: the pattern variable leaks into the rest of the method *exactly* in the cases where it's valid. This is how the compiler eliminates a whole category of "I forgot to cast" and "I cast wrong" bugs.
+
+## Equals becomes one line
+
+Every `equals` implementation used to start with the same six lines. Now:
+
+```java
+@Override
+public boolean equals(Object o) {
+    return o instanceof Point p
+        && p.x == this.x
+        && p.y == this.y;
+}
+```
+
+The pattern variable `p` is in scope across the `&&` because short-circuit evaluation only reaches the rest if `o instanceof Point` was true.
+
+## Combining with switch (Java 21+)
+
+Pattern `instanceof` was the foundation. Pattern matching for `switch` (JEP 441) generalizes it:
+
+```java
+String describe(Object o) {
+    return switch (o) {
+        case Integer i -> "int " + i;
+        case String s when s.isBlank() -> "blank string";
+        case String s -> "string of length " + s.length();
+        case null -> "null";
+        default -> "unknown";
+    };
+}
+```
+
+The `when` clause adds a **guard** — a boolean condition the pattern must satisfy. The `case null` arm makes nulls explicit (no NPE).
+
+## What it doesn't solve
+
+- It's still runtime type checking. Pattern matching doesn't make `instanceof` cheap — favor proper polymorphism or sealed dispatch when the types are under your control.
+- It doesn't replace the *need* to think about the type hierarchy; it just removes the boilerplate of expressing what you already decided.
+
+<Callout kind="info" title="The historical context">
+The `(Foo)` cast was a relic of Java's lack of flow typing. Languages like Kotlin had smart casts from day one (`if (o is String) o.length`); Java needed 25 years to catch up. The pattern-matching family of JEPs (394, 405, 440, 441) is Java finally getting flow typing — gradually.
+</Callout>
+
+<ProbeNote>Three points to make: (1) it replaces check+cast with a single expression and a pattern variable; (2) the variable's scope is exactly where the check is known true — flow typing in disguise; (3) it generalizes into switch patterns and record patterns in Java 21+. Bonus: showing the "early return" idiom where the pattern variable leaks into the rest of the method.</ProbeNote>

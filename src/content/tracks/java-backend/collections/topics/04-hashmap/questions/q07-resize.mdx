@@ -1,0 +1,64 @@
+`resize()` doubles the table and redistributes every entry into one of two new buckets — either the same index `i`, or `i + oldCapacity`. The decision uses a single bit test: `(e.hash & oldCap) == 0`.
+
+## Why two destinations?
+
+When the table grows from `oldCap` to `2 * oldCap`, the index mask widens by exactly one bit:
+
+```text
+oldCap = 16,  mask = 0b01111
+newCap = 32,  mask = 0b11111
+                       ^
+                       new bit
+```
+
+For any existing key, the low four bits of its hash stay the same — so its new index is either `i` (if the new bit is 0) or `i + 16` (if the new bit is 1). No rehashing required, no comparisons, no modulo.
+
+## The high-level flow
+
+```java
+final Node<K,V>[] resize() {
+    // 1. compute new capacity and threshold (double both, capped at MAXIMUM_CAPACITY)
+    // 2. allocate new Node[newCap]
+    // 3. for each old bucket:
+    //      - empty: skip
+    //      - single node: place at (newCap - 1) & e.hash
+    //      - tree: split into lo/hi via TreeNode.split (may untreeify if <= 6)
+    //      - chain: split into lo-list and hi-list, attach to new table
+    // 4. assign table = newTab
+}
+```
+
+## Splitting a chain
+
+The chain walk builds two sub-chains using the high-bit test:
+
+```java
+Node<K,V> loHead = null, loTail = null;
+Node<K,V> hiHead = null, hiTail = null;
+Node<K,V> next;
+do {
+    next = e.next;
+    if ((e.hash & oldCap) == 0) {
+        if (loTail == null) loHead = e; else loTail.next = e;
+        loTail = e;
+    } else {
+        if (hiTail == null) hiHead = e; else hiTail.next = e;
+        hiTail = e;
+    }
+} while ((e = next) != null);
+
+if (loTail != null) { loTail.next = null; newTab[i]           = loHead; }
+if (hiTail != null) { hiTail.next = null; newTab[i + oldCap]  = hiHead; }
+```
+
+Crucially, **relative order within each sub-chain is preserved** — unlike Java 7, which reversed chains during transfer (and helped cause the infamous resize race condition).
+
+## Cost
+
+Resize is O(n) in the number of entries. It happens at size 12, 24, 48, 96, … — amortised, each insert pays O(1) for resize work.
+
+<Callout kind="tip" title="Pre-size to skip it">
+If you know you'll insert N entries, `new HashMap<>((int)(N / 0.75f) + 1)` (or `HashMap.newHashMap(N)` in Java 19+) avoids all resizes.
+</Callout>
+
+<ProbeNote>The killer detail is the bit trick — many candidates will say "doubles and rehashes". You score points by explaining there is no rehash, just a bit test, and by mentioning that Java 8 preserves chain order to avoid the Java 7 resize loop.</ProbeNote>

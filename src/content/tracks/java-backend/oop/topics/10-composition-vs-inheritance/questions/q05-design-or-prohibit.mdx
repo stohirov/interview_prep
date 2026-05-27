@@ -1,0 +1,79 @@
+***Effective Java* Item 19** says the class author has only two morally defensible choices: either commit to inheritance as a first-class supported feature (and document it accordingly), or actively prevent it. The middle path — "inheritance is technically allowed but I haven't thought about it" — is what produces the fragile base class problems from Item 18. Modern Java gives you tools (`final`, `sealed`, package-private constructors) to make the choice deliberately.
+
+## What "designing for inheritance" means in practice
+
+Designing for inheritance is real work. The bar Bloch sets:
+
+1. **Document every self-use of an overridable method.** Each public/protected non-final method's javadoc must spell out which other overridable methods it calls, in what order, under what conditions. Java uses the `@implSpec` javadoc tag for this. Example from `AbstractList`:
+
+   ```
+   @implSpec
+   This implementation iterates over the specified collection, and adds
+   each object returned by the iterator to this collection, in turn.
+   ```
+
+2. **Expose useful protected hooks.** Choose which internal pieces a subclass needs to override or call. Too few hooks = useless extension; too many = future-you can't change anything. Picking the right set requires writing real subclasses to validate.
+
+3. **Write a sample subclass and a test subclass before release.** This is the only way to discover that you forgot a hook or documented the wrong call order.
+
+4. **Constructors must not invoke overridable methods.** The subclass's overrides run before its own constructor body — they see a half-initialized instance. The classic disaster:
+
+   ```java
+   class Super {
+       Super() { overrideMe(); }                    // BUG
+       public void overrideMe() {}
+   }
+   class Sub extends Super {
+       private final Instant when = Instant.now();
+       @Override public void overrideMe() {
+           System.out.println(when);                // prints null!
+       }
+   }
+   new Sub();   // null, then Sub's field initializers run
+   ```
+
+5. **`Cloneable` and `Serializable` need extra care.** These interfaces force the class author to expose constructor-like methods (`clone()`, `readObject`) to subclasses — usually a mistake on extendable classes.
+
+## "Or prohibit it"
+
+If you can't afford that level of investment, **make the class uninheritable**:
+
+```java
+public final class Money { /* ... */ }                    // simplest
+```
+
+Or use a private constructor + static factories (works even if the class isn't `final`):
+
+```java
+public class BigInteger {
+    private BigInteger(...) { ... }
+    public static BigInteger valueOf(long v) { ... }
+}
+```
+
+Or in modern Java, declare a `sealed` hierarchy:
+
+```java
+public sealed class Shape permits Circle, Square {}
+// Only Circle and Square can extend — no surprise subclasses
+```
+
+## The grey zone — package-private constructors
+
+A class with only package-private constructors can be extended within the same package by code you control, but not by external clients. This is what many JDK abstract bases do (`AbstractStringBuilder`).
+
+## The interview answer
+
+Most production classes should be `final`. The exceptions are:
+
+- Classes explicitly designed for extension, with `@implSpec` documentation and tested with a sample subclass.
+- Sealed hierarchies where the closed set is the whole point.
+- Interface implementations (the interface defines the contract; you're inheriting a promise, not state).
+
+Anything else — internal helpers, value classes, services, DTOs — should default to `final`.
+
+<Callout kind="info" title="Why JDK classes often aren't final">
+Many JDK classes (`HashMap`, `ArrayList`, `String` was a special case) are not final for backward-compatibility reasons — making them final today would break code that already extends them. New classes added since Java 8 (`Optional`, `LocalDate`, records) are final by default.
+</Callout>
+
+<ProbeNote>The interviewer wants the two-pronged answer: designing for inheritance is expensive (document self-use, write a sample subclass, no overridable methods from constructors), so most classes should be `final` unless you've paid that cost. Mentioning `sealed` shows you're current with modern Java.</ProbeNote>

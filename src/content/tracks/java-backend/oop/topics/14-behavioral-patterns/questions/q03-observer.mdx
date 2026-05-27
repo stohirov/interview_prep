@@ -1,0 +1,69 @@
+The **Observer** pattern lets a subject notify many listeners when its state changes, without either side knowing the concrete types of the other. It's the foundation of UI event handling, pub/sub messaging, and reactive streams — and it has three classic ways to shoot you in the foot.
+
+## A minimal implementation
+
+```java
+public interface Listener<E> {
+    void onEvent(E event);
+}
+
+public class EventBus<E> {
+    private final List<Listener<E>> listeners = new CopyOnWriteArrayList<>();
+
+    public void subscribe(Listener<E> l) { listeners.add(l); }
+    public void unsubscribe(Listener<E> l) { listeners.remove(l); }
+
+    public void publish(E event) {
+        for (Listener<E> l : listeners) {
+            try {
+                l.onEvent(event);
+            } catch (RuntimeException ex) {
+                log.warn("listener failed", ex); // don't kill the loop
+            }
+        }
+    }
+}
+```
+
+`CopyOnWriteArrayList` lets `publish` iterate without holding a lock while subscribers come and go. Fine when listeners change rarely and events fire often — common for app-level events.
+
+## Pitfall 1: memory leaks from forgotten listeners
+
+The subject holds a strong reference to every listener. If a listener is a short-lived object (a UI panel, a request-scoped bean) and forgets to `unsubscribe`, the subject keeps it (and everything it transitively references) alive forever. This is the single most common cause of permgen-style leaks in long-running JVMs.
+
+**Fixes**:
+- Document the lifecycle: every `subscribe` returns a `Subscription` with `close()` and callers are expected to call it (often via try-with-resources for short-lived subs).
+- Use **weak references** for listeners the subject doesn't own.
+- In Spring, lean on `ApplicationContext` lifecycle so beans are torn down with the container.
+
+```java
+public Subscription subscribe(Listener<E> l) {
+    listeners.add(l);
+    return () -> listeners.remove(l); // AutoCloseable lambda
+}
+```
+
+## Pitfall 2: reentrancy and recursive notification
+
+A listener handles an event and, inside `onEvent`, triggers another event on the same subject. If the subject's `publish` re-enters itself mid-iteration, you get either a stack overflow, an inconsistent listener list, or — worst — events delivered in an order nobody can reason about.
+
+**Fixes**:
+- Disallow nested publish: maintain an `inFlight` flag and queue follow-up events.
+- Or accept reentrancy explicitly and document the ordering contract.
+- Detect it in development with an assertion if reentrancy is forbidden.
+
+## Pitfall 3: one bad listener breaks the rest
+
+If `publish` just iterates and calls `onEvent`, the first `RuntimeException` from any listener short-circuits the loop and the remaining listeners never hear about the event. Now you have partial-delivery semantics that depend on subscription order — a debugging nightmare.
+
+**Fix**: wrap each invocation in try/catch and log (shown above). Optionally collect exceptions and surface them as a `MultipleFailuresException` if the caller needs to know.
+
+<Callout kind="warn" title="Don't reinvent — `java.util.concurrent.Flow`">
+Since Java 9, the `Flow` API (`Publisher`, `Subscriber`, `Subscription`, `Processor`) gives you the Reactive Streams interfaces in the standard library, with proper backpressure semantics. For anything beyond the simplest pub/sub, use it or a library that implements it (Project Reactor, RxJava).
+</Callout>
+
+## What the JDK provides — and why the old API is deprecated
+
+`java.util.Observer` and `java.util.Observable` were deprecated in Java 9 because they're not generic, not serializable-safe, conflate two responsibilities, and have none of the lifecycle/error semantics above. Don't use them in new code.
+
+<ProbeNote>The interviewer wants three things: an implementation that's correct under concurrent subscribe/publish (`CopyOnWriteArrayList` or a snapshot copy); the three classic pitfalls (leak, reentrancy, exception in handler); and the meta-answer that modern Java has `Flow` and you'd reach for it before hand-rolling. Bonus: noting that `java.util.Observer` is deprecated tells them you keep up with the JDK.</ProbeNote>

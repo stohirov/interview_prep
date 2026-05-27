@@ -1,0 +1,63 @@
+Inheritance **cannot preserve the equals contract** when a subclass adds a value-relevant field. Either symmetry breaks (with `instanceof`) or Liskov substitution breaks (with `getClass`). Composition sidesteps the dilemma by making the relationship "has-a" instead of "is-a."
+
+## The composition pattern
+
+```java
+public final class ColorPoint {
+    private final Point point;
+    private final Color color;
+
+    public ColorPoint(int x, int y, Color color) {
+        this.point = new Point(x, y);
+        this.color = Objects.requireNonNull(color);
+    }
+
+    // View method — return the Point part for interop
+    public Point asPoint() { return point; }
+    public Color color()   { return color; }
+
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof ColorPoint cp
+            && cp.point.equals(point)
+            && cp.color.equals(color);
+    }
+
+    @Override
+    public int hashCode() { return Objects.hash(point, color); }
+}
+```
+
+`ColorPoint` is now `final` (no subclass can break things) and is **not** a `Point`. To interoperate with `Set<Point>` you call `asPoint()` explicitly.
+
+## Why this works
+
+- `ColorPoint.equals(ColorPoint)` is **symmetric and transitive** — same class, same fields.
+- `ColorPoint.equals(Point)` and `Point.equals(ColorPoint)` both return `false` — also symmetric.
+- No inheritance means no "is the subclass equals more specific than the superclass" question to answer.
+- The `asPoint()` view makes interop explicit instead of implicit-and-broken.
+
+## Modern Java: records do this for you
+
+```java
+public record Point(int x, int y) {}
+public record ColorPoint(Point point, Color color) {}
+```
+
+Records are implicitly `final`. They auto-generate `equals` based on components. They follow composition naturally because you can't extend them. This is the recommended pattern for value classes in Java 16+.
+
+## When inheritance with equals *is* safe
+
+Extending an **abstract** class with no value-relevant state is fine. The abstract class can't be instantiated, so no `Shape vs Circle` symmetry issue arises — there are no bare `Shape` instances to compare against. *Effective Java* gives `AbstractSet` and `AbstractList` as examples: they implement `equals` for their concrete subclasses (`HashSet`, `ArrayList`), all of which agree on what equality means at the abstract level.
+
+```java
+// Safe: AbstractSet defines equals(other) as "same elements"
+// HashSet and TreeSet both inherit it without conflict.
+new HashSet<>(List.of(1, 2)).equals(new TreeSet<>(List.of(1, 2))); // true
+```
+
+<Callout kind="tip" title="Rule of thumb">
+For value classes: `final class` or `record`. Reserve inheritance for behavior-bearing types (Shape hierarchy where equals isn't meaningful, or implementations sharing a base class with no value state).
+</Callout>
+
+<ProbeNote>Probe: "When is it safe to call super.equals in a subclass?" (When the superclass is abstract and the subclass adds no value-relevant fields.) "Could you make ColorPoint extend Point and still be correct?" (Only if you accept that ColorPoint instances are *never* equal to Point instances — i.e., use getClass-based equality and accept the Liskov violation.)</ProbeNote>

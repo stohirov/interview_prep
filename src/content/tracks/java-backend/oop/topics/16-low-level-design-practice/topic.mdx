@@ -1,0 +1,33 @@
+An **LLD round** is 45 minutes of designing a small system out loud — parking lot, elevator, LRU cache, rate limiter, logger. The interviewer is not grading your final code; they are grading whether you can *take a vague problem, scope it, decompose it, and defend the trade-offs* in real time. The candidates who fail aren't the ones with the wrong design — they're the ones who go silent and start coding without saying what they're doing.
+
+## The 45-minute framework
+
+| Phase | Minutes | Goal |
+|---|---|---|
+| 1. Clarify requirements | 5 | Functional + non-functional, bound the problem, kill scope creep |
+| 2. Enumerate use cases | 5 | "User does X, then Y" — concrete flows you'll support |
+| 3. Class diagram | 10 | Whiteboard: entities, relationships, key interfaces |
+| 4. Key classes + interfaces | 15 | Write the important method signatures; flesh out two or three classes |
+| 5. Patterns + trade-offs | 5 | Name the GoF patterns used; defend a choice; mention alternatives |
+| 6. Extension questions | 5 | What changes when scale 10x? What if requirements shift? |
+
+The timings are guidelines — the interviewer may push you to skip ahead or linger. The point is to have a mental clock so you don't spend 30 minutes on the class diagram and run out of time before writing any code.
+
+## What separates a senior answer
+
+1. **You ask clarifying questions instead of guessing.** "Does the parking lot support reservations? Multiple entrances? Different vehicle sizes?" Every "no" you elicit cuts scope and earns trust.
+2. **You write a class diagram before code.** A whiteboarded `ParkingLot -> Floor -> Spot` with cardinalities communicates 10x more than a half-finished `public class ParkingLot {`.
+3. **You name patterns explicitly.** "I'd use Strategy for pricing because rates change without touching the Lot class." Naming the pattern shows you recognized the problem shape.
+4. **You volunteer trade-offs.** Every design choice has a downside. Saying "I'm choosing a `HashMap` keyed by license plate — fast lookup but no ordering, which is fine because we don't need to list cars in arrival order" is the senior tell.
+5. **You communicate continuously.** Talk while you write. Even "let me think for 30 seconds" beats silent typing.
+
+## What kills the round
+
+- **Coding immediately.** You'll end up rewriting twice.
+- **Memorized solutions.** Interviewers can smell a recited parking-lot answer in 60 seconds; they'll twist the requirements until you have to actually think.
+- **Over-engineering.** A `Singleton<Factory<Builder<Spot>>>` for a 45-minute exercise tells them you don't have judgement.
+- **Ignoring concurrency entirely.** Most LLD problems involve multiple users — at least mention "I'd guard `Spot.assign()` with a per-spot lock" even if you don't implement it.
+
+## The six questions in this topic
+
+The classics: parking lot, elevator, LRU cache, rate limiter, logger — each tests a slightly different muscle (entity decomposition, state machines, data structures, concurrency, plugin architecture). Drilling them is not memorization; it's practicing the framework above until it's instinct.

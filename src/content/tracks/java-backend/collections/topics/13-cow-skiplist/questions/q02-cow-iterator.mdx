@@ -1,0 +1,59 @@
+**Because the iterator captures a reference to the backing array at the moment it's created, and every write produces a *brand new* array. The iterator's array is never mutated, so there is nothing to detect — and nothing to throw.**
+
+## How it works
+
+`CopyOnWriteArrayList` stores its elements in a `volatile Object[] array` field. The iterator constructor reads that field once and keeps the reference:
+
+```java
+// Simplified from JDK source
+static final class COWIterator<E> implements ListIterator<E> {
+    private final Object[] snapshot;   // captured at creation
+    private int cursor;
+
+    COWIterator(Object[] elements, int initialCursor) {
+        this.cursor = initialCursor;
+        this.snapshot = elements;
+    }
+
+    public boolean hasNext() { return cursor < snapshot.length; }
+    public E next() { return (E) snapshot[cursor++]; }
+}
+```
+
+Writes (`add`, `set`, `remove`) acquire the internal `ReentrantLock`, build a brand new array with the modification applied, and assign it back to the `volatile` field. Existing iterators still hold their original snapshot — completely untouched by the new array.
+
+## Consequence: iteration is frozen-in-time
+
+```java
+List<String> list = new CopyOnWriteArrayList<>(List.of("a", "b", "c"));
+Iterator<String> it = list.iterator();
+
+list.add("d");          // backing array is now {a,b,c,d}
+list.remove("a");       // backing array is now {b,c,d}
+
+while (it.hasNext()) {
+    System.out.print(it.next() + " ");   // prints: a b c
+}
+```
+
+The iterator sees `{a, b, c}` because that's the array reference it captured. No CME, no surprise.
+
+## Side effects
+
+- **`iterator.remove()` throws `UnsupportedOperationException`.** Mutating a frozen snapshot would be meaningless.
+- **`iterator.set()` and `add()`** on the `ListIterator` also throw `UOE` for the same reason.
+- **Memory pressure under concurrent iteration + writes.** Each long-running iterator pins an old array version, preventing GC. If you iterate slowly while writes flood in, you can accumulate many array generations in memory.
+
+## Contrast with fail-fast collections
+
+| Collection | Iterator strategy | Behavior on concurrent modification |
+|---|---|---|
+| `ArrayList`, `HashMap` | fail-fast (modCount check) | throws `CME` on next op |
+| `CopyOnWriteArrayList` | snapshot | sees frozen state, never throws |
+| `ConcurrentHashMap`, `ConcurrentSkipListMap` | weakly consistent | reflects some state, never throws |
+
+<Callout kind="tip" title="Snapshot vs weakly consistent">
+Snapshot = "I see exactly the state at iterator creation." Weakly consistent = "I see *some* valid traversal that may include or skip concurrent updates." Both never throw CME; only the former is point-in-time.
+</Callout>
+
+<ProbeNote>The interviewer may probe further: "What happens if you call `iterator.remove()`?" — `UnsupportedOperationException`, because mutating the snapshot can't affect the live list and silently failing would be worse than throwing.</ProbeNote>

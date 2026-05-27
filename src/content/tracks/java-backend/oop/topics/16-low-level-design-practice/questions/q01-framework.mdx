@@ -1,0 +1,66 @@
+The first five minutes set the tone for the entire round. **Do not start coding, do not start drawing classes — start asking questions.** What you're trying to accomplish: convert a vague prompt ("design a parking lot") into a bounded, agreed-upon problem with a written list of must-haves and explicit non-goals. The interviewer wants to see you think like a tech lead, not a code monkey.
+
+## The four buckets of clarifying questions
+
+### 1. Functional requirements — what must it do?
+
+- "What are the primary user actions?" (park, unpark, look up by plate, generate report)
+- "Who are the actors?" (driver, attendant, admin)
+- "What's in scope vs out of scope?" (payment? reservations? multi-tenant?)
+- Write each answer on the whiteboard as a bullet. The list becomes your contract.
+
+### 2. Non-functional requirements — how well must it do it?
+
+- "Roughly how many spots? Are we talking 50 or 50,000?"
+- "How many concurrent vehicles entering per minute at peak?"
+- "Is this single-machine or distributed?"
+- "Latency tolerance? p99 of 1 second for `findSpot`?"
+
+These shape the data structures and the concurrency model. A 100-spot lot is an `ArrayList`; a 100,000-spot multi-floor lot needs indexing by floor + spot-type.
+
+### 3. Constraints — what's fixed?
+
+- "Are we constrained to a single JVM or can we assume a database?"
+- "Any specific tech stack?"
+- "Authentication / authorization expected?"
+
+Constraints usually narrow the design. The interviewer may answer "just in-memory" — that simplifies your storage layer dramatically.
+
+### 4. Edge cases worth surfacing now
+
+- "What happens if a driver loses their ticket?"
+- "Can two cars arrive at the same spot simultaneously?"
+- "How does the lot recover from a process restart — do tickets persist?"
+
+You're not solving these yet; you're flagging them so the interviewer knows you've seen them. Some they'll declare out of scope; the rest you'll handle later.
+
+## A worked example — "Design a parking lot"
+
+In the first five minutes you might extract:
+
+- **In scope**: park / unpark / find available spot / compute bill at exit
+- **Vehicle types**: motorcycle, car, bus (different spot sizes)
+- **Out of scope**: reservations, payment processing, multi-lot federation
+- **Scale**: ~500 spots, single building, single JVM acceptable
+- **Persistence**: in-memory state, no DB
+- **Concurrency**: multiple gates can admit simultaneously — need thread safety
+- **Edge cases noted**: lost ticket, lot full, vehicle too big for any open spot
+
+Now you have a contract. The next 5 minutes — use cases — gives you concrete flows to validate the design against. *Then* you draw classes.
+
+## The communication beat
+
+Wrap up the requirements phase with: *"So, to confirm — I'm building an in-memory parking lot for ~500 spots, three vehicle types, multiple concurrent gates, no reservations or payment processing. I'll start by sketching the entities. Sound good?"* This earns two things: explicit agreement (you can't be marked down for missing payment processing later) and a clean transition to the design phase.
+
+<Callout kind="tip" title="If they push back on questions">
+Some interviewers will say "you tell me — make assumptions." Make them and *state them aloud*: "I'll assume single JVM, in-memory, three vehicle types. If any of those are wrong, stop me." Now the assumption is on record and you can keep moving.
+</Callout>
+
+## Anti-patterns in the first 5 minutes
+
+- Diving into code. "Let me start with a `Vehicle` class..." — you don't even know what counts as a vehicle yet.
+- Listing every conceivable requirement. You're scoping, not gold-plating.
+- Memorized boilerplate. "First I'll define an abstract `ParkingSpotFactoryBuilder`..." earns an immediate side-eye.
+- Going silent. Even when thinking, narrate: "I'm trying to decide whether a spot should know its vehicle or vice versa..."
+
+<ProbeNote>The interviewer is checking whether you can run a design exercise like a senior. The clarifying questions are the answer — they prove you scope before you code, listen before you assume, and communicate before you commit. A candidate who jumps to code in minute one signals junior reflexes regardless of how clean the code ends up being.</ProbeNote>

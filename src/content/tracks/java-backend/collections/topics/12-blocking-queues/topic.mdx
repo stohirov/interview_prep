@@ -1,0 +1,51 @@
+A `BlockingQueue<E>` is a thread-safe queue that adds *blocking* insert and remove operations: producers block when the queue is full, consumers block when it's empty. It's the backbone of producer-consumer pipelines and the work queue for every `ThreadPoolExecutor`.
+
+## The contract
+
+```java
+public interface BlockingQueue<E> extends Queue<E> {
+    void put(E e) throws InterruptedException;   // blocks if full
+    E take() throws InterruptedException;        // blocks if empty
+    boolean offer(E e, long t, TimeUnit u);      // bounded wait insert
+    E poll(long t, TimeUnit u);                  // bounded wait remove
+    boolean offer(E e);                          // non-blocking insert
+    E poll();                                    // non-blocking remove
+    void add(E e);                               // throws on full
+    E remove();                                  // throws on empty
+}
+```
+
+Three behaviors × insert/remove = the classic 4×2 matrix in the Javadoc.
+
+## The implementations at a glance
+
+| Implementation              | Bounded?    | Ordering         | Backed by              | Notable use                |
+|-----------------------------|-------------|------------------|------------------------|----------------------------|
+| `ArrayBlockingQueue`        | yes (fixed) | FIFO             | array + 1 `ReentrantLock` | classic bounded pipeline |
+| `LinkedBlockingQueue`       | optional    | FIFO             | linked list + 2 locks  | high-throughput pipelines  |
+| `SynchronousQueue`          | 0 capacity  | direct handoff   | TransferStack / TransferQueue | `newCachedThreadPool` |
+| `PriorityBlockingQueue`     | unbounded   | by `Comparator`  | binary heap            | priority work scheduling   |
+| `DelayQueue`                | unbounded   | by delay expiry  | heap of `Delayed`      | scheduled task triggers    |
+| `LinkedTransferQueue`       | unbounded   | FIFO             | lock-free (CAS)        | low-latency handoff        |
+| `LinkedBlockingDeque`       | optional    | FIFO/LIFO        | doubly-linked list     | work stealing              |
+
+## Why blocking?
+
+Without blocking semantics, a producer would have to either:
+- Spin-loop on `offer()` — wasting CPU, or
+- Use `wait()`/`notify()` manually — error-prone, easy to deadlock.
+
+`put`/`take` encapsulate this with `Condition` variables internally — clean, interruptible, fair-or-not.
+
+## Interruption is built-in
+
+All blocking methods throw `InterruptedException`. A producer waiting on `put` can be cancelled by `Thread.interrupt()`. This is what makes `BlockingQueue` work with `ExecutorService.shutdownNow()`.
+
+## The two laws of capacity
+
+1. **Always bound your queue in production.** Unbounded queues backed by `LinkedBlockingQueue` are the #1 cause of OOM in Java services — work piles up faster than it drains.
+2. **Bound it small enough that backpressure propagates.** A bounded queue lets producers feel the pressure and slow down (or reject). That's the whole point.
+
+<Callout kind="warn" title="newFixedThreadPool's hidden trap">
+`Executors.newFixedThreadPool(n)` uses an *unbounded* `LinkedBlockingQueue`. Under sustained overload, your heap grows without limit. Roll your own `ThreadPoolExecutor` with a bounded queue and an explicit `RejectedExecutionHandler`.
+</Callout>

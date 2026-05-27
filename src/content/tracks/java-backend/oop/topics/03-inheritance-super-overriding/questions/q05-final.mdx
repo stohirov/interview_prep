@@ -1,0 +1,61 @@
+**`final` means "no further change" in three different shapes: a `final` class cannot be subclassed, a `final` method cannot be overridden, and a `final` variable cannot be reassigned.** Same keyword, three distinct guarantees — and crucially, "no reassignment" is not the same as "immutable."
+
+## `final` on a class
+
+The class cannot be extended at all:
+
+```java
+public final class Money { /* ... */ }
+
+class Cash extends Money { }     // compile error: cannot inherit from final class
+```
+
+Why use it? Three reasons:
+- **Security.** `String` is final so no subclass can override `equals`/`hashCode` and cause subtle attacks (a malicious `String` subclass could break URL parsing).
+- **Performance.** JIT can inline calls more aggressively when no override can exist.
+- **Design intent.** Signals that the class wasn't *designed* for inheritance (which is the right default — see Item 19).
+
+## `final` on a method
+
+The method cannot be overridden by subclasses:
+
+```java
+class Parent { public final void critical() { /* ... */ } }
+class Child  extends Parent {
+    @Override public void critical() { }     // compile error
+}
+```
+
+Use it on template-method "hook points" you don't want subclasses to break, or on methods whose contract is so strict that any override would be a bug. Common JDK example: `Thread.isAlive()` is final.
+
+## `final` on a variable
+
+The reference (or primitive value) cannot be reassigned after initialization:
+
+```java
+final int x = 5;
+x = 6;                                  // compile error
+
+final List<String> xs = new ArrayList<>();
+xs = new ArrayList<>();                 // compile error: reassignment
+xs.add("hi");                            // OK: object is still mutable
+```
+
+`final` locks the **binding**, not the object. A `final List` is still mutable — its contents can change. To make the object immutable, you need `List.copyOf(...)` or `Collections.unmodifiableList(...)` (or pick an immutable type to begin with).
+
+## Variants of `final` variables
+
+- **`final` field** — assigned exactly once: either at declaration, in an instance initializer, or in *every* constructor path. Reading a `final` field across threads has special memory-model guarantees (safe publication via the constructor).
+- **`final` local** — assigned exactly once before use. Closures captured by lambdas and anonymous classes must reference *effectively final* locals (final-in-effect, even without the keyword).
+- **`final` parameter** — same idea: the parameter can't be reassigned in the method body. Mostly stylistic.
+- **`static final` constant** — if the type is primitive or `String` and the initializer is a compile-time constant expression, the value is inlined at every call site. Changing it later in the defining class requires recompiling all callers.
+
+## Combined: `final class` vs `final` methods
+
+`final class Foo` is shorthand for marking every method `final`. The reverse isn't true — you can mark individual methods `final` in a non-final class to lock down specific contracts while allowing the class to be extended for other reasons.
+
+<Callout kind="tip" title="Default to final">
+Make classes, fields, and locals `final` by default. Remove the modifier only when you have a concrete reason. Most subtle concurrency bugs vanish when state can't change after construction.
+</Callout>
+
+<ProbeNote>The interviewer is testing whether you can hold three meanings in your head and articulate the immutable-vs-final-reference distinction. The most common stumble is conflating `final List<X>` with "an immutable list." Strong candidates also mention the safe-publication guarantees for `final` fields under the Java Memory Model.</ProbeNote>

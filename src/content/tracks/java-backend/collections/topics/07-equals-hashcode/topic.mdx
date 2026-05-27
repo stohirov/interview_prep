@@ -1,0 +1,37 @@
+The `equals` and `hashCode` methods form a contract that every value-based class must honor. Break it, and hash-based collections (`HashMap`, `HashSet`, `LinkedHashMap`) will silently misbehave — duplicates appearing in sets, `get` returning `null` for keys you just inserted, and lookups becoming O(n) walks instead of O(1) hits.
+
+## The two contracts in one breath
+
+`equals` must be **reflexive, symmetric, transitive, consistent, and null-safe** (`x.equals(null)` returns `false`). `hashCode` must be **consistent** across calls and must return the **same hash for objects that are equal** — but unequal objects are *allowed* to share a hash (collisions are fine, just slower).
+
+## Why both matter together
+
+Hash collections find a key in two steps:
+
+1. Compute `hashCode()` to pick a bucket.
+2. Walk the bucket calling `equals()` to find the match.
+
+If two equal objects produce different hashes, they land in different buckets and step 2 never runs. `HashMap.get(key)` returns `null` for a key you literally just `put`.
+
+<Callout kind="warn" title="Override both or neither">
+The IDE auto-generator and Lombok's `@EqualsAndHashCode` always emit them as a pair. If you override one by hand, override the other.
+</Callout>
+
+## Modern Java escape hatch: records
+
+Since Java 16, a `record` auto-generates `equals`, `hashCode`, and `toString` from its components. No more 30 lines of boilerplate, no more "we forgot to update hashCode when we added a field" bugs:
+
+```java
+public record Point(int x, int y) {}
+// equals + hashCode + toString are generated. Done.
+```
+
+Use records for any immutable value class unless you need mutation or a non-trivial superclass.
+
+## What you'll cover
+
+- The 5 properties of `equals` and why each one matters in practice.
+- The 3 rules of `hashCode` and why collisions are legal but inequality-mapping-to-equal-hashes is not.
+- The classic symmetric-equals trap with inheritance (Point vs ColorPoint).
+- Why Effective Java prefers composition over inheritance for equals-bearing classes.
+- How records eliminate the whole problem for value types.

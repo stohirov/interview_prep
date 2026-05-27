@@ -1,0 +1,69 @@
+**A valid override has the same name and parameter types, a return type that's the same or a subtype (covariant), a `throws` clause no broader than the parent's, and an access modifier at least as permissive as the parent's.** Break any rule and the compiler will reject — or worse, silently create an unrelated method that doesn't override anything.
+
+## The signature must match exactly
+
+Same name. Same parameter types in the same order. Generic parameters must match after erasure.
+
+```java
+class Parent { void process(List<String> xs) {} }
+
+class ChildOk  extends Parent { @Override void process(List<String> xs) {} }   // ok
+class ChildBad extends Parent { @Override void process(List<Object> xs) {} }   // error
+```
+
+A common error: overloading by accident — different parameter types creates a sibling method, not an override. `@Override` saves you.
+
+## Return type — same or covariant
+
+The override's return type must be the parent's return type *or a subtype of it*.
+
+```java
+class Parent { Number make() { return 1; } }
+class Child  extends Parent { @Override Integer make() { return 2; } }    // ok, covariant
+```
+
+For primitive returns there's no covariance — the types must be identical. Same goes for `void`.
+
+## Throws — no broader checked exceptions
+
+The override can throw *fewer* or *narrower* checked exceptions. It can throw any unchecked exceptions it wants (the parent's clause never constrains those).
+
+```java
+class Parent { void load() throws IOException {} }
+
+class ChildOk1 extends Parent { @Override void load() {} }                              // ok — throws fewer
+class ChildOk2 extends Parent { @Override void load() throws FileNotFoundException {} } // ok — narrower
+class ChildBad extends Parent { @Override void load() throws Exception {} }             // error — broader
+class ChildOk3 extends Parent { @Override void load() throws RuntimeException {} }      // ok — unchecked
+```
+
+Why? Callers wrote `try { p.load(); } catch (IOException e)` and any broader checked throw would escape uncaught.
+
+## Access — same or wider
+
+The override must be *at least* as accessible as the parent's method:
+
+| Parent       | Override may be                             |
+|--------------|---------------------------------------------|
+| `public`     | `public` only                               |
+| `protected`  | `protected` or `public`                     |
+| package-priv | package-private, `protected`, or `public`   |
+| `private`    | not overridable (see q06)                   |
+
+Narrowing access would break callers who relied on the parent's contract — the receiver's actual class shouldn't *remove* visibility.
+
+## `final` and `static` interactions
+
+- A `final` method **cannot** be overridden — compile error.
+- A `static` method cannot be overridden — see q01 (it's hidden instead).
+- An abstract method *must* be overridden in any concrete subclass.
+
+## Modifier additions
+
+The override can *add* `final` (lock further overriding), `synchronized`, `strictfp`, or `native`. It cannot *add* `abstract` to a previously-concrete method in the same hierarchy (compiler error).
+
+<Callout kind="tip" title="Always use @Override">
+Even though it's optional, `@Override` upgrades silent bugs into compile errors. Every override should have it; the IDE warning is your friend.
+</Callout>
+
+<ProbeNote>The interviewer wants you to enumerate the four axes — signature, return, throws, access — without hesitating. Strong candidates connect each rule to a *reason* (callers must remain safe; substitutability must hold), not just recite the rules. Bonus: the bridge-method note for covariant returns.</ProbeNote>

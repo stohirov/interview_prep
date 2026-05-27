@@ -1,0 +1,79 @@
+**Java has four kinds of nested classes — static nested, inner (non-static), local, and anonymous — and they differ along three axes: *where you can declare them*, *what they can capture*, and *whether you need an enclosing instance to construct them.*** Picking the right kind is mostly about which axis matters for your use case.
+
+## The four kinds with code
+
+### 1. Static nested
+
+```java
+class Map {
+    static class Entry<K,V> {     // grouped helper, but independent
+        K key; V value;
+    }
+}
+new Map.Entry<>();                // no Map instance needed
+```
+
+Lives inside the namespace of the enclosing class but is otherwise an ordinary top-level-equivalent class. No hidden field. Construct directly.
+
+### 2. Inner (non-static)
+
+```java
+class Outer {
+    int x = 1;
+    class Inner {                 // implicitly carries `Outer.this`
+        int read() { return x; }  // can use outer's members directly
+    }
+}
+Outer o = new Outer();
+Outer.Inner i = o.new Inner();    // weird syntax — must qualify with outer
+```
+
+Holds a synthetic `this$0` reference to its enclosing instance. Cannot have static members (before Java 16; allowed since 16). Construction requires an enclosing instance.
+
+### 3. Local
+
+```java
+void process(List<String> items) {
+    final int threshold = 5;
+    class Filter {                  // declared inside a method
+        boolean accept(String s) { return s.length() > threshold; }
+    }
+    items.removeIf(s -> !new Filter().accept(s));
+}
+```
+
+Declared inside a method or block. Visible only within that scope. Can capture *effectively final* locals from the enclosing method.
+
+### 4. Anonymous
+
+```java
+Runnable r = new Runnable() {
+    @Override public void run() { System.out.println("hi"); }
+};
+```
+
+A class declaration and an instantiation in one expression. No name; can extend exactly one class *or* implement exactly one interface (not both). Used to be the ergonomic answer for short callbacks; mostly displaced by lambdas in Java 8+.
+
+## Comparison table
+
+| Kind | Has enclosing `this`? | Captures locals? | Has its own `this`? | Has a name? | Static members? |
+|---|:-:|:-:|:-:|:-:|:-:|
+| Static nested | No | No | Yes | Yes | Yes |
+| Inner | Yes | No (not a local) | Yes | Yes | Yes (Java 16+) |
+| Local | If enclosing method is non-static | Yes (effectively final) | Yes | Yes | Yes (Java 16+) |
+| Anonymous | If enclosing method is non-static | Yes (effectively final) | Yes (the anonymous one) | No | No |
+
+## When to use which
+
+| Need | Use |
+|---|---|
+| A helper coupled to a class but conceptually independent | Static nested |
+| A view or iterator over the enclosing instance's state | Inner |
+| A small class only used inside one method | Local — or skip to a lambda |
+| A one-line interface implementation | Lambda (anonymous if it can't be a lambda) |
+
+<Callout kind="tip" title="Default to static">
+Effective Java Item 24: "Favor static member classes over non-static." The hidden `this$0` reference is the source of most inner-class bugs, including the classic memory leak. If your nested class doesn't *need* the enclosing instance, mark it `static`.
+</Callout>
+
+<ProbeNote>The interviewer wants the four kinds named correctly (and "lambdas" is not one of the four), the capture/enclosing-instance distinction, and the Effective Java advice to default to static. Bonus: note that Java 16 lifted the "no statics in inner classes" restriction — a small but real modern detail.</ProbeNote>

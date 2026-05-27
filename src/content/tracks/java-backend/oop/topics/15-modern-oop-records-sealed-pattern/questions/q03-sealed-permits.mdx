@@ -1,0 +1,67 @@
+`final` and package-private get you "no one outside this package extends me," but they're a runtime promise the compiler can't reason about. `sealed ... permits` is a **compile-time guarantee** that gives you cross-package controlled extension *and* — the killer feature — exhaustiveness checking in switch and pattern matching.
+
+## What `final + package-private` gave you
+
+Pre-Java-17, the only way to restrict a hierarchy was to make the parent `final` (no extension at all) or package-private (no extension *outside this package*). Both have gaps:
+
+- **`final`** is binary — nobody can extend. You lose subtyping entirely.
+- **Package-private** forces every implementation into the same package. Across modules that's a non-starter; in a multi-module codebase you'd cram the parent and every implementation into one giant file or one bloated package.
+- **Neither tells the compiler** what the complete set of subtypes is. A `switch` over an `if (x instanceof Foo) ... else if (x instanceof Bar) ...` chain has no way to know it's exhaustive.
+
+## What `sealed` adds
+
+```java
+public sealed interface PaymentMethod
+    permits CreditCard, BankTransfer, Crypto {}
+
+public record CreditCard(String number, YearMonth expiry) implements PaymentMethod {}
+public record BankTransfer(String iban) implements PaymentMethod {}
+public final class Crypto implements PaymentMethod { /* ... */ }
+```
+
+The `permits` clause names every direct subtype. Three things follow:
+
+1. **Cross-package extension under control.** Permitted subtypes can live in *any* package within the same module (or named in the same compilation unit). You're not forced to colocate.
+2. **The compiler knows the full set.** A `switch` over `PaymentMethod` that handles all three cases is provably exhaustive — the compiler will accept it without a `default` clause.
+3. **Adding a new permitted type is a breaking change *at compile time*.** Every non-exhaustive switch in the codebase becomes a compile error. You find every place that needs updating in seconds.
+
+## The exhaustiveness payoff
+
+```java
+String describe(PaymentMethod m) {
+    return switch (m) {
+        case CreditCard cc   -> "card ending " + cc.number().substring(cc.number().length() - 4);
+        case BankTransfer bt -> "bank " + bt.iban();
+        case Crypto c        -> "crypto";
+        // no default needed — compiler proves exhaustiveness
+    };
+}
+```
+
+Add `permits ApplePay` to the interface tomorrow. Every `switch` like the one above becomes a compile error: *"the switch expression does not cover all possible input values."* Your refactor turns into a guided tour of every place that classifies payment methods, instead of a search-and-pray operation.
+
+## Each permitted subtype must declare its inheritance shape
+
+A permitted subtype must itself be one of:
+
+- `final` — closed, no further extension.
+- `sealed` — extends the seal further with its own `permits`.
+- `non-sealed` — explicitly opens up extension at that point in the tree.
+
+```java
+public sealed interface Shape permits Circle, Polygon {}
+public record Circle(double r) implements Shape {} // implicitly final (record)
+public non-sealed interface Polygon extends Shape {} // anyone can implement
+```
+
+The choice forces an explicit answer to "should the seal continue here?" — no accidental open hierarchies.
+
+## What this enables in idiomatic modern Java
+
+Sealed + records + pattern matching together let you express **algebraic data types**: a closed set of shapes, each immutable, dispatched by exhaustive switch. It's the Java equivalent of Kotlin sealed classes, Scala case objects, or Rust enums. For domain modeling (parser ASTs, state machines, event types, result wrappers) it's transformative.
+
+<Callout kind="info" title="Reflection still respects sealing">
+At runtime, `Class.isSealed()` returns true and `Class.getPermittedSubclasses()` lists the children. Frameworks (Jackson, MapStruct, Hibernate) increasingly use this to drive (de)serialization and dispatch — you get type-safe polymorphism over JSON without manual configuration.
+</Callout>
+
+<ProbeNote>The interviewer wants you to articulate three benefits over `final` / package-private: cross-package permitted extension, compile-time exhaustiveness in switch, and the safety net of "adding a permitted type breaks every non-exhaustive switch at compile time." Bonus credit for naming the `final` / `sealed` / `non-sealed` choice each subtype must make.</ProbeNote>

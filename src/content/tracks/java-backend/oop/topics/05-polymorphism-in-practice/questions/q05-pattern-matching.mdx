@@ -1,0 +1,64 @@
+**Yes, polymorphism is still essential — pattern matching for `switch` and virtual dispatch solve different problems along the expression-problem axis.** Polymorphism is for *open* sets of types where you keep adding implementations; pattern matching with `sealed` types is for *closed* sets where you keep adding operations from outside the data.
+
+## The expression problem
+
+You have two axes of extension:
+
+- Add a new **type** (e.g., a new `Shape`).
+- Add a new **operation** (e.g., `serialize`, `area`, `render`).
+
+A given language feature usually makes one easy and the other painful:
+
+| Approach | Add a new type | Add a new operation |
+|---|---|---|
+| Virtual methods (OOP) | Easy — drop in a new subclass | Hard — must edit every existing class |
+| `switch` / pattern matching | Hard — must edit every switch | Easy — write a new function |
+
+The two are duals. Neither replaces the other.
+
+## When polymorphism wins
+
+```java
+interface Shape { double area(); }
+record Circle(double r) implements Shape  { public double area() { return Math.PI*r*r; } }
+record Square(double s) implements Shape  { public double area() { return s*s; } }
+// Tomorrow: drop in Triangle. Nobody else changes.
+```
+
+This is the **Open/Closed Principle** in action. The set of `Shape`s is open — third parties, plugins, future you all add new ones. The operations on Shape are few and stable. Virtual dispatch is the right tool.
+
+## When pattern matching wins
+
+```java
+sealed interface Json permits JsonNull, JsonBool, JsonNum, JsonStr, JsonArr, JsonObj {}
+// ...
+String render(Json j) {
+    return switch (j) {
+        case JsonNull n      -> "null";
+        case JsonBool(var b) -> Boolean.toString(b);
+        case JsonNum(var n)  -> n.toString();
+        case JsonStr(var s)  -> "\"" + s + "\"";
+        case JsonArr(var es) -> es.stream().map(this::render).collect(joining(",", "[", "]"));
+        case JsonObj(var fs) -> ...;
+    };   // exhaustive — compiler proves it
+}
+```
+
+The set of `Json` node types is **closed** (the spec defines exactly six). The operations are **many** — render, validate, query, transform, diff. Putting all those operations as virtual methods on `Json` would bloat the interface and force every JSON library to provide all of them. Pattern matching keeps each operation as a standalone function and gives you **exhaustiveness checking** for free.
+
+## The senior synthesis
+
+| Question | Use |
+|---|---|
+| Is the type set open for extension by third parties? | Polymorphism |
+| Is the type set closed and well-known? | `sealed` + pattern matching |
+| Is the behavior inherent to "what this thing *is*"? | Polymorphism (a `Dog` knows how to bark) |
+| Is the behavior an external concern (rendering, persistence, audit)? | Pattern matching (keeps domain types clean) |
+| Do you want OCP (no edits when adding subtypes)? | Polymorphism |
+| Do you want exhaustiveness ("if a new case appears, the compiler tells me")? | Pattern matching |
+
+<Callout kind="tip" title="They compose">
+The two features cooperate. You can put a virtual method on a sealed interface for behavior that *does* belong to the type, and use pattern matching for behavior that doesn't. A `Shape` might have `area()` as a virtual method and be rendered to SVG via a switch in a separate `SvgRenderer`.
+</Callout>
+
+<ProbeNote>The interviewer is checking whether you understand the *expression problem* by name or by intuition. The wrong answer is "switches are now better, so polymorphism is dead." The right answer names both axes and gives a concrete example of each. Bonus: mention the visitor pattern as the pre-Java-21 workaround for exhaustive case analysis.</ProbeNote>

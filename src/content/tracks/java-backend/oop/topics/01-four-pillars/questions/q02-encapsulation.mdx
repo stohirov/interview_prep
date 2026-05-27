@@ -1,0 +1,51 @@
+**Marking a field `private` is the cheapest possible form of encapsulation — it stops a compiler error but doesn't protect anything that matters.** Real encapsulation is about hiding the *representation choice*, protecting *invariants*, and preserving the *freedom to evolve* the implementation without breaking callers.
+
+## Representation hiding
+
+Imagine a `Temperature` class:
+
+```java
+public final class Temperature {
+    private final double celsius;       // today
+    public Temperature(double celsius) { this.celsius = celsius; }
+    public double celsius()    { return celsius; }
+    public double fahrenheit() { return celsius * 9.0 / 5.0 + 32.0; }
+}
+```
+
+The field is private, but the *real* encapsulation win is that we never promised callers we store celsius. Tomorrow we can switch to kelvin internally; as long as the methods return the same values, no caller notices. A `public double celsius` field would have welded the representation into the API forever.
+
+## Invariant protection
+
+```java
+public final class DateRange {
+    private final LocalDate start;
+    private final LocalDate end;
+
+    public DateRange(LocalDate start, LocalDate end) {
+        if (end.isBefore(start)) throw new IllegalArgumentException("end < start");
+        this.start = start;
+        this.end   = end;
+    }
+}
+```
+
+The invariant `end >= start` is *guaranteed* because the only path that sets the fields runs the check. If `start` and `end` were public, anyone could write `range.start = LocalDate.MAX` and silently break every other method that assumes the invariant.
+
+## Evolution and the public surface
+
+Public APIs are forever. A `getCount()` method can be reimplemented to fetch lazily, cache, or count incrementally. A `public int count` field cannot — replacing it with a method is a *binary-incompatible* change that breaks every compiled caller.
+
+<Callout kind="warn" title="`get`/`set` is not encapsulation">
+Mechanical `getX/setX` pairs that expose every field are barely better than public fields. They preserve binary compatibility, but they leak the representation and skip invariant checks. The right question isn't "do I have a getter?" — it's "does any caller need this at all?"
+</Callout>
+
+## A practical encapsulation checklist
+
+- Make fields `private final` by default.
+- Expose intent, not state (`isExpired()`, not `getExpirationTimestamp()`).
+- Validate in the constructor; never trust callers.
+- Return defensive copies of mutable internals.
+- For records, add a compact constructor to validate.
+
+<ProbeNote>The interviewer is screening for the difference between syntactic encapsulation (private keyword) and design encapsulation (the API protects invariants and hides choices). A strong answer explicitly names invariants and binary compatibility; a weak one just says "private fields with getters and setters."</ProbeNote>

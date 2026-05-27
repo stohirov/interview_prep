@@ -1,0 +1,110 @@
+An elevator system tests two things at once: **entity decomposition** (cars, floors, requests, controller) and **scheduling algorithm** (the SCAN/LOOK family of disk-scheduling algorithms applied to elevator cars). The interviewer cares most about the scheduling — that's where the trade-offs live.
+
+## Requirements
+
+- Multiple elevator cars (3–8 typical), some serving high floors only.
+- Two kinds of requests: **external** (someone presses up/down on a floor) and **internal** (someone inside picks a destination floor).
+- Optimize for: average wait time and total travel distance.
+- Out of scope: priority for emergency services, weight limits, maintenance scheduling.
+
+## Use cases
+
+1. Passenger on floor 5 presses ↑. System assigns the elevator that minimizes their wait.
+2. Passenger inside car #2 presses 12. Car queues the stop in the right place along its current direction.
+3. Car is idle. It stays where it is (saves energy) until a request comes in.
+
+## Scheduling algorithms — pick one and defend it
+
+- **FCFS (first-come, first-served)**: simplest. Service requests in arrival order. Bad — a request from floor 1 to 20 followed by a request from floor 21 wastes a full round trip.
+- **SCAN / "elevator algorithm"**: car moves in one direction servicing all requests in that direction, then reverses. Bounded worst-case wait. Classic.
+- **LOOK**: like SCAN but reverses as soon as there are no more requests in the current direction (instead of always going to the top/bottom). Strictly better than SCAN — same fairness, less travel.
+- **Nearest-car / weighted assignment**: for *multi-car* dispatch, assign each external request to the car whose direction and position minimize a cost function (estimated time to reach floor + capacity penalty + same-direction bonus).
+
+The standard interview answer is **LOOK per car + nearest-car assignment for multi-car dispatch**. Defend it: bounded wait, low travel, simple to implement, and matches what real elevator vendors (Otis, KONE) ship.
+
+## Class skeleton
+
+```java
+public enum Direction { UP, DOWN, IDLE }
+
+public record FloorRequest(int floor, Direction direction) {} // external
+public record CarRequest(int destinationFloor) {}             // internal
+
+public final class ElevatorCar {
+    private final int id;
+    private int currentFloor = 1;
+    private Direction direction = Direction.IDLE;
+    private final NavigableSet<Integer> upStops = new TreeSet<>();
+    private final NavigableSet<Integer> downStops = new TreeSet<>(Comparator.reverseOrder());
+
+    public ElevatorCar(int id) { this.id = id; }
+
+    public synchronized void addInternalStop(int floor) {
+        if (floor > currentFloor) upStops.add(floor);
+        else if (floor < currentFloor) downStops.add(floor);
+        if (direction == Direction.IDLE) direction = floor > currentFloor ? Direction.UP : Direction.DOWN;
+    }
+
+    public synchronized void step() {
+        if (direction == Direction.UP) {
+            currentFloor++;
+            if (upStops.contains(currentFloor)) { upStops.remove(currentFloor); openDoors(); }
+            if (upStops.isEmpty()) direction = downStops.isEmpty() ? Direction.IDLE : Direction.DOWN;
+        } else if (direction == Direction.DOWN) {
+            currentFloor--;
+            if (downStops.contains(currentFloor)) { downStops.remove(currentFloor); openDoors(); }
+            if (downStops.isEmpty()) direction = upStops.isEmpty() ? Direction.IDLE : Direction.UP;
+        }
+    }
+
+    // For cost-based dispatch
+    public int estimatedStopsTo(int floor, Direction reqDir) {
+        // Same direction and ahead -> closest. Otherwise must reverse first.
+        // ... return a cost (number of stops + reversal penalty)
+        return Math.abs(currentFloor - floor);
+    }
+
+    public int currentFloor() { return currentFloor; }
+    public Direction direction() { return direction; }
+    private void openDoors() { /* simulate */ }
+}
+
+public final class ElevatorController {
+    private final List<ElevatorCar> cars;
+    public ElevatorController(List<ElevatorCar> cars) { this.cars = cars; }
+
+    public void handleExternal(FloorRequest req) {
+        // Nearest-car dispatch
+        ElevatorCar best = cars.stream()
+            .min(Comparator.comparingInt(c -> c.estimatedStopsTo(req.floor(), req.direction())))
+            .orElseThrow();
+        best.addInternalStop(req.floor());
+    }
+}
+```
+
+The LOOK behavior emerges from the two `NavigableSet` buckets: while moving up, only service `upStops`; flip direction only when `upStops` is empty.
+
+## State pattern lurking
+
+The car's direction (`UP / DOWN / IDLE`) is a state machine — transitions trigger when stop sets empty out. A `sealed interface CarState permits Going, Stopped, Idle` makes this explicit and lets a `switch` enforce all transitions are handled. For a 45-minute interview, the enum + flag form above is usually enough; mention State pattern as a refinement.
+
+## Concurrency
+
+- External requests arrive on user threads; the controller's `handleExternal` should be safe to call concurrently. `synchronized` on the car or a per-car `ReentrantLock` works.
+- A separate "tick" thread (or `ScheduledExecutorService`) drives `step()` on each car at a fixed interval.
+- For high traffic, separate `ExecutorService`s per car so one busy car doesn't block another.
+
+## Trade-offs to volunteer
+
+- **Greedy nearest-car** is locally optimal but can starve high floors during heavy ground-floor traffic. A bid-based system with elapsed-wait weighting fixes it.
+- **Coalescing**: if two adjacent floors both press ↑, the same car can serve both — the priority queue takes care of this naturally.
+- **Idle parking**: real systems pre-position cars on common-source floors (lobby in morning, top floors in evening) based on historical traffic.
+
+## Extension questions
+
+- "What if a car can only serve odd floors?" Add a `serves(int floor)` capability filter to dispatch.
+- "What if requests have priority (VIP, emergency)?" Augment cost function or use a separate priority queue per car.
+- "Distribute the controller across machines." Per-elevator agent + central dispatcher over RPC.
+
+<ProbeNote>The grading line is the scheduling: candidates who name SCAN/LOOK and explain *why* (bounded wait, low travel, matches reality) score higher than those who hand-wave "use a queue." Bonus credit for separating the two scheduling layers — per-car (LOOK) and multi-car dispatch (nearest-car cost function) — and for mentioning starvation as a real failure mode.</ProbeNote>

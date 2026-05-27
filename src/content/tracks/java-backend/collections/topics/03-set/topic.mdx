@@ -1,0 +1,25 @@
+A `Set<E>` is a `Collection` with one extra invariant: **no duplicate elements**, as defined by `equals`. Adding an element already present returns `false` and leaves the set unchanged. Beyond that, the three main implementations differ dramatically in ordering, performance, and memory layout.
+
+## The Three Implementations
+
+**`HashSet<E>`** is the workhorse — `O(1)` average `add`/`remove`/`contains`, no ordering guarantee. Internally it's a `HashMap` where every key maps to the same dummy sentinel value `PRESENT`. You pay one `HashMap` per set, but get hash-table speed.
+
+**`LinkedHashSet<E>`** extends `HashSet` and adds a doubly-linked list threaded through the entries, preserving **insertion order** for iteration. Same `O(1)` ops, slightly higher memory overhead per element (two extra references for the linked-list pointers).
+
+**`TreeSet<E>`** is backed by a red-black tree (`TreeMap`). Elements are kept in **sorted order** via `Comparable` or a supplied `Comparator`. All operations are `O(log n)`. It implements `NavigableSet`, so you get `first`, `last`, `floor`, `ceiling`, `headSet`, `tailSet`, `subSet`, and `descendingSet` for free.
+
+## Specialized Sets
+
+The framework includes a few specialized implementations worth knowing:
+
+- **`EnumSet<E extends Enum<E>>`** — bitvector-backed set for enum types. Spectacularly fast, often a single `long`.
+- **`CopyOnWriteArraySet`** — thread-safe via `CopyOnWriteArrayList` internally. Same read/write trade-off — great for tiny, read-heavy listener sets.
+- **`ConcurrentSkipListSet`** — concurrent, sorted, `O(log n)` set. The thread-safe `TreeSet`.
+
+## The Invariant Trap
+
+Because membership is determined by `equals` (and bucket location by `hashCode` for hash-based sets), **mutating an element's state after adding it can silently corrupt the set**. The element ends up "stranded" — `contains` returns false, but the element is still physically there. This is the single most common Set bug in production Java.
+
+The same goes for `TreeSet` and mutable elements that affect ordering: change the field your `Comparator` depends on, and you've just broken the BST invariant. The cure is to use **immutable elements** (records are perfect) for any object you intend to put in a `Set`.
+
+Let's get into the questions interviewers love to ask.

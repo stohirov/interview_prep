@@ -1,0 +1,86 @@
+`PriorityQueue` is **unbounded and not thread-safe**. `PriorityBlockingQueue` is **unbounded, thread-safe, and adds blocking semantics** — `take()` blocks while empty, letting consumer threads sleep efficiently until producers add work. Both are heap-based with the same priority semantics; the difference is concurrency.
+
+## Side-by-side
+
+| Aspect | `PriorityQueue` | `PriorityBlockingQueue` |
+| --- | --- | --- |
+| Package | `java.util` | `java.util.concurrent` |
+| Thread-safe | No | Yes (ReentrantLock internally) |
+| Bounded? | No (grows on add) | No (grows on add) |
+| Blocks on empty take? | N/A — `poll` returns null | `take()` blocks until non-empty |
+| Blocks on full put? | N/A — never full | N/A — never full (unbounded) |
+| Allows null? | No (NPE) | No (NPE) |
+| Iterator order | Heap order (undefined for priority) | Weakly consistent snapshot, heap order |
+| Initial capacity | 11 | 11 |
+| Comparator support | Yes | Yes |
+
+## Why "unbounded but blocking"
+
+`BlockingQueue` traditionally implies bounded — `ArrayBlockingQueue(int capacity)` blocks producers when full. `PriorityBlockingQueue` is unusual: it blocks consumers on empty (the useful case for priority work) but never blocks producers, growing the heap as needed.
+
+The trade-off: producers can't apply back-pressure via the queue. If a producer outpaces consumers indefinitely, the heap grows until OOM. Pair it with explicit rate limiting or a `Semaphore`.
+
+## Code: producer-consumer with priorities
+
+```java
+public record Task(int priority, String name) implements Comparable<Task> {
+    @Override
+    public int compareTo(Task other) {
+        return Integer.compare(this.priority, other.priority); // lower = higher priority
+    }
+}
+
+PriorityBlockingQueue<Task> queue = new PriorityBlockingQueue<>();
+
+// Producer
+Thread producer = new Thread(() -> {
+    queue.put(new Task(5, "low"));     // never blocks (unbounded)
+    queue.put(new Task(1, "urgent"));
+    queue.put(new Task(3, "medium"));
+});
+
+// Consumer
+Thread consumer = new Thread(() -> {
+    try {
+        while (true) {
+            Task t = queue.take();  // blocks on empty
+            System.out.println("Processing: " + t.name());
+        }
+    } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+    }
+});
+```
+
+The consumer wakes up only when there's work, with the highest-priority task immediately available — no busy-wait, no `poll() == null` polling loop.
+
+## When to use which
+
+- **Single-threaded priority work** (sort by priority, top-k, Dijkstra, A\*) — `PriorityQueue`. Faster, no locking overhead.
+- **Multiple consumer threads** pulling priority-ordered work — `PriorityBlockingQueue`. Built-in blocking + lock-based safety.
+- **High-contention priority work where you want lock-free** — neither. There's no JDK-provided lock-free priority queue. Consider `ConcurrentSkipListMap` keyed by priority for a sorted-but-concurrent alternative.
+
+## Internal locking strategy
+
+`PriorityBlockingQueue` uses a single `ReentrantLock` guarding the heap. All `put`, `offer`, `poll`, `take`, `peek`, and `iterator` acquire this lock. This makes operations atomic but serializes them — high contention with many producers hurts throughput.
+
+For very high contention, look at `LinkedTransferQueue` (FIFO only) or partition work across multiple queues by priority class.
+
+## Take with timeout
+
+```java
+Task t = queue.poll(500, TimeUnit.MILLISECONDS);
+if (t == null) {
+    // timeout — no work after 500ms
+} else {
+    process(t);
+}
+```
+
+This is the standard pattern for shutdown-aware consumers: poll with timeout, check shutdown flag, loop.
+
+<Callout kind="warn" title="Iteration during concurrent updates">
+`PriorityBlockingQueue.iterator()` is "weakly consistent" — it snapshots the heap array under the lock, then iterates the snapshot without further synchronization. Concurrent modifications won't break iteration but won't be reflected either. Still NOT in priority order — it's heap order.
+</Callout>
+
+<ProbeNote>Probe: "How do you implement a bounded priority blocking queue?" (Not in the JDK directly — wrap PriorityBlockingQueue with a Semaphore controlling capacity, or use a custom implementation.) "Difference vs DelayQueue?" (DelayQueue is a priority queue where take blocks until the head element's delay expires — useful for scheduled tasks. Element must implement Delayed.) "Is PriorityBlockingQueue the right choice for a thread-pool ExecutorService?" (Yes — used as the work queue for a `ThreadPoolExecutor` it gives priority scheduling of submitted tasks.)</ProbeNote>

@@ -1,0 +1,64 @@
+**No — an override may widen the access level but never narrow it. Narrowing would violate Liskov substitution because a caller holding the parent reference must be able to make the call.** The compiler enforces this rule directly.
+
+## What the JLS says
+
+JLS §8.4.8.3: "The access modifier of an overriding or hiding method must provide at least as much access as the overridden or hidden method." The legal widening transitions are:
+
+```text
+private        -> (private is not overridable, only hidden)
+package-private -> protected, public
+protected       -> public
+public          -> public (cannot widen further)
+```
+
+Narrowing in any direction is a compile error.
+
+## Why — the Liskov argument
+
+If a parent method is `public`, every caller in the JVM is *allowed* to invoke it on a `Parent` reference. Imagine the subclass narrowed it to `protected`:
+
+```java
+class Parent { public void open() { ... } }
+class Child  extends Parent { protected void open() { ... } }  // ILLEGAL
+
+Parent p = new Child();
+p.open();   // compiler sees public — accepts
+            // at runtime dispatches to Child.open — which is protected!
+            // who decides whether to throw?
+```
+
+Dynamic dispatch picks the implementation, but access checking happens against the *reference type* at compile time. If the runtime override were narrower, the language would either have to do a second access check at runtime (slow, surprising, breaks the type system) or let unauthorized callers in through the parent type (broken encapsulation). Disallowing the narrowing sidesteps both options.
+
+## Other things you can and can't change on override
+
+| Aspect | Can it change in subclass? |
+|---|---|
+| Access | Wider only |
+| Return type | Covariant (a subtype is allowed) |
+| Checked exceptions thrown | Fewer or subtypes only — never more |
+| Parameter types | Must match exactly (else it's an overload, not an override) |
+| `final` | Subclass cannot override a `final` method |
+| `static` | Cannot change (static is hidden, not overridden) |
+
+All of these follow the same Liskov principle: the subclass must be a drop-in replacement when used through the parent type, so the contract may relax for the *caller* but never tighten.
+
+## The implementation override gotcha
+
+This also applies to interface implementations. An interface method is implicitly `public`, so any class implementing it must declare the method `public`:
+
+```java
+interface Door { void open(); }
+
+class Vault implements Door {
+    void open() { ... }      // COMPILE ERROR — must be public
+    public void open() { ... } // correct
+}
+```
+
+A common newbie mistake; the compiler error message ("attempting to assign weaker access privileges") names the rule directly.
+
+<Callout kind="tip" title="Records and the same rule">
+A record component's accessor is implicitly `public`. If you write an explicit accessor, you must keep it `public` — otherwise the record body fails to compile for the same reason.
+</Callout>
+
+<ProbeNote>The interviewer wants the *reason* (Liskov), not just the rule. Strong candidates connect it to dynamic dispatch — access is a compile-time check against the reference type, and the JVM never re-checks at runtime, so the contract must monotonically widen down the hierarchy.</ProbeNote>

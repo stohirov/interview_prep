@@ -1,0 +1,29 @@
+**Behavioral patterns** describe how objects collaborate to get a job done — who calls whom, who decides, who notifies whom. Where creational patterns build objects and structural patterns wire them together, behavioral patterns choreograph the conversation. The classic seven — Strategy, Observer, Template Method, Command, Iterator, State, Chain of Responsibility — show up so often in modern frameworks that you've used most of them today without naming them.
+
+## The seven and what each solves
+
+| Pattern | Problem | Modern example |
+|---|---|---|
+| Strategy | Swap one algorithm for another at runtime | `Comparator`, `ScheduledExecutorService` |
+| State | Change behavior as the object's lifecycle moves | TCP connection, vending machine |
+| Observer | Notify many listeners when one thing changes | `Flow.Publisher`, Spring `ApplicationEvent` |
+| Template Method | Fix the algorithm skeleton, let subclasses fill in steps | `AbstractList`, JdbcTemplate |
+| Command | Wrap a request as an object — queue, log, undo it | `Runnable`, undo stacks, message brokers |
+| Iterator | Traverse a collection without exposing its layout | `Iterator`, enhanced `for` loop |
+| Chain of Responsibility | Pass a request through a series of handlers | Servlet `FilterChain`, Spring `HandlerInterceptor` |
+
+## The shared theme: separate "what" from "who"
+
+Each behavioral pattern pulls apart a responsibility that naive code would crush together. Strategy separates *what algorithm runs* from *who picks it*. Observer separates *what changed* from *who cares*. Command separates *what to do* from *when to do it*. Chain of Responsibility separates *what to handle* from *who handles it*. The decoupling is the value — testability, swappability, and the ability to add a new variant without touching the rest of the code (Open/Closed, every time).
+
+## Java's bias: functional interfaces collapsed half of them
+
+Pre-Java-8, a Strategy was always a class. Today it's usually a lambda: `list.sort((a, b) -> a.priority() - b.priority())` is the Strategy pattern with an anonymous `Comparator`. Same for Command (`Runnable`), Observer (`Consumer<Event>`), and Iterator (collapsed into `Stream`). The pattern is still there — you just don't need a five-class hierarchy to express it anymore.
+
+<Callout kind="tip" title="When the class form still wins">
+Reach for an explicit interface (not a lambda) when the strategy needs (a) named state, (b) multiple methods, (c) a stable identity for equality/serialization, or (d) injection metadata for a DI container. A `RetryStrategy` bean wired into ten services should be a class.
+</Callout>
+
+## What interviewers want to hear
+
+They'll check three things: that you can name the pattern when it fits, that you don't reach for it when it doesn't, and that you know which patterns the JDK already provides so you don't reinvent them. "I'd use `java.util.concurrent.Flow` instead of hand-rolling Observer" earns more credit than a 50-line Observer implementation.

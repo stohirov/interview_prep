@@ -1,0 +1,83 @@
+**The element becomes "stranded" — physically present in the set but invisible to `contains`, `remove`, and any future lookup.** This is the most notorious bug pattern with `HashSet` (and `HashMap` keys, by extension). It happens because the set placed the element in a bucket based on its *original* `hashCode`, but after mutation `hashCode` returns a different value, sending lookups to the wrong bucket.
+
+## The Failure in Action
+
+```java
+class Person {
+    String name;
+    Person(String name) { this.name = name; }
+
+    @Override public boolean equals(Object o) {
+        return o instanceof Person p && p.name.equals(name);
+    }
+    @Override public int hashCode() {
+        return name.hashCode();
+    }
+}
+
+Set<Person> people = new HashSet<>();
+Person ada = new Person("Ada");
+people.add(ada);
+
+System.out.println(people.contains(ada));   // true
+
+ada.name = "Grace";                          // mutate the live element
+
+System.out.println(people.contains(ada));   // false  (!)
+System.out.println(people.size());          // 1     (the element is still THERE)
+people.remove(ada);                          // returns false — can't find it
+people.iterator().next();                    // returns the Person object — it's in there
+```
+
+The element is reachable only by iteration, never by lookup. You can no longer remove it through the normal API, you can no longer prevent duplicates, and `addAll`/equality with other sets goes wrong.
+
+## Why It Happens
+
+A hash table places each entry in `buckets[hash(e) % capacity]`. When you call `set.contains(x)`, the set computes `hash(x)` and searches *that bucket only*. After mutation:
+
+```text
+At insert time:     hash("Ada")   -> bucket 4   -> entry placed in bucket 4
+After mutation:     hash("Grace") -> bucket 11
+contains(ada):      hash("Grace") -> bucket 11  -> not found (entry is still in bucket 4)
+```
+
+The element's bucket doesn't move when its hash changes — there's no listener; the set has no way to know.
+
+## The Cures
+
+1. **Use immutable elements.** The cleanest fix. Records are perfect:
+
+   ```java
+   record Person(String name) {}        // immutable by construction
+   ```
+
+2. **Use only immutable fields in `hashCode`/`equals`.** If `Person` has a mutable `address` but only `name` (treated as final) is used for identity, mutation of `address` is harmless.
+
+3. **Remove before mutating, re-add after** — verbose, error-prone, and easy to forget. Avoid unless you have no other option.
+
+   ```java
+   people.remove(ada);
+   ada.name = "Grace";
+   people.add(ada);
+   ```
+
+4. **Use `IdentityHashMap`-backed structures** if identity-based membership is what you actually want — but that's a different semantic.
+
+## The Same Bug in TreeSet
+
+`TreeSet` has an analogous failure: mutate a field used by the `Comparator`, and the tree's BST invariant is broken. Now lookups can miss, or worse, the tree itself becomes corrupted — `add` can place duplicates, traversal can skip elements.
+
+```java
+NavigableSet<Person> sorted = new TreeSet<>(Comparator.comparing(p -> p.name));
+sorted.add(new Person("Ada"));
+sorted.add(new Person("Bob"));
+((Person) sorted.first()).name = "Zane";  // tree invariant now violated
+```
+
+<Callout kind="warn" title="Defensive design">
+Treat anything you put into a `Set` (or use as a `Map` key) as effectively immutable. **Records, `String`, boxed primitives, and value objects** are safe by construction. Mutable entities (JPA entities especially) should never have `equals`/`hashCode` based on mutable state.
+</Callout>
+
+<ProbeNote>
+The interviewer is testing whether you understand the **physical layout** of a hash table, not just its API. Strong answers explain the "wrong bucket" mechanism, name the cure (immutability — ideally records), and note the parallel problem in `TreeSet` with comparator fields. Bonus: mentioning that JPA entities often violate this rule (auto-generated IDs change at flush time), which is why entity equality is its own minefield.
+</ProbeNote>

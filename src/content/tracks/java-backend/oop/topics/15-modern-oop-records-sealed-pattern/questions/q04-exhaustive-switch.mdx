@@ -1,0 +1,94 @@
+A `switch` over a sealed hierarchy that handles every permitted subtype is **provably exhaustive at compile time**. The compiler accepts it without a `default`, and — the part interviewers actually care about — when you later add a new permitted subtype, every non-exhaustive switch in your codebase turns into a compile error. The bug that used to ship to production is now caught before you hit save.
+
+## The setup
+
+```java
+public sealed interface Shape permits Circle, Square, Triangle {}
+
+public record Circle(double radius) implements Shape {}
+public record Square(double side) implements Shape {}
+public record Triangle(double base, double height) implements Shape {}
+```
+
+## Exhaustive switch — no `default` needed
+
+```java
+double area(Shape s) {
+    return switch (s) {
+        case Circle c   -> Math.PI * c.radius() * c.radius();
+        case Square sq  -> sq.side() * sq.side();
+        case Triangle t -> 0.5 * t.base() * t.height();
+    };
+}
+```
+
+The compiler checks: are all permitted subtypes of `Shape` covered? Yes. The switch compiles. No `default -> throw new IllegalStateException()` needed — that branch is provably unreachable.
+
+## Why this is a big deal
+
+Imagine you add a fourth shape:
+
+```java
+public sealed interface Shape permits Circle, Square, Triangle, Pentagon {}
+public record Pentagon(double side) implements Shape {}
+```
+
+Now go run a build. Every `switch` like the one above produces:
+
+```
+error: the switch expression does not cover all possible input values
+    return switch (s) {
+                  ^
+  Pentagon is not covered
+```
+
+You find — at compile time, in the IDE, before any test runs — every place in the codebase that dispatches on `Shape` and forgot the new case. In a 200,000-line codebase, that's the difference between a clean refactor and a production incident two weeks later when someone uploads a pentagon and your stats dashboard silently undercounts area.
+
+## Compare to the pre-Java-17 equivalent
+
+```java
+double area(Shape s) {
+    if (s instanceof Circle c)       return Math.PI * c.radius() * c.radius();
+    else if (s instanceof Square sq) return sq.side() * sq.side();
+    else if (s instanceof Triangle t) return 0.5 * t.base() * t.height();
+    else throw new IllegalStateException("unknown shape: " + s);
+}
+```
+
+Three pain points:
+
+1. **The compiler can't prove exhaustiveness** — that `throw` is necessary because the compiler has no idea what else might implement `Shape`.
+2. **Adding `Pentagon` compiles fine.** The `IllegalStateException` only fires at runtime, when the first pentagon flows through this code path. Maybe in production. Maybe at 3am.
+3. **The code reads as defensive plumbing** — every reader has to scan past the `throw` to find the actual logic.
+
+The exhaustive switch removes all three.
+
+## Pattern matching makes it more concise
+
+Combine sealed + records + switch with record patterns and you get destructuring as a bonus:
+
+```java
+double area(Shape s) {
+    return switch (s) {
+        case Circle(double r)              -> Math.PI * r * r;
+        case Square(double side)           -> side * side;
+        case Triangle(double b, double h)  -> 0.5 * b * h;
+    };
+}
+```
+
+No accessor calls. The pattern destructures the record components directly into local variables.
+
+## The escape hatch — `default` is still allowed
+
+If you want defensive logging on top of exhaustiveness, you can add `default`. The compiler then doesn't require all cases — but you usually want exhaustiveness over the convenience of a catch-all. The discipline is the value.
+
+<Callout kind="warn" title="`null` is not automatically covered">
+Exhaustive only means "every permitted subtype." If `s` could be `null`, the switch throws `NullPointerException` unless you add `case null -> ...`. Java 21+ allows `case null` explicitly, and it's a good habit when the input nullability is uncertain.
+</Callout>
+
+## Why interviewers love this question
+
+It's a litmus test for keeping up with modern Java. A senior who can articulate "sealed + exhaustive switch = compile-time safety net on refactors" understands why the language has evolved this way — it's not syntactic sugar, it's a fundamentally stronger contract. The candidate who shrugs and says "I'd add a default" hasn't seen what this protects you from.
+
+<ProbeNote>The headline is the refactor story: adding a permitted subtype turns every non-exhaustive switch into a compile error, so you can't ship a missed case. Mentioning that `default` is still allowed shows you know the escape hatch; emphasizing why you usually don't want it shows you understand the discipline.</ProbeNote>

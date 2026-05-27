@@ -1,0 +1,62 @@
+**`this(...)` delegates to another constructor in the same class; `super(...)` delegates to a constructor in the direct superclass. At most one of them may appear in a constructor body, and it must be the first statement.** This rule keeps the super-chain linear and prevents partially-initialized objects from skipping ancestor setup.
+
+## What each does
+
+```java
+public class User {
+    private final String name;
+    private final int    age;
+
+    public User(String name) {
+        this(name, 0);                  // delegate to the two-arg ctor
+    }
+
+    public User(String name, int age) {
+        super();                         // implicit call to Object()
+        this.name = name;
+        this.age  = age;
+    }
+}
+```
+
+`this(name, 0)` jumps to the sibling constructor, which itself runs `super()` (implicit) before assigning fields. `super(...)` reaches *up* the hierarchy; `this(...)` reaches *sideways* within the same class.
+
+## Why they can't coexist
+
+Picture what *would* happen if both were allowed in one constructor:
+
+- `super(args)` runs — parent state is initialized.
+- `this(otherArgs)` runs — the sibling constructor ALSO runs `super(...)`, initializing parent state a second time.
+
+You'd double-initialize the parent. The JLS sidesteps this by requiring exactly one explicit constructor invocation (or none, in which case the compiler inserts `super()`) and requiring it to be the first statement. If you wrote both, the compiler refuses:
+
+```java
+public User(String name) {
+    super();                       // error: cannot combine
+    this(name, 0);                 // error: not the first statement
+}
+```
+
+## Why "first statement"
+
+Before the super-chain completes, the object's parent state is *uninitialized*. Letting you run arbitrary code before `super()` would mean you could read parent fields that don't yet hold their constructor-set values, or call methods that depend on parent state. Java enforces a clean rule: nothing happens in your body until the entire ancestor chain has finished initializing.
+
+<Callout kind="info" title="Java 22+ flexible constructor bodies">
+JEP 447 (preview in 22, standard in later versions) relaxes this slightly — you can put *prologue* code before `super(...)` as long as it doesn't read or expose `this`. Useful for argument validation. The "exactly one constructor invocation" rule still holds.
+</Callout>
+
+## Common use: avoiding telescoping constructors
+
+```java
+public final class Box {
+    private final int w, h, d;
+
+    public Box()                       { this(1, 1, 1); }
+    public Box(int side)              { this(side, side, side); }
+    public Box(int w, int h, int d)   { this.w = w; this.h = h; this.d = d; }
+}
+```
+
+Every constructor funnels through the most general one. Validation lives in exactly one place.
+
+<ProbeNote>The interviewer is testing whether you understand the constraint and *why* it exists, not just that it exists. Saying "must be first statement" earns a nod; explaining that the rule prevents double-initialization of the parent and forbids touching uninitialized state earns the senior signal. Bonus: mention the Java 22 flexible-constructor relaxation.</ProbeNote>

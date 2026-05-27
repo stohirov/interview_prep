@@ -1,0 +1,84 @@
+**`Iterable<T>` exists as a separate, minimal interface — just `iterator()` plus default `forEach` and `spliterator()` — so types that are traversable but aren't collections can still participate in `for-each` loops and streams.**
+
+## The for-each contract
+
+The enhanced for loop is desugared by the compiler to:
+
+```java
+for (T t : iterable) { ... }
+
+// becomes
+
+for (Iterator<T> it = iterable.iterator(); it.hasNext(); ) {
+    T t = it.next();
+    ...
+}
+```
+
+The compiler only requires that the operand be either an array or an `Iterable`. It does **not** require `Collection`. That's the entire point.
+
+## What can be Iterable but not a Collection?
+
+| Type                          | Why not Collection?                              |
+|-------------------------------|--------------------------------------------------|
+| `java.nio.file.Path`          | Iterates path segments — no `size()`, no `add()`. |
+| `java.nio.file.DirectoryStream` | Streams entries from disk, must be closed.     |
+| `BeanContext`, `XMLEventReader` | Forward-only, single-use.                      |
+| `JSONArray` (some libs)       | Doesn't conform to `Collection` API.              |
+| A lazy/infinite sequence      | No `size()`, no `contains()`.                    |
+| `ResultSet`-like cursors      | One-shot, externally managed.                    |
+
+If `Iterable` were merged into `Collection`, none of these could be used in a `for-each` loop without faking dozens of methods.
+
+## What Iterable actually provides
+
+```java
+public interface Iterable<T> {
+    Iterator<T> iterator();
+    default void forEach(Consumer<? super T> action) { ... }
+    default Spliterator<T> spliterator() { ... }
+}
+```
+
+That's it. Three methods, two of them default. Implementing a custom iterable is a few lines:
+
+```java
+record Range(int from, int toExclusive) implements Iterable<Integer> {
+    @Override
+    public Iterator<Integer> iterator() {
+        return new Iterator<>() {
+            int cur = from;
+            public boolean hasNext() { return cur < toExclusive; }
+            public Integer next() {
+                if (cur >= toExclusive) throw new NoSuchElementException();
+                return cur++;
+            }
+        };
+    }
+}
+
+for (int i : new Range(0, 5)) System.out.println(i);
+```
+
+## Iterable vs Collection vs Stream
+
+```
+Iterable      <-- contract for "loopable"
+   ^
+   |
+Collection    <-- adds size, contains, add, remove, etc.
+
+Stream        <-- one-shot pipeline, NOT Iterable (deliberately)
+```
+
+`Stream` is intentionally **not** `Iterable` because it's single-use and the for-each loop's "looks like a collection" intuition would mislead. You can still get one via `stream::iterator` when you really need to.
+
+## Design lesson
+
+This is the **interface segregation principle** in the JDK: keep the traversal contract orthogonal to the "container of stuff" contract. Anything you can walk over once, in order, qualifies as `Iterable` — disk entries, lazy ranges, parse trees, network event streams.
+
+<Callout kind="tip" title="Pair Iterable with AutoCloseable">
+For iterables backed by external resources (`DirectoryStream`, `Stream.iterate` over a file), implement `AutoCloseable` and use try-with-resources. The for-each loop won't close them for you.
+</Callout>
+
+<ProbeNote>Probe: "Why isn't `Stream` an `Iterable`?" Because a `Stream` is single-use — calling `iterator()` consumes it. If it implemented `Iterable`, users would naturally expect to loop twice, which would silently fail at runtime. The library designers chose to break the for-each ergonomics rather than the contract.</ProbeNote>

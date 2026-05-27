@@ -1,0 +1,36 @@
+Collections evolved more in Java 9–21 than in the entire decade before. The modern era brought immutable factory methods (`List.of`), better stream terminators (`Stream.toList`), Sequenced Collections for a unified first/last API, records as first-class map keys, and — most disruptive — virtual threads, which change how you think about thread-local state and queue-based coordination.
+
+## What's new at a glance
+
+| Feature | Java | Impact |
+|---|---|---|
+| `List.of`, `Set.of`, `Map.of` factory methods | 9 | Replace `Collections.unmodifiableX(Arrays.asList(...))` everywhere |
+| `Map.entry`, `Map.copyOf`, `List.copyOf`, `Set.copyOf` | 9–10 | Immutable snapshots without ceremony |
+| `Stream.toList()` | 16 | Concise unmodifiable list terminator |
+| Records | 16 | Auto `equals`/`hashCode` makes them ideal map keys / set elements |
+| Pattern matching for `switch`, sealed types | 17–21 | Cleaner traversal of polymorphic collection elements |
+| Sequenced Collections (JEP 431) | 21 | Unified `getFirst`/`getLast`/`reversed` across `List`, `LinkedHashSet`, `LinkedHashMap`, `Deque` |
+| Virtual threads (JEP 444) | 21 | Concurrent-collection patterns over thread-pool + bounded-queue patterns |
+| `synchronized` no longer pins virtual threads (JEP 491) | 24 | `Collections.synchronizedX` no longer a virtual-thread hazard |
+
+## Theme: immutability by default
+
+The pre-Java-9 API had no convenient way to build a small immutable collection. You wrote `Collections.unmodifiableList(new ArrayList<>(Arrays.asList("a", "b")))` and prayed nobody held a reference to the inner list. Now `List.of("a", "b")` does the right thing in one expression: immutable, null-hostile, structurally compact, safe to share.
+
+The downstream effect: APIs return `List.of()` instead of `null`, callers receive immutable views by default, defensive copies become `List.copyOf(in)`.
+
+## Theme: ordering as a first-class concept
+
+Before Java 21, "first element of this list-or-set-or-map" was inconsistent: `list.get(0)`, `set.iterator().next()`, `map.entrySet().iterator().next().getKey()`. Sequenced Collections unify this — any encounter-ordered collection now exposes `getFirst()`, `getLast()`, `addFirst()`, `addLast()`, `removeFirst()`, `removeLast()`, and `reversed()`.
+
+## Theme: virtual threads change the playbook
+
+The classic "fixed thread pool + bounded blocking queue" pattern was a workaround for OS threads being expensive. Virtual threads are cheap (millions per JVM), so you can spawn one per request and let it block on I/O directly. Consequences for collections:
+
+- Prefer **concurrent collections** (`ConcurrentHashMap`, `ConcurrentLinkedQueue`) over `synchronized` wrappers — millions of virtual threads contending on a monitor will still pin and serialize.
+- Prefer **`ScopedValue`** (Java 21 preview, finalizing) over `ThreadLocal` — `ThreadLocal` was sized for hundreds of OS threads, not millions of virtual ones.
+- The "submit to executor + take from queue" pattern is often unnecessary now — just `Thread.ofVirtual().start(task)`.
+
+<Callout kind="info" title="Java 25 LTS">
+Java 25 is the current LTS (Sept 2025). Most production deployments will be on Java 21 LTS or 25 LTS for the next few years. All features in this topic are available on both unless noted.
+</Callout>

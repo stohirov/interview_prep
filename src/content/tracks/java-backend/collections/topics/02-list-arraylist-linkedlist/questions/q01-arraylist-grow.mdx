@@ -1,0 +1,62 @@
+**`ArrayList` grows by 1.5× since Java 7** — specifically `newCapacity = oldCapacity + (oldCapacity >> 1)`. The default initial capacity is 10 (allocated lazily on first `add`). When `add` would exceed the current capacity, `grow()` allocates a new array of the larger size and copies elements via `System.arraycopy`.
+
+## The Mechanism Step by Step
+
+Internally, `ArrayList` holds three fields: an `Object[] elementData` (the backing array), an `int size` (count of elements actually stored), and an inherited `modCount` (for fail-fast iteration). When you call `add(e)`:
+
+```java
+// Simplified from OpenJDK ArrayList
+public boolean add(E e) {
+    modCount++;
+    add(e, elementData, size);
+    return true;
+}
+
+private void add(E e, Object[] elementData, int s) {
+    if (s == elementData.length)
+        elementData = grow();
+    elementData[s] = e;
+    size = s + 1;
+}
+
+private Object[] grow(int minCapacity) {
+    int oldCapacity = elementData.length;
+    if (oldCapacity > 0 || elementData != DEFAULTCAPACITY_EMPTY_ELEMENTDATA) {
+        int newCapacity = ArraysSupport.newLength(
+            oldCapacity,
+            minCapacity - oldCapacity,   // minimum growth
+            oldCapacity >> 1);            // preferred growth (50%)
+        return elementData = Arrays.copyOf(elementData, newCapacity);
+    } else {
+        return elementData = new Object[Math.max(DEFAULT_CAPACITY, minCapacity)];
+    }
+}
+```
+
+So the sequence of capacities starting from default is **10, 15, 22, 33, 49, 73, 109, …** — each step is `floor(1.5 × previous)`.
+
+## Why 1.5× and Not 2×
+
+Doubling (the older policy and what C++ `std::vector` typically uses on some implementations) gives faster amortized growth but wastes more memory and prevents *reuse* of freed arrays — after one grow, the freed block is always smaller than the sum of all previous blocks combined. With **1.5×**, the geometric series of previous allocations eventually exceeds the next allocation, so the allocator can reuse coalesced free space. It's a classic memory-vs-time trade-off.
+
+## ensureCapacity — The Optimization Hook
+
+If you know you'll add many elements, **pre-size or call `ensureCapacity`** to skip intermediate grows:
+
+```java
+// Bad: 1M adds, ~30 grow+copy cycles
+List<Integer> xs = new ArrayList<>();
+for (int i = 0; i < 1_000_000; i++) xs.add(i);
+
+// Good: one allocation
+List<Integer> xs = new ArrayList<>(1_000_000);
+for (int i = 0; i < 1_000_000; i++) xs.add(i);
+```
+
+<Callout kind="info" title="Amortized analysis">
+Each `add` is **O(1) amortized** despite occasional copy: across n adds you copy at most `n + n/2 + n/4 + ... < 3n` elements, so cost-per-add stays constant.
+</Callout>
+
+<ProbeNote>
+The interviewer is checking three things: (1) you know the factor is **1.5×, not 2×**; (2) you understand the **amortized O(1)** argument; (3) you'd reach for `new ArrayList<>(expectedSize)` or `ensureCapacity` in performance-sensitive code. Bonus depth: mention `trimToSize()` for the opposite direction — shrinking the backing array to fit after the list is fully built.
+</ProbeNote>

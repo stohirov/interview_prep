@@ -1,0 +1,66 @@
+`HashMap` is not thread-safe because its mutating operations are not atomic and its fields aren't published with safe-publication semantics. Concurrent use risks **lost updates**, **corrupted internal state**, **`ConcurrentModificationException`**, and historically an **infinite loop on resize** (Java 7).
+
+## What can go wrong
+
+### 1. Lost updates
+
+`put` is read-modify-write at the bucket level. If two threads hit the same bucket simultaneously:
+
+```java
+// Thread A: put("x", 1)        Thread B: put("y", 2)
+// Both read bucket -> null
+// Both write a new Node into the slot
+// One overwrite wins; the other entry is silently lost
+```
+
+No exception, no warning — just missing data.
+
+### 2. Inconsistent size
+
+`size` is incremented non-atomically. Two concurrent inserts can both read `size = 5` and both write `size = 6`, so the map reports 6 entries while actually holding 7. This skews resize timing (resize may never trigger or trigger too often).
+
+### 3. ConcurrentModificationException
+
+Iterators are fail-fast: they snapshot `modCount` and throw `CME` if the map mutates during iteration. With concurrent threads, this is essentially inevitable.
+
+```java
+// Thread A iterating, Thread B putting -> CME on A
+for (var e : map.entrySet()) { ... } // BOOM in concurrent context
+```
+
+### 4. The infamous Java 7 resize loop
+
+In Java 7, `transfer()` reversed each bucket chain during resize. If two threads resized at the same time, they could rewire `next` pointers into a **cycle** — a loop in the linked list. The next `get` on that bucket would spin forever, pinning a CPU core.
+
+```text
+Before:  A -> B -> null
+Race result:  A -> B -> A -> B -> ...   (infinite loop)
+```
+
+This was a classic outage cause — engineers reporting "HashMap caused 100% CPU in production" almost always meant this bug.
+
+### 5. Java 8 fixed the loop, not the unsafety
+
+Java 8's `resize` preserves chain order (no reversal) and uses the `(hash & oldCap)` bit split, eliminating the cycle. But concurrent `put` still races on `size`, on bucket slots, on `modCount`, and on treeification. Lost updates and `CME` remain. Don't be lulled into thinking Java 8 made `HashMap` "kind of safe" — it didn't.
+
+## What to use instead
+
+```java
+// Single-thread: HashMap is fine and fast
+Map<String, Integer> m1 = new HashMap<>();
+
+// Shared, read-heavy with infrequent writes: synchronizedMap
+Map<String, Integer> m2 = Collections.synchronizedMap(new HashMap<>());
+// Must externally synchronize during iteration!
+
+// Shared, high concurrency: ConcurrentHashMap (almost always the right choice)
+Map<String, Integer> m3 = new ConcurrentHashMap<>();
+```
+
+`ConcurrentHashMap` uses CAS for empty-bin inserts and synchronizes only on individual bins (in Java 8+), giving near-linear scalability.
+
+<Callout kind="danger" title="A subtle one">
+Even just *publishing* a `HashMap` across threads without proper synchronization (no `volatile`, no happens-before) can leave a thread seeing partially-initialised state — buckets array but no entries, or even a corrupted entry chain. The unsafety is not only about concurrent writes.
+</Callout>
+
+<ProbeNote>Senior interviewers want to hear lost updates and CME, not just "you'll get an exception". Naming the Java 7 resize loop (and that Java 8 fixed *that bug* but not the broader unsafety) signals you have war stories or have read postmortems.</ProbeNote>

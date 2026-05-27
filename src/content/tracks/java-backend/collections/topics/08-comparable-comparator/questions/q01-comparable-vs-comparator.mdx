@@ -1,0 +1,75 @@
+`Comparable<T>` defines a type's **natural ordering** via `int compareTo(T other)` — the type orders itself. `Comparator<T>` defines an **external ordering** via `int compare(T a, T b)` — a separate strategy object that can be composed, reversed, or swapped at the call site.
+
+## Side-by-side
+
+| Aspect | `Comparable<T>` | `Comparator<T>` |
+| --- | --- | --- |
+| Package | `java.lang` | `java.util` |
+| Method | `int compareTo(T o)` | `int compare(T a, T b)` |
+| Lives where | On the type itself | Separate object/lambda |
+| How many per type | One (natural ordering) | Unlimited |
+| Used by | `Collections.sort(list)`, `TreeSet`, `TreeMap` | `Collections.sort(list, cmp)`, `Stream.sorted(cmp)` |
+| Composability | None | `thenComparing`, `reversed`, `nullsFirst` |
+| Modify the type? | Yes — must edit source | No — works on any type |
+
+## Comparable example
+
+```java
+public record Version(int major, int minor, int patch)
+        implements Comparable<Version> {
+
+    @Override
+    public int compareTo(Version other) {
+        int c = Integer.compare(this.major, other.major);
+        if (c != 0) return c;
+        c = Integer.compare(this.minor, other.minor);
+        if (c != 0) return c;
+        return Integer.compare(this.patch, other.patch);
+    }
+}
+
+var versions = new TreeSet<Version>(); // uses compareTo
+versions.add(new Version(1, 2, 0));
+versions.add(new Version(1, 10, 0));
+// Iterates in order: 1.2.0, 1.10.0
+```
+
+## Comparator example
+
+```java
+public record Person(String name, int age, BigDecimal salary) {}
+
+// Sort by salary descending, then by name ascending
+Comparator<Person> bySalaryThenName =
+    Comparator.comparing(Person::salary).reversed()
+              .thenComparing(Person::name);
+
+people.sort(bySalaryThenName);
+
+// Different comparator for a different view — Person never changes
+Comparator<Person> byAge = Comparator.comparingInt(Person::age);
+people.sort(byAge);
+```
+
+## When you need both
+
+A `TreeSet<T>` will use `T.compareTo` if no comparator is supplied. So:
+
+- Implement `Comparable` if there's an obvious "default" ordering — versions, dates, IDs.
+- Also accept `Comparator` at the API boundary so callers can override — `new TreeSet<>(byAgeComparator)`.
+
+## The compareTo / compare contract (same for both)
+
+Return value is a sign, not a magnitude:
+
+- Negative — first arg is "less."
+- Zero — equal in this ordering (NOT necessarily `equals`-equal).
+- Positive — first arg is "greater."
+
+The classic bug: `return a.size - b.size;` can overflow for very different ints. Use `Integer.compare(a.size, b.size)` instead — never compute differences for comparison.
+
+<Callout kind="tip" title="Lambda comparators">
+Since Java 8, comparators are functional: `Comparator<String> byLength = (a, b) -> Integer.compare(a.length(), b.length());`. Or even more compactly: `Comparator.comparingInt(String::length)`.
+</Callout>
+
+<ProbeNote>Probe: "Can a class implement Comparable to a type other than itself?" (Technically yes — `class Foo implements Comparable<Bar>` compiles, but it breaks the convention and TreeSet expects `Comparable<? super T>`.) "Why does Collections.sort use Comparable by default?" (Backward compatibility — it predates Comparator's composability; passing no comparator means "natural order".)</ProbeNote>

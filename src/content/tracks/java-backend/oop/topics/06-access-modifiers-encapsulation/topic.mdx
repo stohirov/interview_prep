@@ -1,0 +1,36 @@
+**Encapsulation in Java is enforced at two layers: the four access modifiers inside a module, and the JPMS `exports` clause between modules.** Together they let you hide implementation details from arbitrary callers — provided you actually use the smallest visibility that compiles. Default to `private`, justify everything else.
+
+## The four levels
+
+Java has four access levels but only three keywords; the unqualified case (no modifier) is **package-private**, also called *default* access. From narrowest to widest:
+
+```text
+private          -> same class (and its nested classes)
+package-private  -> same package
+protected        -> same package OR any subclass (even in a different package)
+public           -> anywhere the class is visible
+```
+
+The "anywhere the class is visible" caveat is what hands modular encapsulation to JPMS — see the JPMS question.
+
+## Inheritance is the wrinkle
+
+`protected` is the one that surprises people. It's *wider* than package-private because it adds "subclasses in any package" on top of "same package". When you see a `protected` member you should mentally annotate it: *this is part of the contract with my subclasses, and I cannot remove it without warning them.* Treat it as a public API for the subclass world.
+
+## Why fields should almost never be public
+
+A public field surrenders three things you almost always want later:
+
+1. **Invariants** — you can't validate a write because there's no setter.
+2. **Lazy initialization** — you can't compute on first read because there's no getter.
+3. **Subclass override** — fields are not polymorphic; methods are.
+
+Even `final` public fields are a one-way door: callers may inline the value at compile time (constant folding for `static final` primitives and strings), and you can never add interception later without breaking source compatibility.
+
+## JPMS — the layer above access modifiers
+
+Before Java 9, `public` meant "every classloader in the JVM can see this." That's how `sun.misc.Unsafe` leaked into half the ecosystem. JPMS adds a coarser layer: a module declares which packages it `exports`, and unexported packages stay invisible to outside modules *even if everything inside them is public*. Strong encapsulation, finally.
+
+## The rule
+
+Pick the narrowest modifier that compiles, prefer composition over `protected`, prefer methods over fields, and reach for `exports` only when you ship a library.

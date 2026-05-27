@@ -1,0 +1,87 @@
+Use `Comparator.comparing(...)` to extract a sort key, then chain `thenComparing(...)` for tiebreakers. Add `.reversed()` to flip direction, and use the primitive-specialized variants (`comparingInt`, `comparingLong`, `comparingDouble`) to avoid boxing on hot paths.
+
+## The pattern
+
+```java
+public record Employee(
+    String department,
+    String name,
+    int age,
+    BigDecimal salary
+) {}
+
+// Sort by department asc, then salary desc, then name asc, then age asc
+Comparator<Employee> cmp =
+    Comparator.comparing(Employee::department)
+              .thenComparing(Employee::salary, Comparator.reverseOrder())
+              .thenComparing(Employee::name)
+              .thenComparingInt(Employee::age);
+
+employees.sort(cmp);
+```
+
+Read top to bottom — first key wins; subsequent keys break ties.
+
+## Watch out: `.reversed()` reverses everything before it
+
+```java
+// BUG: reversed() flips the whole chain, not just salary
+var bug = Comparator.comparing(Employee::department)
+                    .thenComparing(Employee::salary)
+                    .reversed();
+// This sorts by department DESC, then salary DESC.
+```
+
+To reverse only one key, pass an explicit comparator:
+
+```java
+// GOOD: only salary descends
+var good = Comparator.comparing(Employee::department)
+                     .thenComparing(Employee::salary, Comparator.reverseOrder())
+                     .thenComparing(Employee::name);
+```
+
+## Primitive specializations avoid boxing
+
+```java
+// Boxing — each compare allocates an Integer
+Comparator.comparing(Employee::age);
+
+// No boxing — uses int directly
+Comparator.comparingInt(Employee::age);
+```
+
+`Comparator.comparing` takes a `Function<T, U extends Comparable<? super U>>` — the return type must be a reference. `Integer.compareTo` boxes its arg. For hot sort paths over large collections, prefer `comparingInt`/`comparingLong`/`comparingDouble`.
+
+## Common chains
+
+```java
+// Top-N by score
+var topN = stream.sorted(Comparator.comparingDouble(Item::score).reversed())
+                 .limit(n)
+                 .toList();
+
+// Group then sort each group
+Map<String, List<Employee>> byDept = employees.stream()
+    .collect(Collectors.groupingBy(
+        Employee::department,
+        Collectors.collectingAndThen(
+            Collectors.toList(),
+            list -> { list.sort(Comparator.comparing(Employee::name)); return list; }
+        )
+    ));
+
+// Sort stable by multiple keys (Collections.sort is stable since Java 7)
+list.sort(Comparator.comparing(Item::category)
+                    .thenComparing(Item::priority, Comparator.reverseOrder()));
+```
+
+## Stability matters when chaining
+
+`Collections.sort` and `List.sort` are **stable** — elements that compare equal keep their original relative order. This means a two-pass sort `sort by name; sort by department;` gives the same result as `sort by department then name` (the second sort preserves the name order within each department). Chained comparators are more readable; two-pass sorts work too.
+
+<Callout kind="tip" title="Static import for cleanliness">
+`import static java.util.Comparator.*;` lets you write `comparing(...)` and `reverseOrder()` without the prefix.
+</Callout>
+
+<ProbeNote>Probe: "Difference between `comparing(x).reversed()` and `comparing(x, reverseOrder())`?" (Reversed flips the whole comparator chain; passing reverseOrder reverses only that key.) "Is List.sort stable?" (Yes — backed by TimSort since Java 7.) "How do you sort by a derived value efficiently?" (Compute once and memoize, or use `comparing` with a function call — but be aware the function is invoked twice per comparison.)</ProbeNote>

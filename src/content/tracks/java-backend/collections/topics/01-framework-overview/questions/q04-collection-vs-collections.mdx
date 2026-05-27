@@ -1,0 +1,54 @@
+**`Collection` is an interface; `Collections` is a utility class.** The trailing `s` matters: `Collection<E>` (in `java.util`) is the root interface for groups of elements, while `Collections` (also in `java.util`) is a final class full of static helper methods that operate on `Collection` instances.
+
+## Collection — The Interface
+
+`Collection<E>` defines the contract every list, set, and queue obeys: `add`, `remove`, `contains`, `size`, `iterator`, and friends. You implement it (rarely directly — you typically implement `List` or `Set`), and you program against it when you want to be implementation-agnostic.
+
+```java
+public int countNonNull(Collection<?> items) {
+    int n = 0;
+    for (var x : items) if (x != null) n++;
+    return n;
+}
+// Accepts List, Set, Queue, ArrayDeque — anything that's a Collection.
+```
+
+## Collections — The Utility Class
+
+`Collections` (note the **s**) is modeled after `Arrays` and `Math` — a final class with a private constructor and dozens of static methods:
+
+- **Algorithms**: `sort`, `binarySearch`, `reverse`, `shuffle`, `min`, `max`, `frequency`, `disjoint`.
+- **Wrappers**: `unmodifiableList`, `synchronizedList`, `checkedList` — return wrapper views.
+- **Factories** (mostly superseded by Java 9 `List.of` etc.): `emptyList`, `singletonList`, `nCopies`.
+- **Bulk ops**: `addAll`, `fill`, `replaceAll`, `swap`.
+
+```java
+List<Integer> xs = new ArrayList<>(List.of(3, 1, 4, 1, 5, 9));
+Collections.sort(xs);                              // mutates in place
+int idx = Collections.binarySearch(xs, 4);         // requires sorted list
+List<Integer> readonly = Collections.unmodifiableList(xs);
+List<Integer> threadSafe = Collections.synchronizedList(xs);
+```
+
+## Side-by-Side
+
+| Aspect            | `Collection`                          | `Collections`                       |
+| ----------------- | ------------------------------------- | ----------------------------------- |
+| Kind              | Interface                             | Final utility class                 |
+| Package           | `java.util`                           | `java.util`                         |
+| Instantiable      | Implemented by `ArrayList`, `HashSet` | No — private constructor            |
+| Methods           | Instance methods (`add`, `size`)      | Static methods (`sort`, `reverse`)  |
+| Introduced        | Java 1.2                              | Java 1.2                            |
+| Typical use       | Parameter/return type                 | `Collections.method(coll)`          |
+
+## Why the Confusion Persists
+
+The naming is unfortunate — Bloch has admitted that on a do-over he might have called it `CollectionUtils`. But the convention is consistent with `Arrays` (utility for `[]`) and `Objects` (utility for `Object`). Modern Guava and Apache Commons echo this pattern with `Lists`, `Maps`, `Sets`.
+
+<Callout kind="tip" title="Quick check">
+If it's a noun describing a *thing* you'd hold, it's `Collection`. If you'd say "I want to sort/reverse/wrap this," it's `Collections`.
+</Callout>
+
+<ProbeNote>
+This is a trivial-sounding question that quickly separates candidates who've actually written Java from those who've only read about it. The interviewer is testing **vocabulary precision** — and may follow up with "name three useful methods on `Collections`" to confirm you know it's a real toolbox, not just a name to memorize.
+</ProbeNote>

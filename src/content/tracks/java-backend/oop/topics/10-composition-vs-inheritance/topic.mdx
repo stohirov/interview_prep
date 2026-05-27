@@ -1,0 +1,51 @@
+**Inheritance binds two classes together at the seams** — the subclass depends on implementation details the superclass never promised to keep stable. Composition, by contrast, talks to the wrapped object through its public interface only, the same way every other client does. *Effective Java* Item 18 ("Favor composition over inheritance") makes this the default in modern Java for a reason: most "is-a" relationships dissolve into "has-a + delegate" without losing anything.
+
+## Why inheritance is fragile
+
+When `class Sub extends Super`:
+
+- `Sub` sees the superclass's protected fields and methods — a wider API than any other client.
+- `Sub.foo()` may be invoked by `Super.bar()` in ways the superclass's javadoc never mentioned.
+- Adding a method to `Super` in version 2 can silently override (or be overridden by) something in `Sub`.
+- A bug in `Super` propagates to every subclass.
+
+The canonical example: `HashSet.addAll` happens to call `this.add` internally. A subclass that overrides both `add` and `addAll` to count insertions double-counts every element of `addAll`. Nothing in the `Set` contract said `addAll` would *not* call `add` — the subclass made an assumption about an implementation detail.
+
+## Composition + forwarding — the fix
+
+```java
+public class InstrumentedSet<E> implements Set<E> {
+    private final Set<E> s;          // the composed Set
+    private int addCount = 0;
+
+    public InstrumentedSet(Set<E> s) { this.s = s; }
+
+    @Override public boolean add(E e)              { addCount++; return s.add(e); }
+    @Override public boolean addAll(Collection<? extends E> c) {
+        addCount += c.size();
+        return s.addAll(c);
+    }
+    public int addCount() { return addCount; }
+
+    // ... forward every other Set method to s
+}
+```
+
+The wrapper talks to `s` through `Set`'s public contract. It doesn't know or care whether `addAll` calls `add` internally — it counts adds at the boundary it owns.
+
+## When inheritance still belongs
+
+Composition isn't a religion. Inheritance is appropriate when:
+
+- **Interface inheritance** (`implements`) — almost always fine; you're inheriting a contract, not implementation.
+- **True is-a within a package you control** — `AbstractList` extended by `ArrayList`, designed for extension and documented as such.
+- **Sealed hierarchies** where you control all subclasses — the closed set lets you reason about every override.
+- **Frameworks that require it** — JPA `@Entity` inheritance strategies, `extends Thread`, etc.
+
+## The decision rubric
+
+Ask: "Would I be comfortable if the superclass author added a new method in the next minor release without telling me?" If no, you don't have a true is-a relationship — you have a coincidental shape match. Wrap, don't extend.
+
+<Callout kind="tip" title="Sealed classes change the math">
+In modern Java, a `sealed interface Shape permits Circle, Square` gives you the polymorphism benefits of inheritance with the closure of composition — the compiler knows every subtype. That's often the cleanest answer.
+</Callout>

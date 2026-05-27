@@ -1,0 +1,88 @@
+**A static block runs exactly once, during class initialization, at the first active use of the class — and it can only throw *unchecked* exceptions. Anything that does escape gets wrapped in `ExceptionInInitializerError`, which permanently poisons the class.** This is one of the few places where "the JVM gives up forever" is the actual behavior.
+
+## When it runs
+
+The JVM initializes a class on the first **active use**:
+
+- `new ClassName()`
+- A call to a static method on the class
+- A read or write of a non-constant static field
+- Reflection (`Class.forName`)
+- Initialization of a subclass
+
+```java
+class Config {
+    static final Map<String,String> VALUES = new HashMap<>();
+    static {
+        System.out.println("loading config");
+        VALUES.put("env", System.getenv("ENV"));
+    }
+}
+
+Config.VALUES.get("env");        // prints "loading config" first
+Config.VALUES.get("env");        // prints nothing — already initialized
+```
+
+The static phase runs at most once per classloader. Multiple `static { }` blocks are merged with static field initializers and executed in source order.
+
+## What can it throw?
+
+A static block's *declared* throws clause doesn't exist — there is no syntax for it. So:
+
+- **Unchecked** (`RuntimeException`, `Error`): allowed; will propagate.
+- **Checked** (`IOException`, etc.): you must catch them inside the block, or wrap them.
+
+```java
+class Bad {
+    static {
+        // throw new IOException();    // compile error
+        try { Files.readString(Path.of("config.txt")); }
+        catch (IOException e) {
+            throw new ExceptionInInitializerError(e);   // wrap explicitly
+        }
+    }
+}
+```
+
+## ExceptionInInitializerError — the poison
+
+Any unchecked exception that escapes a static initializer is wrapped:
+
+```java
+class Doomed {
+    static int x = 1 / 0;           // ArithmeticException
+}
+
+try { Doomed.x = 5; }
+catch (ExceptionInInitializerError e) { /* first touch */ }
+
+try { Doomed.x = 5; }
+catch (NoClassDefFoundError e) { /* subsequent touches */ }
+```
+
+The first attempt throws `ExceptionInInitializerError` with the original cause. *Every subsequent use* throws `NoClassDefFoundError` (state: *erroneous*), even though the class file was loaded fine. The class is permanently unusable in this classloader — there is no retry.
+
+<Callout kind="danger" title="Operational consequence">
+A flaky network call in a `static { }` block can take down your service permanently. Move IO out of static init, or wrap it with retry-and-default logic. "Restart the app to recover" is the only fix once a class enters the erroneous state.
+</Callout>
+
+## A note on order
+
+Static blocks and static field initializers are merged in source order:
+
+```java
+class Order {
+    static int a = log(1);
+    static { log(2); }
+    static int b = log(3);
+    static { log(4); }
+    static int log(int n) { System.out.println(n); return n; }
+}
+// Output: 1 2 3 4
+```
+
+## Thread safety
+
+The JVM guarantees that class initialization is *thread-safe* and happens *at most once* — even if N threads race to touch the class, only one runs the initializer, and the others block until it completes. This is the foundation of the Initialization-on-Demand Holder idiom for safe lazy singletons.
+
+<ProbeNote>The interviewer is checking three things: (1) you know when class init triggers, (2) you know checked exceptions don't escape, and (3) you know the consequence — `ExceptionInInitializerError` once, `NoClassDefFoundError` forever after. The third point is what separates production-experienced engineers from textbook learners.</ProbeNote>

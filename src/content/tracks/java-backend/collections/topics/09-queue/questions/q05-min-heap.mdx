@@ -1,0 +1,90 @@
+`PriorityQueue` is Java's binary min-heap. Two classic interview problems map cleanly to it: **k smallest elements** (bounded max-heap of size k) and **merge k sorted lists** (min-heap of list heads). Both are O(n log k) — better than the O(n log n) sort-then-pick approach.
+
+## Problem 1: k smallest elements in a stream
+
+Trick: use a **max-heap of size k**. Keep the k smallest seen so far; the root is the largest of those, ready to be evicted when a smaller element arrives.
+
+```java
+public static List<Integer> kSmallest(int[] nums, int k) {
+    if (k <= 0 || nums.length == 0) return List.of();
+
+    // Max-heap of size k: largest of the "current top k" sits at the root
+    PriorityQueue<Integer> maxHeap = new PriorityQueue<>(k, Comparator.reverseOrder());
+
+    for (int n : nums) {
+        if (maxHeap.size() < k) {
+            maxHeap.offer(n);
+        } else if (n < maxHeap.peek()) {
+            maxHeap.poll();      // evict the current largest
+            maxHeap.offer(n);    // insert the smaller value
+        }
+    }
+
+    return maxHeap.stream()
+                  .sorted()       // PriorityQueue iteration is NOT sorted
+                  .toList();
+}
+```
+
+**Complexity:** O(n log k) time, O(k) space. For n=1M and k=10, this is roughly 10x faster than `Arrays.sort(nums)` followed by `Arrays.copyOf(nums, k)`.
+
+## Problem 2: merge k sorted lists
+
+Use a min-heap keyed on the current head of each list. Pop the smallest head, advance that list, push the new head. Repeat until all lists are exhausted.
+
+```java
+public record ListNode(int val, ListNode next) {}
+
+public static ListNode mergeKLists(List<ListNode> lists) {
+    PriorityQueue<ListNode> minHeap = new PriorityQueue<>(
+        Comparator.comparingInt(ListNode::val)
+    );
+
+    // Seed with each list's head
+    for (ListNode head : lists) {
+        if (head != null) minHeap.offer(head);
+    }
+
+    ListNode dummy = new ListNode(0, null);
+    ListNode tail = dummy;
+
+    while (!minHeap.isEmpty()) {
+        ListNode smallest = minHeap.poll();
+        tail = new ListNode(smallest.val(), null);
+        // ... append tail to result (depending on your linked-list model)
+        if (smallest.next() != null) {
+            minHeap.offer(smallest.next());
+        }
+    }
+
+    return dummy.next();
+}
+```
+
+**Complexity:** O(N log k) time where N is the total element count and k is the number of lists. Compare to the naive "merge two at a time" approach: O(N k) — significantly worse for large k.
+
+## Why max-heap for k smallest (and vice versa)
+
+Counterintuitive but key: **to keep the k smallest, you need fast access to the largest** of them — the one to kick out when a smaller arrival shows up. A max-heap gives you that in O(1) at the root.
+
+Symmetrically: to keep the k largest, use a **min-heap** of size k. The smallest of the top-k sits at the root, ready for eviction.
+
+## PriorityQueue gotchas during interviews
+
+- **Default is min-heap.** For max-heap, pass `Comparator.reverseOrder()` or `Collections.reverseOrder()`.
+- **`peek()` returns the root (min for min-heap), not "the next element."**
+- **No bulk-update method.** Removing a non-root element by value (`remove(Object)`) is O(n) — it walks the array linearly. Use `pollFirst`-style only.
+- **Iteration is NOT sorted.** Drain with `poll()` if order matters.
+
+<Callout kind="tip" title="Initial capacity hint">
+`new PriorityQueue<>(k, comparator)` pre-sizes the array to avoid reallocations. For known k, always pass it.
+</Callout>
+
+<ComplexityTable rows={[
+  {op: "offer (add)", best: "O(1)", average: "O(log n)", worst: "O(log n)", note: "Sift-up"},
+  {op: "poll (extract min)", best: "O(log n)", average: "O(log n)", worst: "O(log n)", note: "Sift-down"},
+  {op: "peek", best: "O(1)", average: "O(1)", worst: "O(1)", note: "Array index 0"},
+  {op: "remove(Object)", best: "O(n)", average: "O(n)", worst: "O(n)", note: "Linear search + sift"}
+]} />
+
+<ProbeNote>Probe: "Why not just sort and take the first k?" (O(n log n) vs O(n log k) — for small k this is a real win.) "When does QuickSelect beat a heap for k-smallest?" (When you can mutate the input and have all data in memory — QuickSelect is O(n) average. Heap wins for streaming data where you don't see all elements at once.) "What if k changes dynamically?" (Heap adapts cleanly; QuickSelect would need a re-run.)</ProbeNote>

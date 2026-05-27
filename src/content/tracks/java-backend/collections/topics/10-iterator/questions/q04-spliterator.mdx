@@ -1,0 +1,84 @@
+**A `Spliterator` is a "splittable iterator" — it can be partitioned into two halves repeatedly, letting the Stream API process pieces in parallel via fork-join.**
+
+## The interface
+
+```java
+interface Spliterator<T> {
+    boolean tryAdvance(Consumer<? super T> action);  // one element
+    Spliterator<T> trySplit();                       // split or null
+    long estimateSize();                             // size hint
+    int characteristics();                           // bit flags
+}
+```
+
+- `tryAdvance` consumes one element and returns `false` when exhausted.
+- `trySplit` returns a new spliterator covering a prefix of the elements; `this` keeps the suffix. Returning `null` means "can't split further" — the leaf case.
+- `estimateSize` is exact when `SIZED` is set, otherwise a hint.
+
+## Powering parallel streams
+
+```java
+list.parallelStream()
+    .filter(...)
+    .map(...)
+    .reduce(...);
+```
+
+Under the hood:
+1. `list.spliterator()` returns the root.
+2. Fork-join recursively calls `trySplit()` until pieces are small enough.
+3. Each leaf runs `forEachRemaining()` on a worker thread.
+4. Results combine back up the tree.
+
+The quality of parallelism depends entirely on how well `trySplit` divides the workload. `ArrayList` splits in O(1) — slice the array. `LinkedList` has to walk halfway — terrible for parallel.
+
+## Characteristics
+
+| Flag         | Meaning                                                    |
+|--------------|------------------------------------------------------------|
+| `ORDERED`    | Encounter order is meaningful (lists, `LinkedHashSet`).    |
+| `SORTED`     | Elements follow a defined sort order.                      |
+| `DISTINCT`   | No duplicates (`Set`).                                     |
+| `SIZED`      | `estimateSize()` is exact, fixed.                          |
+| `SUBSIZED`   | All children of `trySplit` are also `SIZED`.               |
+| `NONNULL`    | No element is `null`.                                      |
+| `IMMUTABLE`  | Source can't be modified.                                  |
+| `CONCURRENT` | Source can be safely modified concurrently.                |
+
+These flags let the pipeline skip work — e.g. `distinct()` on a `DISTINCT` spliterator is a no-op; `sorted()` on a `SORTED` one (with a matching comparator) is too.
+
+## Custom example
+
+```java
+record Range(long lo, long hi) {
+    Spliterator.OfLong spliterator() {
+        return new Spliterators.AbstractLongSpliterator(
+            hi - lo, Spliterator.SIZED | Spliterator.SUBSIZED
+                   | Spliterator.ORDERED | Spliterator.DISTINCT
+                   | Spliterator.NONNULL | Spliterator.IMMUTABLE) {
+
+            long cur = lo;
+
+            public boolean tryAdvance(LongConsumer action) {
+                if (cur >= hi) return false;
+                action.accept(cur++);
+                return true;
+            }
+
+            public Spliterator.OfLong trySplit() {
+                long mid = (cur + hi) >>> 1;
+                if (mid - cur < 1024) return null;
+                long oldLo = cur;
+                cur = mid;
+                return LongStream.range(oldLo, mid).spliterator();
+            }
+        };
+    }
+}
+```
+
+<Callout kind="tip" title="Default spliterator is mediocre">
+`Spliterable.spliterator()` has a default that calls `iterator()` and wraps it. It works but parallelizes badly — no size, splits by buffering. If you build a custom data structure intended for streams, override `spliterator()`.
+</Callout>
+
+<ProbeNote>Probe: "When is parallelStream actually faster than sequential?" Rough rule: CPU-bound, stateless ops, data structure splits in O(1) (arrays, `ConcurrentHashMap`), N large enough that fork-join overhead is amortized. For `LinkedList` or tiny streams, parallel is usually slower.</ProbeNote>

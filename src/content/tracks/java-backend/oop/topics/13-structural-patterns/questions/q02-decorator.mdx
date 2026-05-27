@@ -1,0 +1,58 @@
+A Decorator preserves the component's interface and adds responsibility by wrapping. The textbook example is a coffee shop where every add-on (milk, sugar, whipped cream) is a wrapper that contributes to the final price and description.
+
+## The full implementation
+
+```java
+public interface Beverage {
+    String description();
+    double cost();
+}
+
+public class Espresso implements Beverage {
+    public String description() { return "Espresso"; }
+    public double cost() { return 1.99; }
+}
+
+public abstract class CondimentDecorator implements Beverage {
+    protected final Beverage beverage;
+    protected CondimentDecorator(Beverage beverage) {
+        this.beverage = beverage;
+    }
+}
+
+public class Milk extends CondimentDecorator {
+    public Milk(Beverage b) { super(b); }
+    public String description() { return beverage.description() + ", milk"; }
+    public double cost() { return beverage.cost() + 0.30; }
+}
+
+public class Sugar extends CondimentDecorator {
+    public Sugar(Beverage b) { super(b); }
+    public String description() { return beverage.description() + ", sugar"; }
+    public double cost() { return beverage.cost() + 0.10; }
+}
+```
+
+## Using it
+
+```java
+Beverage order = new Sugar(new Milk(new Milk(new Espresso())));
+System.out.println(order.description()); // Espresso, milk, milk, sugar
+System.out.println(order.cost());        // 2.69
+```
+
+The composition reads inside-out: the innermost `Espresso` does the base work; each surrounding wrapper extends the previous result. Reverse the order and the description text changes but the price doesn't — addition is commutative; concatenation is not. That asymmetry is itself a clue to which decorators are order-sensitive.
+
+## Why an abstract base class
+
+`CondimentDecorator` exists solely to hold the wrapped `beverage` reference so concrete decorators don't repeat the constructor and field. It's optional — pure interfaces work too — but the abstract base is the cleanest way to ensure every decorator follows the wrapping contract.
+
+## Where the JDK uses this
+
+The classic example is the I/O hierarchy: `new BufferedInputStream(new GZIPInputStream(new FileInputStream(path)))`. Each wrapper preserves the `InputStream` interface and adds one capability — buffering, decompression, byte source — exactly the Beverage shape with different verbs.
+
+<Callout kind="tip" title="Decorator vs an enum of options">
+For two or three orthogonal flags, an `EnumSet<Option>` and a switch inside one class is often simpler than five decorator classes. Reach for Decorator when (a) the behaviors are open-ended (third parties can add new ones), or (b) wrappers carry their own state — a `RetryDecorator` with backoff config, a `CachingDecorator` with its own map.
+</Callout>
+
+<ProbeNote>Interviewers want to see two things: (1) the wrapper implements the same interface as the component, so wrappers compose; (2) each decorator's method calls `wrapped.method()` first and then adds its contribution — never duplicates the wrapped logic. Forgetting either turns the answer into copy-paste inheritance.</ProbeNote>

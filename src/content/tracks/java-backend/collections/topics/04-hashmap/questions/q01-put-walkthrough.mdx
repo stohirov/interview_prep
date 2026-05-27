@@ -1,0 +1,43 @@
+`put(k, v)` hashes the key, finds a bucket, and either replaces an existing entry with an equal key or appends a new node — treeifying or resizing if thresholds are crossed.
+
+## Step by step
+
+**1. Compute the spread hash.** The raw `hashCode()` is mixed so high bits influence the index:
+
+```java
+static final int hash(Object key) {
+    int h;
+    return (key == null) ? 0 : (h = key.hashCode()) ^ (h >>> 16);
+}
+```
+
+**2. Lazy-allocate the table.** On the first `put`, `resize()` allocates a `Node[16]`.
+
+**3. Locate the bucket.** Index = `(n - 1) & hash` where `n` is the table length (always a power of two, so `n-1` is a low-bit mask).
+
+**4. Empty bucket?** Drop a new `Node` there and we're done.
+
+**5. Non-empty bucket — three cases:**
+
+- The first node's key matches (same hash, `equals` true): remember it for replacement.
+- The first node is a `TreeNode`: delegate to `putTreeVal`, which walks the red-black tree.
+- Otherwise: walk the linked list, counting nodes. If a match is found, remember it. If not, append a new node at the tail.
+
+**6. Treeify check.** If the chain length reaches `TREEIFY_THRESHOLD = 8` *and* `table.length >= MIN_TREEIFY_CAPACITY = 64`, convert the bucket to a red-black tree. If the table is smaller, resize instead — doubling spreads entries before paying for tree overhead.
+
+**7. Replace or insert.** If a matching key was found, overwrite the value and return the old one. Otherwise increment `size` and `modCount`.
+
+**8. Resize check.** If `++size > threshold` (`capacity * loadFactor`, default 12), call `resize()` to double the table.
+
+```java
+Map<String, Integer> m = new HashMap<>();
+m.put("a", 1);  // bucket = (16-1) & hash("a"); table allocated
+m.put("a", 2);  // same bucket, equals match, replaces 1 -> 2
+m.put("b", 3);  // new bucket or appended chain
+```
+
+<Callout kind="info" title="Why count during the walk?">
+The list walk tracks `binCount` precisely so the treeify decision is made at the exact moment the 8th node is linked — not on every `put`.
+</Callout>
+
+<ProbeNote>The interviewer wants to see you connect the dots: spread hash → bit-mask index → list/tree fallback → resize. Naming the constants (8, 64, 0.75, 16) shows you've actually opened the source, not just read a blog.</ProbeNote>

@@ -1,0 +1,52 @@
+**`CopyOnWriteArrayList` is right when reads vastly outnumber writes and the list is small. It is wrong almost everywhere else, because every single mutation copies the entire backing array.**
+
+## When it's the right choice
+
+- **Listener / observer registries** — you register a handful of listeners at startup and iterate them on every event. Reads are constant; writes are rare.
+- **Mostly-static config snapshots** — feature flags, route tables, plugin lists. Occasional reload, constant lookup.
+- **Iteration under concurrent modification** — you want callers to iterate without locking, and you don't care if they see a slightly stale snapshot.
+
+In all these cases, you get lock-free O(1) reads and an iterator that *never* throws `ConcurrentModificationException`.
+
+## When it's the wrong choice
+
+- **Write-heavy workloads** — every `add`, `set`, `remove` is O(n) time **and** O(n) transient memory. A list of 10,000 elements receiving 1000 writes/sec copies 10 million references per second.
+- **Large lists, any writes** — even occasional writes get expensive once n grows. A 1 MB array means 1 MB of garbage per write.
+- **You need linearizable reads after writes** — readers holding an old snapshot won't see the update until they re-fetch the iterator. If you need "read sees latest write", use `ConcurrentHashMap` (for keyed access) or external synchronization.
+
+## Code
+
+```java
+// Right: listener pattern
+private final List<EventListener> listeners = new CopyOnWriteArrayList<>();
+
+public void fire(Event e) {
+    for (EventListener l : listeners) {   // no lock, no CME
+        l.onEvent(e);
+    }
+}
+
+public void register(EventListener l) {   // rare, O(n) copy is fine
+    listeners.add(l);
+}
+```
+
+```java
+// Wrong: building a list concurrently
+List<String> bad = new CopyOnWriteArrayList<>();
+IntStream.range(0, 100_000).parallel()
+    .forEach(i -> bad.add("item-" + i));  // 100k array copies, OOM-prone
+```
+
+<Callout kind="warn" title="addAll is also O(n+m)">
+Even `addAll(collection)` does a single copy, but it's still proportional to the combined size. Don't think "bulk add" makes it cheap.
+</Callout>
+
+## Alternative for write-heavy concurrent lists
+
+There isn't a great drop-in. Options:
+- `Collections.synchronizedList(new ArrayList<>())` — locks per operation, but iteration still needs manual sync.
+- `ConcurrentLinkedQueue` if you only need FIFO order.
+- A `ConcurrentHashMap<Integer, T>` keyed by insertion index, if you can tolerate sparse keys after removal.
+
+<ProbeNote>Follow-up to expect: "What if my list has 10 listeners and they change once per hour?" — perfect fit. "What if it has 10,000 entries and changes every second?" — never use it.</ProbeNote>

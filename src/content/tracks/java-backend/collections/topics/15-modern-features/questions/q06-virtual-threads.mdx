@@ -1,0 +1,105 @@
+**Virtual threads (Java 21+) make threads cheap enough to spawn millions of, which changes three things about how you use collections: `ThreadLocal` becomes a scaling concern, the "thread pool + bounded queue" pattern often becomes unnecessary, and `synchronized` used to pin virtual threads to their carrier — though JEP 491 (Java 24) largely fixed that.**
+
+## The mental shift
+
+The classic pre-21 server pattern:
+
+```
+Bounded thread pool (200 threads)
+  |
+  +-- BlockingQueue<Task>   <-- backpressure on overflow
+        |
+        +-- workers take(), block on I/O, return
+```
+
+You bounded the pool because OS threads cost ~1 MB of stack each. The queue + pool combination was a workaround for that cost.
+
+The Java 21+ pattern:
+
+```
+One virtual thread per request — spawn freely
+  |
+  +-- thread blocks on I/O directly (DB call, HTTP call, etc.)
+  |
+  +-- JVM parks the virtual thread, frees the carrier OS thread
+  +-- another virtual thread runs on the carrier
+```
+
+Virtual threads cost ~hundreds of bytes each. A modern JVM can run 1M+ of them. So:
+
+```java
+// Old: bounded pool, indirect
+ExecutorService pool = Executors.newFixedThreadPool(200);
+pool.submit(() -> handleRequest(req));
+
+// New: virtual thread per task
+Thread.startVirtualThread(() -> handleRequest(req));
+
+// Or: per-task executor for structured shutdown
+try (var exec = Executors.newVirtualThreadPerTaskExecutor()) {
+    exec.submit(() -> handleRequest(req));
+}
+```
+
+## Consequence 1: ThreadLocal at scale becomes a problem
+
+`ThreadLocal` allocates per-thread storage. With 200 OS threads × a handful of ThreadLocal entries each, total cost is negligible. With 1M virtual threads × a few ThreadLocals (e.g. request context, MDC, security context), suddenly you're looking at gigabytes of `ThreadLocal` storage.
+
+Prefer `ScopedValue` (JEP 446, finalized in Java 25) for context that's bound during a call tree:
+
+```java
+private static final ScopedValue<User> CURRENT_USER = ScopedValue.newInstance();
+
+ScopedValue.where(CURRENT_USER, alice).run(() -> {
+    handleRequest();   // anywhere in this call tree: CURRENT_USER.get() == alice
+});
+```
+
+`ScopedValue` is immutable, scoped to a dynamic extent (the lambda above), and doesn't accumulate per-thread storage. It also inherits cleanly across structured concurrency boundaries.
+
+## Consequence 2: synchronized used to pin virtual threads (largely fixed in Java 24)
+
+In Java 21–23, when a virtual thread entered a `synchronized` block and then blocked (e.g. inside `synchronized(x) { networkCall(); }`), it would **pin** itself to the underlying carrier OS thread for the entire duration of the synchronized region. This defeated the cheap-blocking advantage of virtual threads — if all your carrier threads were pinned, no other virtual threads could make progress.
+
+This drove a recommendation: prefer `ReentrantLock` over `synchronized`, because `ReentrantLock` correctly parks the virtual thread.
+
+**JEP 491 (Java 24)** changed the JVM so `synchronized` no longer pins virtual threads in almost all cases. As of Java 24+, the practical difference between `synchronized` and `ReentrantLock` for virtual threads is negligible.
+
+<Callout kind="warn" title="Verify">
+TODO: confirm JEP 491 status — fully shipped in Java 24, refined in Java 25. Some edge cases (e.g. native frame holding the monitor) may still pin. Check against current JDK 25 source if precise edge-case behavior matters.
+</Callout>
+
+## Consequence 3: collection choice still matters
+
+Even with JEP 491 unblocking `synchronized`, contention is real:
+
+- **Avoid** `Collections.synchronizedMap(new HashMap<>())` for shared state across many virtual threads — a million threads serializing on one monitor is a throughput collapse, regardless of pinning.
+- **Prefer** `ConcurrentHashMap` — lock striping spreads contention across many bins.
+- **For unbounded producer-consumer**: `ConcurrentLinkedQueue` (lock-free) is often the right choice when virtual threads play both producer and consumer roles.
+- **For bounded backpressure**: `LinkedBlockingQueue` still works — the blocking semantics now compose cleanly with virtual threads (block freely, no carrier cost).
+
+## Concrete example
+
+```java
+// Server using virtual thread per request + concurrent collections
+ConcurrentHashMap<String, Session> sessions = new ConcurrentHashMap<>();
+
+try (var exec = Executors.newVirtualThreadPerTaskExecutor()) {
+    while (running) {
+        Socket s = serverSocket.accept();
+        exec.submit(() -> {
+            Session session = sessions.computeIfAbsent(s.getRemoteSocketAddress().toString(),
+                                                       Session::new);
+            handle(s, session);   // blocks on I/O, no carrier cost
+        });
+    }
+}
+```
+
+No pool sizing, no queue, no `ThreadLocal` plumbing. The virtual thread per task model + concurrent collections is most of what you need.
+
+<Callout kind="tip" title="Migration heuristic">
+For new code on Java 21+: virtual thread per task by default. For existing code: leave it alone unless you have a measured scalability problem — pool-based code keeps working.
+</Callout>
+
+<ProbeNote>Likely follow-up: "Should I rewrite my `ThreadLocal` to `ScopedValue` everywhere?" — No. `ThreadLocal` is fine for a handful of values and a few thousand threads. Migrate only if you measure memory pressure or you want the cleaner immutable/dynamic-scope semantics.</ProbeNote>

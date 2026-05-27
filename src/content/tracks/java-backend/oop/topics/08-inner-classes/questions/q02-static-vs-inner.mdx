@@ -1,0 +1,94 @@
+**A static nested class is an ordinary class that just lives inside another class's namespace; a non-static inner class holds a hidden reference to its enclosing instance.** That one hidden reference (`this$0`) is the source of every meaningful difference: construction syntax, memory footprint, serialization behavior, and the classic enclosing-instance memory leak.
+
+## The hidden field
+
+```java
+class Outer {
+    int x;
+    class Inner { void use() { System.out.println(x); } }
+    static class Nested { /* no enclosing reference */ }
+}
+```
+
+After compilation:
+
+```text
+Outer$Inner.class:
+  - field synthetic Outer this$0
+  - constructor takes Outer as its first argument
+  - body of use() reads this$0.x
+
+Outer$Nested.class:
+  - no synthetic field
+  - constructor takes only its declared args
+```
+
+`Inner` is structurally larger by one reference per instance, and every method that touches an `Outer` member compiles to an extra `getfield this$0` indirection. `Nested` looks like any other class.
+
+## Construction syntax
+
+```java
+Outer o = new Outer();
+Outer.Nested n = new Outer.Nested();   // no Outer needed
+Outer.Inner  i = o.new Inner();        // weird — must qualify with an outer
+```
+
+You cannot construct an `Inner` without an enclosing `Outer` instance. The compiler will refuse `new Outer.Inner()` unless you're in an instance context of `Outer`.
+
+## Memory implications
+
+The hidden reference keeps the enclosing instance reachable for the entire lifetime of every inner instance.
+
+```java
+class HugeOuter {
+    byte[] cache = new byte[1024 * 1024 * 100];  // 100 MB
+
+    Runnable makeTask() {
+        return new Runnable() {                  // anonymous inner class
+            @Override public void run() { /* doesn't use cache */ }
+        };
+    }
+}
+
+Runnable r = new HugeOuter().makeTask();
+// HugeOuter is unreachable... except r holds an anonymous Inner
+// whose this$0 points to it. The 100 MB stays alive.
+```
+
+A static nested class wouldn't capture, so the 100 MB would be eligible for GC. This is the foundation of the leak question.
+
+## Serialization
+
+`Inner` carries `Outer` along when serialized:
+
+```java
+new Outer().new Inner();          // ser includes the Outer instance
+```
+
+That's a footgun — your serialized inner class instances drag in their entire enclosing context, including fields you never intended to persist. Static nested classes serialize like ordinary classes.
+
+## Statics inside
+
+Pre-Java-16, inner classes couldn't declare `static` members (the language said "an inner class can't own state independent of its enclosing instance"). Java 16 lifted this for records and for general nested classes. Static nested classes were always free to declare statics.
+
+## When to choose which
+
+| Need | Use |
+|---|---|
+| Helper that doesn't reference enclosing state | Static nested |
+| Iterator/view tightly bound to enclosing state | Inner |
+| Anything where you might keep references long-term | Static nested (avoid leaks) |
+| Anything serializable | Static nested |
+| Anonymous one-line callback | Lambda if possible, anonymous otherwise (but be aware of the `this$0` capture) |
+
+## The Effective Java rule
+
+> "If you declare a member class that does not require access to an enclosing instance, *always* put the `static` modifier in its declaration." — Item 24.
+
+The advice is rarely wrong. The default should be `static`; promote to inner only when you genuinely need the enclosing instance.
+
+<Callout kind="warn" title="The IDE doesn't help">
+IntelliJ and Eclipse don't auto-suggest `static` on nested classes. The pattern has to come from habit, code review, or a static analysis rule (SpotBugs has `SIC_INNER_SHOULD_BE_STATIC`).
+</Callout>
+
+<ProbeNote>The interviewer wants the `this$0` synthetic field, the construction syntax difference, and the memory/serialization implications. Strong candidates connect it to Effective Java Item 24 and the leak pattern — both will come up directly in later questions.</ProbeNote>

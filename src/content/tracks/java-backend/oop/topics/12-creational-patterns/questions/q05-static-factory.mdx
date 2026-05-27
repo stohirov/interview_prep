@@ -1,0 +1,88 @@
+***Effective Java* Item 1** lists five reasons static factory methods beat constructors: they have names, they don't have to create a new object, they can return any subtype, they can return different types depending on input, and they can be defined before the returned class exists (useful in service-provider frameworks). Modern JDK is saturated with examples — `List.of`, `Optional.of`, `Integer.valueOf`, `Files.newBufferedReader` — because the trade-offs land overwhelmingly in their favor.
+
+## The five advantages
+
+### 1. They have names
+
+A constructor is named after the class. A static factory can describe what it does:
+
+```java
+new BigInteger(int, int, Random);           // makes a random prime — but who can tell?
+BigInteger.probablePrime(int, Random);      // self-documenting
+```
+
+When a class needs *multiple constructors with the same signature*, only one of them can be the constructor — the rest need different parameter types or default-value tricks. Static factories sidestep this:
+
+```java
+public static Point cartesian(double x, double y) { return new Point(x, y); }
+public static Point polar(double r, double theta) {
+    return new Point(r * Math.cos(theta), r * Math.sin(theta));
+}
+```
+
+### 2. They don't have to create a new object
+
+```java
+public static Boolean valueOf(boolean b) {
+    return b ? Boolean.TRUE : Boolean.FALSE;   // cached instances
+}
+```
+
+`Integer.valueOf(int)` caches values in `-128..127`. `BigInteger.ZERO/ONE/TEN` are cached. `Optional.empty()` returns a singleton. Performance + memory wins without changing the call site.
+
+### 3. They can return any subtype
+
+A constructor returns exactly the named class. A static factory can return a subtype, which lets you hide implementation classes entirely:
+
+```java
+public interface List<E> {
+    static <E> List<E> of(E... elements) {
+        return switch (elements.length) {
+            case 0  -> ImmutableCollections.EMPTY_LIST;        // private subtype
+            case 1  -> new ImmutableCollections.List12<>(elements[0]);
+            case 2  -> new ImmutableCollections.List12<>(elements[0], elements[1]);
+            default -> new ImmutableCollections.ListN<>(elements);
+        };
+    }
+}
+```
+
+Caller code says `List.of(1, 2, 3)` — `List12`, `ListN`, `EMPTY_LIST` are package-private implementation details. The JDK is free to swap them in a future version.
+
+### 4. They can return different runtime types
+
+`EnumSet.noneOf(elementType)` returns a `RegularEnumSet` (a bitvector) if the enum has up to 64 values, or a `JumboEnumSet` (a bitvector array) otherwise. Callers always see `EnumSet<E>` — the choice is invisible. A constructor couldn't do this.
+
+### 5. The returned class doesn't need to exist when the factory is written
+
+Service-provider frameworks (JDBC, ServiceLoader) work because the factory method (`DriverManager.getConnection`) can dispatch to driver classes loaded at runtime. The factory is written once; the actual returned types come from third-party JARs.
+
+```java
+Connection conn = DriverManager.getConnection(url);   // returns a class shipped by Postgres or MySQL
+```
+
+## The two disadvantages
+
+1. **Classes with only static factories (no public/protected constructor) cannot be subclassed.** That's arguably a feature (favor composition), but it's a constraint to know.
+
+2. **Static factories are hard to find in javadoc.** Constructors are highlighted; factory methods are listed among regular methods. Conventional names help — Java's de facto vocabulary:
+
+   - `of` / `valueOf` — concise creation: `List.of(1,2,3)`, `BigInteger.valueOf(42)`.
+   - `from` — converting from a related type: `Date.from(instant)`.
+   - `instance` / `getInstance` — return an instance, perhaps cached.
+   - `create` / `newInstance` — fresh instance every call.
+   - `getType` / `newType` — return a type-specific instance: `Files.newBufferedReader(path)`.
+
+## When to still use a constructor
+
+- The class is meant to be subclassed (every constructor parameter goes to a `super(...)` call).
+- The class is a value record with one obvious construction: `new Point(1, 2)`.
+- Frameworks require a no-arg constructor (JPA entities, Jackson DTOs).
+
+For most business code, **default to static factories** with descriptive names.
+
+<Callout kind="tip" title="Records still get factories">
+A `record User(String name, int age) {}` can still have static factories: `User.of(...)`, `User.guest()`, `User.fromJson(...)`. The compiler-generated canonical constructor is one creation path; factories add named, validated, or cached ones.
+</Callout>
+
+<ProbeNote>The interviewer wants at least three of the five reasons, with concrete JDK examples (`List.of`, `Optional.of`, `Integer.valueOf` is the safe trio). The naming conventions (`of`, `valueOf`, `from`) signal you've read the JDK source. A common follow-up: "When is a constructor still better?" — for frameworks that reflect on constructors (JPA, Jackson) and for genuinely extension-friendly classes.</ProbeNote>

@@ -1,0 +1,125 @@
+**Builder belongs when a constructor would have four-or-more parameters, several of them optional, and you want the resulting object to be immutable.** Telescoping constructors (one for each combination of optional params) explode combinatorially and silently mis-order positional arguments. JavaBeans-style setters compromise immutability and let you observe a partially-initialized object. The Builder gives you a fluent, readable, immutable result.
+
+## The pain — telescoping constructors
+
+```java
+public class NutritionFacts {
+    public NutritionFacts(int servingSize, int servings) { ... }
+    public NutritionFacts(int servingSize, int servings, int calories) { ... }
+    public NutritionFacts(int servingSize, int servings, int calories, int fat) { ... }
+    public NutritionFacts(int servingSize, int servings, int calories, int fat, int sodium) { ... }
+    // ... 5 more
+}
+
+new NutritionFacts(240, 8, 100, 0, 35, 27);   // what does '35' mean?
+```
+
+Six positional ints. The compiler can't catch a swap of `sodium` and `carbohydrate` if both are `int`. Adding a new optional field requires another constructor.
+
+## The pain — JavaBeans pattern
+
+```java
+NutritionFacts n = new NutritionFacts();
+n.setServingSize(240);
+n.setServings(8);
+n.setCalories(100);
+// ... 7 more setters
+```
+
+Readable, but:
+
+- The object exists in invalid states between `new` and the last setter.
+- Cross-field validation can't run until "the end" — but there's no defined end.
+- The object can't be made immutable; setters preclude `final`.
+
+## The Builder
+
+```java
+public final class NutritionFacts {
+    private final int servingSize, servings, calories, fat, sodium, carbohydrate;
+
+    private NutritionFacts(Builder b) {
+        this.servingSize  = b.servingSize;
+        this.servings     = b.servings;
+        this.calories     = b.calories;
+        this.fat          = b.fat;
+        this.sodium       = b.sodium;
+        this.carbohydrate = b.carbohydrate;
+    }
+
+    public static class Builder {
+        // required
+        private final int servingSize;
+        private final int servings;
+        // optional, with defaults
+        private int calories     = 0;
+        private int fat          = 0;
+        private int sodium       = 0;
+        private int carbohydrate = 0;
+
+        public Builder(int servingSize, int servings) {
+            this.servingSize = servingSize;
+            this.servings    = servings;
+        }
+        public Builder calories(int v)     { this.calories = v; return this; }
+        public Builder fat(int v)          { this.fat = v; return this; }
+        public Builder sodium(int v)       { this.sodium = v; return this; }
+        public Builder carbohydrate(int v) { this.carbohydrate = v; return this; }
+
+        public NutritionFacts build() {
+            if (calories < 0) throw new IllegalArgumentException();
+            // ... other cross-field validation
+            return new NutritionFacts(this);
+        }
+    }
+}
+
+// Usage
+NutritionFacts cola = new NutritionFacts.Builder(240, 8)
+    .calories(100)
+    .sodium(35)
+    .carbohydrate(27)
+    .build();
+```
+
+**What you get:**
+
+- Required fields are constructor parameters of the builder — the compiler enforces them.
+- Optional fields are named method calls — readable, can't be mis-ordered, defaultable.
+- The product is immutable — every field `final`, no setters.
+- Cross-field validation runs once, in `build()`, before the product is exposed.
+
+## When NOT to use Builder
+
+- **2-3 fields, all required.** Just use a constructor or a record.
+- **Records:** `record Point(int x, int y) {}` — no Builder needed.
+- **Mutable objects.** If callers will modify the object later, setters are fine.
+
+## Modern Java alternatives
+
+- **Records with static factory methods**: `Point.of(1, 2)`. Records make Builder unnecessary for the simple immutable-data case.
+- **Records + canonical constructor validation**: catches invariant violations at construction.
+- **Sealed records + factory methods**: typed alternatives.
+
+But for objects with 4+ parameters and a mix of required/optional, Builder still earns its keep.
+
+## A JDK example
+
+`java.net.http.HttpRequest`:
+
+```java
+HttpRequest req = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.example.com"))
+    .GET()
+    .timeout(Duration.ofSeconds(10))
+    .header("Accept", "application/json")
+    .build();
+```
+
+`StringBuilder` is not a GoF Builder — it's a *mutable* string buffer. Easy confusion in interviews.
+
+<Callout kind="tip" title="Lombok's @Builder">
+For boilerplate-heavy domains, Lombok's `@Builder` annotation generates the entire pattern from a class declaration. Saves typing; the result behaves identically.
+</Callout>
+
+<ProbeNote>The interviewer wants the threshold ("4+ params with optional ones, immutable result") and the contrast with telescoping constructors and JavaBeans. A junior probe: "Why is it a static nested class?" — because the builder needs access to private fields of the product, and being static avoids capturing an unnecessary outer reference.</ProbeNote>

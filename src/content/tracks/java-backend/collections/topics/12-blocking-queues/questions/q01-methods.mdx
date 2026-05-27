@@ -1,0 +1,73 @@
+**`BlockingQueue` defines four behaviors for the two core operations (insert, remove): throw an exception, return a special value, block indefinitely, or block with a timeout. Memorize the 4×2 matrix — it's directly out of the Javadoc and interviewers will check the exact names.**
+
+## The matrix
+
+| Operation | Throws exception | Returns special | Blocks         | Times out                       |
+|-----------|------------------|-----------------|----------------|---------------------------------|
+| Insert    | `add(e)`         | `offer(e)`      | `put(e)`       | `offer(e, t, unit)`             |
+| Remove    | `remove()`       | `poll()`        | `take()`       | `poll(t, unit)`                 |
+| Examine   | `element()`      | `peek()`        | —              | —                               |
+
+## What each row does
+
+**Insert**
+
+- `add(e)` — `IllegalStateException` if no space.
+- `offer(e)` — returns `false` if no space; never blocks.
+- `put(e)` — blocks until space appears; throws `InterruptedException`.
+- `offer(e, 5, SECONDS)` — blocks up to the timeout, then returns `false`.
+
+**Remove**
+
+- `remove()` — `NoSuchElementException` if empty.
+- `poll()` — returns `null` if empty; never blocks.
+- `take()` — blocks until an element appears; throws `InterruptedException`.
+- `poll(5, SECONDS)` — blocks up to the timeout, then returns `null`.
+
+## When to use which
+
+| Scenario                                             | Use                          |
+|------------------------------------------------------|------------------------------|
+| "I must enqueue this work, even if I have to wait."  | `put` / `take`               |
+| "If the queue is full, drop the message."            | `offer` (no wait)            |
+| "Try for 100ms then give up."                        | `offer(e, 100, MILLIS)` / `poll(100, MILLIS)` |
+| "Asserting the queue isn't full — bug if it is."     | `add` / `remove`             |
+| "Polling loop with backoff."                         | `poll` and `Thread.sleep`    |
+
+## A common pattern: timed consumer with shutdown
+
+```java
+while (!Thread.currentThread().isInterrupted()) {
+    Task t = queue.poll(1, TimeUnit.SECONDS);
+    if (t == null) continue;          // timeout — re-check shutdown
+    if (t == POISON) break;            // shutdown sentinel
+    process(t);
+}
+```
+
+The 1-second poll lets the consumer notice shutdown signals (interrupt, flag) without forever blocking inside `take()`.
+
+## Interrupt handling
+
+`put`, `take`, and the timed variants throw `InterruptedException`. The right responses are:
+
+```java
+try {
+    queue.put(task);
+} catch (InterruptedException e) {
+    Thread.currentThread().interrupt();   // restore the flag
+    // ... clean up, return
+}
+```
+
+Never swallow `InterruptedException` silently — it's the contract that lets `shutdownNow()` work.
+
+## What `peek` and `element` are for
+
+`peek()` returns the head without removing — or `null` if empty. `element()` does the same but throws if empty. There's no blocking peek; if you need "wait for an element to look at", `take` then put back is a workable (if awkward) substitute.
+
+<Callout kind="tip" title="Default to put/take">
+For straight producer-consumer code, `put` and `take` are the right defaults — they apply backpressure automatically. Reach for `offer`/`poll` only when you need explicit timeout or drop-on-full semantics.
+</Callout>
+
+<ProbeNote>Probe: "What's the difference between `offer(e)` and `add(e)` on an unbounded queue?" None visible — both succeed. The difference shows up the moment you switch to a bounded implementation: `add` starts throwing, `offer` starts returning `false`. Code to the interface, not the implementation.</ProbeNote>

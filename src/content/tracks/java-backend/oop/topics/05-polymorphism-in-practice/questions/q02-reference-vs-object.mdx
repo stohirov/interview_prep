@@ -1,0 +1,52 @@
+**The reference type is a compile-time fiction the compiler uses to typecheck; the runtime type is what `new` actually allocated on the heap.** The two can differ whenever a reference points up the inheritance hierarchy, and the gap between them is precisely where polymorphism lives.
+
+## Two perspectives on the same object
+
+```java
+Animal a = new Dog("Rex");
+//  ^         ^
+//  |         runtime type: Dog (set by `new`, never changes)
+//  reference type: Animal (declared, used by the compiler)
+```
+
+The reference `a` is just a slot of type `Animal`. The actual object on the heap is — and forever will be — a `Dog`. Even if you reassign `a = new Cat()`, the *old* Dog object's runtime type does not change; you simply pointed `a` at a different heap object.
+
+## What each type decides
+
+| Decision | Determined by |
+|---|---|
+| Which methods you can *call* (resolution) | Reference (compile-time) type |
+| Which overridden method *actually runs* | Runtime type |
+| Static method binding | Reference type |
+| Field access | Reference type (fields are not polymorphic) |
+| `instanceof` result | Runtime type |
+| `getClass()` result | Runtime type |
+
+## Worked example
+
+```java
+class Animal { String name = "animal"; void speak() { System.out.println("..."); } }
+class Dog extends Animal {
+    String name = "dog";                            // hides Animal.name
+    @Override void speak() { System.out.println("woof"); }
+    void fetch() { System.out.println("fetching"); }
+}
+
+Animal a = new Dog();
+a.speak();             // "woof"           -> runtime type wins for methods
+System.out.println(a.name); // "animal"    -> reference type wins for fields
+// a.fetch();          // compile error    -> Animal has no fetch
+((Dog) a).fetch();     // "fetching"       -> cast widens what compiler permits
+System.out.println(a instanceof Dog); // true
+System.out.println(a.getClass());     // class Dog
+```
+
+## Why fields are not polymorphic
+
+Field access is resolved by the compiler via the reference type — there is no vtable for fields. This is why "hiding" a field in a subclass almost always produces a bug: you get two slots in memory, and which one you read depends on the reference you used. The fix is to expose state only through methods, which *are* polymorphic.
+
+<Callout kind="warn" title="The cast doesn't change the object">
+`(Dog) a` does not convert anything. It tells the compiler "trust me, treat this reference as a Dog so I can call Dog methods." At runtime the JVM checks the *runtime type* — if `a` doesn't actually point to a Dog you get `ClassCastException`.
+</Callout>
+
+<ProbeNote>The trick question variant: "What does `a.name` print?" Most candidates answer "dog" because they conflate fields with methods. The right answer is "animal" — fields are bound to the reference type. This single distinction separates juniors from middles.</ProbeNote>
