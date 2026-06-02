@@ -1,0 +1,49 @@
+**The frame clause defines *which rows* around the current row the window function sees — and `ROWS`, `RANGE`, and `GROUPS` count those rows differently when there are ties.** Misunderstanding the frame is the #1 source of "my running total is wrong" bugs.
+
+## The frame, anchored to the current row
+
+A frame is written inside `OVER (...)` after the `ORDER BY`:
+
+```sql
+SUM(amount) OVER (
+  ORDER BY created_at
+  ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+) AS running_total
+```
+
+Bounds: `UNBOUNDED PRECEDING`, `N PRECEDING`, `CURRENT ROW`, `N FOLLOWING`, `UNBOUNDED FOLLOWING`.
+
+## ROWS — physical row count
+
+`ROWS` counts literal rows. `ROWS BETWEEN 2 PRECEDING AND CURRENT ROW` is exactly three physical rows (or fewer at the edges) — a true moving window, ideal for a 3-row moving average:
+
+```sql
+AVG(price) OVER (ORDER BY day ROWS BETWEEN 2 PRECEDING AND CURRENT ROW)
+```
+
+## RANGE — logical value range
+
+`RANGE` groups rows by their **`ORDER BY` value**. `RANGE BETWEEN CURRENT ROW AND CURRENT ROW` includes **all peer rows that share the current row's ordering value**, not just the physical current row. So with ties, a `RANGE ... CURRENT ROW` running total jumps to the same total for every tied row.
+
+```text
+day        amount   ROWS sum   RANGE sum   (frame = ... CURRENT ROW)
+2026-01-01   10        10         10
+2026-01-02   20        30         50   <- both Jan-02 rows summed
+2026-01-02   20        50         50      because they're peers
+```
+
+`RANGE` also supports value offsets when ordering by a number/date: `RANGE BETWEEN INTERVAL '7 days' PRECEDING AND CURRENT ROW` sums the last 7 days regardless of how many rows that is.
+
+## GROUPS — peer-group count
+
+`GROUPS` (PostgreSQL 11+) counts **distinct ordering-value groups**. `GROUPS BETWEEN 1 PRECEDING AND CURRENT ROW` means "the current peer group plus the one peer group before it," however many physical rows each contains.
+
+<Callout kind="warn" title="The default frame bites you">
+If you specify `ORDER BY` but no explicit frame, the default is `RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW`. With duplicate ordering values this includes all peers of the current row — surprising for running totals. With **no** `ORDER BY`, the default frame is the entire partition. This is exactly why `LAST_VALUE(...) OVER (ORDER BY x)` returns the current row, not the last.
+</Callout>
+
+<Callout kind="tip" title="Rule of thumb">
+Want a literal N-row moving window → `ROWS`. Want "within this value / within the last 7 days" → `RANGE`. Want "N peer-groups back" → `GROUPS`. When in doubt with running totals and possible ties, write `ROWS` explicitly.
+</Callout>
+
+<ProbeNote>The interviewer wants the ROWS-vs-RANGE distinction demonstrated with ties: ROWS counts physical rows, RANGE lumps all peers sharing the ORDER BY value. The expert tell is knowing the implicit default frame is `RANGE UNBOUNDED PRECEDING TO CURRENT ROW` and why that breaks naive LAST_VALUE / running totals.</ProbeNote>

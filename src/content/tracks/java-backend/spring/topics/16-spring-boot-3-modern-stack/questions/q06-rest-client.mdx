@@ -1,0 +1,41 @@
+**`RestClient` (Spring 6.1+) is the modern fluent, synchronous HTTP client — `WebClient`'s ergonomics without needing Reactor.** It's the forward path for blocking HTTP calls; `RestTemplate` is in maintenance mode (still supported, not formally deprecated) but won't get new features.
+
+## Why it exists
+
+`RestTemplate` works but its API is template-method-style and awkward for anything beyond simple `getForObject`. `WebClient` has a much nicer fluent API but pulls in the reactive stack and returns `Mono`/`Flux`, which is overkill if your code is plain blocking. `RestClient` takes `WebClient`'s fluent, chained API and makes it **synchronous** — you get the readable builder style and direct return values.
+
+```java
+RestClient client = RestClient.create("https://orders.internal");
+
+Order order = client.get()
+    .uri("/orders/{id}", 42)
+    .accept(MediaType.APPLICATION_JSON)
+    .retrieve()
+    .body(Order.class);          // blocks, returns the value directly
+```
+
+POST and error handling read naturally:
+
+```java
+Order created = client.post()
+    .uri("/orders")
+    .body(new NewOrder("widget"))
+    .retrieve()
+    .onStatus(HttpStatusCode::is4xxClientError,
+        (req, res) -> { throw new OrderClientException(res.getStatusCode()); })
+    .body(Order.class);
+```
+
+For full control, `.toEntity(Order.class)` returns a `ResponseEntity`; `.exchange(...)` hands you the raw request/response.
+
+## Status in the ecosystem
+
+- It reuses the same `ClientHttpRequestFactory` infrastructure as `RestTemplate`, so you can migrate incrementally and even build a `RestClient` from an existing `RestTemplate`.
+- It backs `@HttpExchange` interfaces via `RestClientAdapter`, so declarative clients can run on a blocking transport.
+- `RestTemplate` is **not deprecated** — existing code keeps working — but new code should prefer `RestClient`. State this precisely; claiming `RestTemplate` is "deprecated" is a common but wrong answer.
+
+<Callout kind="tip" title="The decision rule">
+Blocking code, new project → `RestClient`. Already reactive (returning `Mono`/`Flux`) → `WebClient`. Existing `RestTemplate` code that works → leave it, migrate opportunistically. There's rarely a reason to start new code on `RestTemplate`.
+</Callout>
+
+<ProbeNote>Two precise points score here: (1) `RestClient` is the *synchronous* fluent client — `WebClient` ergonomics, no Reactor — and is the recommended client for blocking code; (2) `RestTemplate` is in *maintenance mode but not formally deprecated*. Bonus: it shares `RestTemplate`'s request-factory infrastructure and backs `@HttpExchange` via `RestClientAdapter`.</ProbeNote>

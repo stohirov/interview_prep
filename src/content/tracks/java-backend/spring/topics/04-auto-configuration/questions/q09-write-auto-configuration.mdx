@@ -1,0 +1,67 @@
+**Writing your own auto-configuration means a `@AutoConfiguration` class, guarded by `@Conditional` annotations, listed in `AutoConfiguration.imports`.** This is exactly how you'd build a reusable library or company starter that "just works" when added to a project.
+
+## Step 1 — the configuration class
+
+Use `@AutoConfiguration` (Boot 3's dedicated annotation, a `@Configuration` specialization that also carries ordering metadata). Guard it so it backs off correctly:
+
+```java
+@AutoConfiguration
+@ConditionalOnClass(AcmeClient.class)              // only if the library is present
+@EnableConfigurationProperties(AcmeProperties.class)
+public class AcmeAutoConfiguration {
+
+    @Bean
+    @ConditionalOnMissingBean                       // user can override
+    public AcmeClient acmeClient(AcmeProperties props) {
+        return AcmeClient.builder()
+                .endpoint(props.getEndpoint())
+                .timeout(props.getTimeout())
+                .build();
+    }
+}
+```
+
+```java
+@ConfigurationProperties(prefix = "acme")
+public class AcmeProperties {
+    private String endpoint = "https://api.acme.com";
+    private Duration timeout = Duration.ofSeconds(5);
+    // getters/setters
+}
+```
+
+## Step 2 — register it in the imports file
+
+Boot won't find the class unless it's listed:
+
+```text
+# src/main/resources/META-INF/spring/
+#   org.springframework.boot.autoconfigure.AutoConfiguration.imports
+com.acme.autoconfigure.AcmeAutoConfiguration
+```
+
+(Add `spring-boot-autoconfigure-processor` and the file is generated for you.)
+
+## Step 3 — control ordering
+
+`@AutoConfiguration` takes `before`/`after`, and you can use `@AutoConfigureBefore`, `@AutoConfigureAfter`, `@AutoConfigureOrder` for finer control. Order matters when your config depends on another's beans existing first — e.g. you need the `DataSource` before configuring your own component:
+
+```java
+@AutoConfiguration(after = DataSourceAutoConfiguration.class)
+@ConditionalOnBean(DataSource.class)
+public class AcmeJdbcAutoConfiguration { ... }
+```
+
+## The design rules that make it well-behaved
+
+- **`@ConditionalOnClass`** at the top so the class is inert when the library is absent (never throws `NoClassDefFoundError`).
+- **`@ConditionalOnMissingBean`** on every `@Bean` so a user's own definition wins.
+- **`@ConfigurationProperties`** for configuration, not scattered `@Value`.
+- **Don't `@ComponentScan`** from an auto-config class — declare beans explicitly so you never accidentally pull in the user's packages.
+- Ship it as the **autoconfigure module of a starter** so consumers get the library + config in one dependency.
+
+<Callout kind="tip" title="Back off gracefully">
+A good auto-config does nothing surprising: present only when its library is on the classpath, silent when the user has configured the bean themselves, and fully driven by typed properties. If you find yourself forcing beans unconditionally, you've written ordinary `@Configuration`, not auto-configuration.
+</Callout>
+
+<ProbeNote>The interviewer wants the three concrete steps — `@AutoConfiguration` class with `@ConditionalOnClass` + `@ConditionalOnMissingBean`, a `@ConfigurationProperties` type, and registration in `AutoConfiguration.imports` — plus ordering via `before`/`after`. Stressing "back off when the user defined the bean" proves you understand the contract, not just the syntax.</ProbeNote>

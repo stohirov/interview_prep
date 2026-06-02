@@ -1,0 +1,41 @@
+**Sizing these two is the difference between a stable server and one that OOM-kills at peak load — and they're sized by completely different logic.** `shared_buffers` is a single fixed allocation; `work_mem` is a *per-operation* budget that you must multiply by concurrency.
+
+## shared_buffers — start at 25% of RAM
+
+The well-worn rule of thumb is **~25% of system RAM**. The reasoning: Postgres pages also live in the OS page cache, so giving Postgres *all* the RAM just double-buffers the same data and steals memory the OS would use anyway. On a 64 GB box, start at 16 GB.
+
+```ini
+shared_buffers = 16GB
+```
+
+Going beyond ~40% occasionally helps very write-heavy or large-working-set workloads, but it's a measured tweak, not a default. Validate with the **buffer cache hit ratio** (via `pg_stat_database`) or the `pg_buffercache` extension — if hit ratio is already 99%+, more buffers won't help.
+
+## work_mem — the parameter that multiplies
+
+`work_mem` is allocated **per sort/hash node, per connection**, not globally. A worst-case ceiling looks like:
+
+```text
+peak ≈ work_mem × (avg sort/hash nodes per query) × max_connections
+```
+
+So with `work_mem = 256MB` and 200 connections each running a query with a few sorts, you can blow past 100 GB and trigger the OOM killer. Size it from concurrency, not from one query:
+
+```ini
+work_mem = 32MB        # safe global default
+```
+
+Then raise it **locally** only where you know it pays off:
+
+```sql
+SET LOCAL work_mem = '512MB';   -- inside a txn, for one heavy report
+```
+
+## How to tell it's too low
+
+Watch for **temp file** activity — sorts/hashes that spill to disk. `log_temp_files = 0` logs every spill; `pg_stat_database.temp_bytes` tracks the volume. Frequent large temp files mean `work_mem` is too small for that workload; near-zero means you can lower it and reclaim headroom.
+
+<Callout kind="warn" title="Pooling changes the math">
+With a connection pooler capping backends at, say, 40, you can afford a much larger `work_mem` than with 500 raw connections — the multiplier is bounded by the pool, not by app threads.
+</Callout>
+
+<ProbeNote>Strong answers anchor `shared_buffers` to ~25% RAM *with the double-buffering reason*, and treat `work_mem` as a concurrency problem: `work_mem × nodes × connections`. Mentioning temp-file logging as the feedback signal, and that pooling lets you safely raise `work_mem`, signals real operational experience.</ProbeNote>

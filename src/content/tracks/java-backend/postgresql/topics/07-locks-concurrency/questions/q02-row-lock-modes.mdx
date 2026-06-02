@@ -1,0 +1,43 @@
+**Row-level locks let two transactions modify *different* rows of the same table without blocking each other, and PostgreSQL has four strengths — ordered by how much they conflict.** They're acquired automatically by `UPDATE`/`DELETE`, or explicitly with the `SELECT ... FOR ...` clauses.
+
+## The four modes, strongest to weakest
+
+| Mode | How acquired | Conflicts with |
+|---|---|---|
+| `FOR UPDATE` | explicit; also `DELETE` and `UPDATE` of a key column | all four other row locks |
+| `FOR NO KEY UPDATE` | explicit; also plain `UPDATE` of non-key columns | all except `FOR KEY SHARE` |
+| `FOR SHARE` | explicit | `FOR UPDATE`, `FOR NO KEY UPDATE` |
+| `FOR KEY SHARE` | explicit; also taken implicitly by FK checks | `FOR UPDATE` only |
+
+## Why there are *two* "update" strengths
+
+The split between `FOR UPDATE` and `FOR NO KEY UPDATE` exists entirely to make **foreign keys concurrent**. When you `UPDATE` a row but don't touch any column referenced by a foreign key, PostgreSQL takes the weaker `FOR NO KEY UPDATE`. A child-row insert that references the parent only needs `FOR KEY SHARE` — and those two are *compatible*.
+
+```sql
+-- Parent: UPDATE a non-key column -> FOR NO KEY UPDATE
+UPDATE customers SET last_seen = now() WHERE id = 7;
+
+-- Concurrently, child insert checks the FK -> FOR KEY SHARE on customer 7
+INSERT INTO orders (customer_id, total) VALUES (7, 99);   -- does NOT block
+```
+
+Before this distinction existed (pre-9.3), updating a parent row blocked inserts of its children — a notorious source of contention. Now it doesn't.
+
+## The two you'll actually write
+
+`FOR UPDATE` is the workhorse: "I'm about to modify these rows, claim them so no one else can change them until I commit." `FOR SHARE` is rarer — "I need these rows to stay as they are until I commit, but I'm not changing them" (an application-level read-stability lock; SSI is usually the better tool).
+
+```sql
+BEGIN;
+SELECT balance FROM accounts WHERE id = 1 FOR UPDATE;  -- claim the row
+UPDATE accounts SET balance = balance - 100 WHERE id = 1;
+COMMIT;  -- lock released here
+```
+
+Locks are held until the transaction ends (`COMMIT`/`ROLLBACK`) — there is no early release. All four can be combined with `NOWAIT` or `SKIP LOCKED` to control waiting behavior.
+
+<Callout kind="info" title="FOR UPDATE still gives a consistent read">
+A `SELECT ... FOR UPDATE` returns the *latest committed* version of each row (it waits for and re-reads any concurrent uncommitted write), unlike a plain `SELECT` which sees the transaction's snapshot. This matters in REPEATABLE READ.
+</Callout>
+
+<ProbeNote>The discriminating answer explains *why* `FOR NO KEY UPDATE` and `FOR KEY SHARE` exist: to stop parent-row updates from blocking child-row inserts under foreign keys. Candidates who only know `FOR UPDATE` are fine for junior roles; naming the FK-concurrency reason is the senior signal.</ProbeNote>

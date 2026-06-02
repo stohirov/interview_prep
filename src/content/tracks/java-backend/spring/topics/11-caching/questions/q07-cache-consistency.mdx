@@ -1,0 +1,39 @@
+**These four strategies answer two separate questions — *who fills the cache on a read* (read-through vs cache-aside) and *when the write reaches the database* (write-through vs write-behind) — and Spring's annotations let you implement any of them.** Mixing the axes up is the common mistake.
+
+## Read strategies
+
+**Cache-aside (lazy loading)** — the application owns the logic. On a read it checks the cache; on a miss it loads from the DB and *the app* populates the cache. This is exactly what `@Cacheable` does: lookup, on miss invoke the method (which hits the DB), store the result. Most common, simplest, and the cache can be down without breaking correctness — only the hit rate suffers.
+
+**Read-through** — the *cache itself* loads from the DB on a miss, via a loader the cache invokes; the app only ever talks to the cache. Caffeine's `CacheLoader` and JCache's `CacheLoader` provide this. The app code is simpler, but the cache owns the data-access path.
+
+```text
+cache-aside : app -> cache (miss) -> app -> DB -> app -> cache
+read-through: app -> cache (miss -> cache -> DB) -> app
+```
+
+## Write strategies
+
+**Write-through** — every write goes to the cache *and* the database **synchronously**, in the same operation, before returning. The cache is always consistent with the DB; the cost is write latency (two hops). In Spring this is `@CachePut` (update the cache) on a method that also persists, or `@CacheEvict` to invalidate so the next read reloads.
+
+**Write-behind (write-back)** — write to the cache immediately and **asynchronously** flush to the DB later (batched). Fast writes and write coalescing, but a crash before the flush *loses data*, and the DB is temporarily stale. Used for high-write, loss-tolerant workloads; needs a provider/queue that supports it.
+
+## Spring mapping
+
+```java
+@Cacheable("books")                      // cache-aside read
+public Book find(long id) { ... }
+
+@CachePut(value = "books", key = "#b.id") // write-through (update cache)
+public Book save(Book b) { return repo.save(b); }
+
+@CacheEvict(value = "books", key = "#id") // invalidate-on-write
+public void delete(long id) { repo.deleteById(id); }
+```
+
+A pragmatic default is **cache-aside reads + invalidate-on-write** (`@CacheEvict`): rather than trying to keep the cache perfectly in sync, you evict on every mutation and let the next read repopulate. It's simpler and avoids the dual-write race between updating the cache and updating the DB.
+
+<Callout kind="warn" title="The dual-write race">
+Updating cache and DB as two separate steps can interleave (DB write succeeds, cache write fails, or vice versa), leaving them inconsistent. Evicting instead of updating sidesteps this — there's nothing stale to read, just a miss that reloads fresh.
+</Callout>
+
+<ProbeNote>The interviewer wants you to separate the read axis (cache-aside = app fills it, `@Cacheable`; read-through = cache fills it) from the write axis (write-through = sync, consistent; write-behind = async, fast but lossy). Mapping each to the annotations, and preferring cache-aside-plus-evict to dodge the dual-write race, is the senior answer.</ProbeNote>

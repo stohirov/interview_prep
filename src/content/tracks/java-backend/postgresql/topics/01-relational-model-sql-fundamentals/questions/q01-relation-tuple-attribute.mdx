@@ -1,0 +1,33 @@
+**The relational model has its own vocabulary, and SQL renames almost all of it — but the mapping isn't perfectly one-to-one.** Getting the terms right signals you understand the theory; knowing where SQL *deviates* from it signals you understand the database.
+
+## The mapping
+
+| Relational model | SQL term | What it is |
+| --- | --- | --- |
+| Relation | Table (or view, or query result) | A set of tuples over the same attributes |
+| Tuple | Row | One member of the relation |
+| Attribute | Column | A named slot with a domain |
+| Domain | Data type (+ constraints) | The set of legal values for an attribute |
+| Cardinality | Row count | Number of tuples |
+| Degree / arity | Column count | Number of attributes |
+
+```sql
+CREATE TABLE employees (
+    id     bigint PRIMARY KEY,   -- attribute "id", domain bigint
+    name   text   NOT NULL,      -- attribute "name", domain text
+    dept   text                  -- attribute "dept"
+);
+-- The table is a relation; each inserted row is a tuple.
+```
+
+## Where SQL departs from the pure model
+
+The terms map cleanly, but the *guarantees* don't. Three differences matter:
+
+- **A relation is a set; a SQL table is a multiset (bag).** A true relation cannot contain duplicate tuples. A SQL table can hold identical rows unless a `PRIMARY KEY` or `UNIQUE` constraint forbids it. This is why `SELECT` keeps duplicates and you need `DISTINCT` to recover set semantics.
+- **A relation has no order; SQL results have no *guaranteed* order either, but you can impose one.** Tuples in a relation are unordered, so any row order you observe without `ORDER BY` is incidental and unsafe to rely on.
+- **Attributes in a relation are unordered and accessed by name; SQL columns have a positional order** (you can write `INSERT ... VALUES` without column names, and `SELECT *` has a defined column order). This is a SQL convenience that the pure model doesn't have.
+
+A common follow-up: "Is a view a relation?" Yes — any expression that yields a set of tuples over fixed attributes is a relation, so views, CTEs, and join results are all relations. That's the whole point of the model being *closed*: operations on relations produce relations, which is what lets you compose subqueries.
+
+<ProbeNote>The interviewer is checking that you know the formal vocabulary (relation/tuple/attribute/domain) and, more importantly, that you can name the two places SQL breaks the model: tables are multisets (duplicates allowed) and rows are not inherently ordered. Mentioning that the model is *closed* — operators on relations return relations — is the senior-level flourish.</ProbeNote>

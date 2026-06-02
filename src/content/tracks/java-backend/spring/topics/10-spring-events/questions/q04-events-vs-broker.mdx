@@ -1,0 +1,34 @@
+**The line is process boundary and durability: Spring events live inside one JVM and vanish on crash; Kafka and RabbitMQ cross processes and survive crashes.** Picking the wrong one is a common design mistake in interviews, so be precise about what each guarantees.
+
+## What Spring events are
+
+In-process, in-memory, synchronous-by-default method dispatch. The event object is a Java reference passed between beans in the same `ApplicationContext`. That means:
+
+- **Single process only** — a listener in another service or another instance never sees it.
+- **Not durable** — if the JVM crashes between publish and handling, the event is lost. There's no log, no queue, no replay.
+- **No delivery guarantee, no retry, no ordering across restarts** — it's a method call, so "delivery" is just "the method ran."
+
+The upside is exactly the cost of a broker, removed: no serialization, no network, no extra infrastructure, no operational surface. Latency is nanoseconds. For decoupling collaborators *within one deployable*, that's perfect.
+
+## What a broker adds
+
+Kafka / RabbitMQ are **out-of-process** systems that persist messages to disk before acknowledging:
+
+- **Cross-process / cross-service** — different applications, different instances, different languages consume the same stream.
+- **Durable & replayable** — Kafka retains a log you can re-read; RabbitMQ persists queues. A consumer that was down catches up.
+- **At-least-once delivery, retries, dead-letter queues, backpressure** — the reliability machinery that makes asynchronous integration safe.
+
+The cost: serialization, a network hop, a system to operate and monitor, and the distributed-systems concerns (idempotency, ordering, exactly-once semantics) that come with all of it.
+
+## How to decide
+
+| | Spring events | Kafka / RabbitMQ |
+|---|---|---|
+| Boundary | within one JVM | across processes/services |
+| Durability | none (lost on crash) | persisted, replayable |
+| Coupling removed | between beans | between deployables |
+| Cost | ~zero | infra + ops + distributed concerns |
+
+Rule of thumb: **decoupling code in the same app → Spring events. Decoupling services, or needing durability/replay → a broker.** A frequent mistake is using async Spring events as a "queue" for work that must not be lost — a crash drops it silently. If losing the event is unacceptable, you need persistence, which means a broker (or Spring Modulith's persistent event registry as a stepping stone).
+
+<ProbeNote>The discriminator is **in-process vs cross-process** and **ephemeral vs durable**. Strong answers reject Spring events as a durable work queue (crash = silent loss) and reserve brokers for cross-service boundaries and replay. Naming Spring Modulith's event publication registry as the in-between option is a senior tell.</ProbeNote>

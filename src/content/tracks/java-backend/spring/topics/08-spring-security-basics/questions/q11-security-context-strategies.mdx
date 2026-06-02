@@ -1,0 +1,46 @@
+**The `SecurityContextHolder` stores the current `Authentication` using a pluggable strategy, and the default — a plain `ThreadLocal` — is exactly why security context "disappears" when you switch threads.** Three strategies exist, and the right one depends on your concurrency model.
+
+## The three strategies
+
+- **`MODE_THREADLOCAL`** (default): the context lives in a `ThreadLocal`, so it's bound to the request thread and invisible to any other thread. Correct for the standard one-thread-per-request model.
+- **`MODE_INHERITABLETHREADLOCAL`**: uses an `InheritableThreadLocal`, so a thread you *spawn* inherits the parent's context at creation time. Useful when a request handler starts child threads that must run as the same user.
+- **`MODE_GLOBAL`**: a single static context shared by the whole JVM. Only sensible for standalone, single-user clients (a desktop app) — never a server.
+
+```java
+SecurityContextHolder.setStrategyName(
+    SecurityContextHolder.MODE_INHERITABLETHREADLOCAL);
+// or: spring.security.strategy=MODE_INHERITABLETHREADLOCAL
+```
+
+## Why this bites with thread pools and virtual threads
+
+A `ThreadLocal` is bound to *one* thread. The moment work hops to another thread, the context is gone:
+
+- Submitting to an `ExecutorService` / `@Async` runs on a **pool** thread that never saw the login → `getAuthentication()` returns `null`. (`InheritableThreadLocal` doesn't help here either: pooled threads are created once and *reused*, so they inherit the context of whoever created the pool, not the current request — a subtle and dangerous leak.)
+- Even **virtual threads** are still thread-locals under the hood; a virtual thread carries its own `ThreadLocal`, so propagation across an async boundary remains a manual concern.
+
+The fix for crossing threads is **explicit propagation**, not `InheritableThreadLocal`:
+
+```java
+// wraps tasks so they restore the SecurityContext on the worker thread
+Executor secured = new DelegatingSecurityContextExecutor(realExecutor);
+```
+
+Spring also provides `DelegatingSecurityContextRunnable` / `...Callable` and `@Async` integration that copies the context to the worker.
+
+## Reactive code is different entirely
+
+In WebFlux there is **no single thread per request** — a request bounces across event-loop threads — so a thread-local cannot work at all. Reactive code stores the context in the **Reactor `Context`**, accessed via `ReactiveSecurityContextHolder`, and you read it inside the reactive chain:
+
+```java
+Mono<String> name = ReactiveSecurityContextHolder.getContext()
+    .map(ctx -> ctx.getAuthentication().getName());
+```
+
+Calling the blocking `SecurityContextHolder` from reactive code returns nothing useful.
+
+<Callout kind="warn" title="Don't reach for GLOBAL or INHERITABLE to 'fix' async">
+`MODE_GLOBAL` would leak one user's identity to every request. `MODE_INHERITABLETHREADLOCAL` silently breaks with pooled executors. The correct answer is per-task propagation (`DelegatingSecurityContext*`) for imperative async and `ReactiveSecurityContextHolder` for reactive.
+</Callout>
+
+<ProbeNote>Name the three modes and state the default is `ThreadLocal`. The real test is the async story: thread pools and virtual threads break thread-local propagation, the fix is explicit `DelegatingSecurityContext*` wrappers (not `INHERITABLETHREADLOCAL`, which leaks with reused pool threads), and reactive code must use `ReactiveSecurityContextHolder` backed by the Reactor context.</ProbeNote>

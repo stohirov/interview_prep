@@ -1,0 +1,30 @@
+**A Seq Scan is not a bug — it's frequently the *correct* choice.** Candidates who treat "Seq Scan" as a red flag fail this question. The planner picks it whenever it estimates that reading the whole table sequentially is cheaper than the random I/O an index would incur.
+
+## The reasons, in rough order of frequency
+
+**1. Low selectivity — the predicate matches many rows.** If 40% of the table matches, an Index Scan would do ~40% of the table's worth of *random* heap fetches, which is far more expensive than one sequential pass. The classic threshold is a single-digit percentage of rows, governed by `random_page_cost` (default 4.0).
+
+**2. The table is small.** A few hundred rows fit in a handful of pages; scanning them sequentially beats the overhead of descending an index. You'll see this on lookup tables forever and it's fine.
+
+**3. Stale or missing statistics.** If `ANALYZE` hasn't run since a bulk load, the planner may think the table has 100 rows when it has 10 million, and mis-cost everything. Fix: `ANALYZE the_table;`
+
+**4. The predicate isn't sargable.** Wrapping the column in a function or doing arithmetic on it hides it from a plain index:
+
+```sql
+WHERE lower(email) = 'a@b.com'   -- can't use an index on email
+WHERE created_at::date = '2024-01-01'  -- cast defeats the index
+```
+
+The fix is an **expression index** (`CREATE INDEX ON t (lower(email))`) or rewriting as a range (`created_at >= '2024-01-01' AND created_at < '2024-01-02'`).
+
+**5. Type mismatch.** `WHERE bigint_col = '42'` is fine, but comparing a column to a value of a different type can force an implicit cast on the *column* and skip the index.
+
+## How to confirm it's a mistake vs correct
+
+Compare estimated vs actual rows in `EXPLAIN ANALYZE`. If they agree and the Seq Scan is genuinely cheap, leave it alone. If estimated is wildly off, fix the estimate (run ANALYZE, raise the statistics target, or check for a non-sargable predicate) — don't reach for `SET enable_seqscan = off`, which is a diagnostic toy, not a fix.
+
+<Callout kind="warn" title="random_page_cost on SSDs">
+The default `random_page_cost = 4.0` assumes spinning disks. On SSDs/cloud storage, lowering it to ~1.1 makes index scans look correctly cheaper and is one of the highest-leverage tuning changes.
+</Callout>
+
+<ProbeNote>The interviewer is checking you don't panic at "Seq Scan." Strong answers connect it to **selectivity and `random_page_cost`**, name sargability as a common self-inflicted cause, and reject `enable_seqscan = off` as a production fix.</ProbeNote>

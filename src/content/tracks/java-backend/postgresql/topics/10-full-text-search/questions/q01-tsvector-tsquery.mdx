@@ -1,0 +1,36 @@
+**`tsvector` is the *document* side of full-text search and `tsquery` is the *query* side; the `@@` operator matches one against the other.** Both are real PostgreSQL data types, not just function return values, and understanding what they store is the foundation for everything else.
+
+## tsvector — the preprocessed document
+
+A `tsvector` is a **sorted list of distinct lexemes**, each with the integer positions at which it occurs. Building one with `to_tsvector` runs the text through a configuration that lowercases, strips stop words, and stems each token to its root lexeme.
+
+```sql
+SELECT to_tsvector('english', 'A fox was running and runs fast');
+-- 'fast':7 'fox':2 'run':4,6
+```
+
+Notice what happened: `a`, `was`, `and` are stop words and vanished; `running` and `runs` both stemmed to `run` and merged, keeping both positions. The vector is lexeme-sorted (not original order), and positions enable phrase search and cover-density ranking.
+
+## tsquery — the parsed search expression
+
+A `tsquery` holds lexemes combined with boolean operators: **`&`** (AND), **`|`** (OR), **`!`** (NOT), and **`<->`** (followed-by, for phrases). `to_tsquery` parses and normalizes the input with the same configuration so its lexemes line up with the document's.
+
+```sql
+SELECT to_tsquery('english', 'running & !cat');   -- 'run' & !'cat'
+SELECT to_tsquery('english', 'quick <-> brown');  -- 'quick' <-> 'brown' (adjacent)
+```
+
+## @@ — the match operator
+
+```sql
+SELECT to_tsvector('english', 'The fox runs fast')
+     @@ to_tsquery('english', 'run & fox');   -- true
+```
+
+Matching is on **lexemes**, which is exactly why `runs` in the document matches `running` in the query — both normalize to `run`. This is the whole point of FTS over `LIKE`.
+
+<Callout kind="warn" title="Use the same configuration on both sides">
+If you build the vector with `'english'` but the query with `'simple'`, stemming and stop-word handling differ and matches silently fail. Always normalize document and query with the *same* configuration.
+</Callout>
+
+<ProbeNote>The interviewer wants to hear that a `tsvector` is sorted, de-duplicated, stemmed lexemes with positions (not raw text), and a `tsquery` is a boolean expression of lexemes — and that `@@` matches at the lexeme level, which is why morphological variants match. Mentioning that both sides must use the same configuration is a senior tell.</ProbeNote>

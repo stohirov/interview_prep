@@ -1,0 +1,21 @@
+PostgreSQL ships a **full-text search engine inside the database** — no separate service, no syncing job, no eventual-consistency window. Instead of `LIKE '%term%'` (which is substring matching that can't use an index, ignores word boundaries, and has no notion of relevance), FTS understands *words*: it tokenizes text into normalized **lexemes**, strips stop words, applies stemming, and matches a parsed query against that. "running" matches a document containing "ran" or "runs" because all three stem to the same lexeme.
+
+Two data types carry the whole feature. A **`tsvector`** is the preprocessed document — a sorted list of distinct lexemes with their positions. A **`tsquery`** is a parsed search expression with boolean operators. The **`@@`** operator asks "does this vector satisfy this query?"
+
+```sql
+SELECT to_tsvector('english', 'The fox was running fast')
+     @@ to_tsquery('english', 'run & fox');
+-- true: "running" stems to "run", "the"/"was" are stop words
+```
+
+You make this fast with a **GIN index** — either on the expression `to_tsvector('english', body)`, or (better) on a **generated `tsvector` column** that you index directly. GIN stores an entry per lexeme pointing at the rows that contain it, so a search probes only the matching lexemes rather than scanning every row.
+
+Results come back via **`ts_rank`** / **`ts_rank_cd`**, which score how well each document matches so you can `ORDER BY` relevance. The whole pipeline is driven by a **text search configuration** (`english`, `simple`, etc.) that bundles a parser and a chain of dictionaries deciding how each token is normalized.
+
+The honest trade-off: this is excellent for search *within your existing relational data* — transactional, no extra infrastructure, joins to your other tables for free. It is **not** Elasticsearch: no distributed sharding across a cluster, far less relevance tuning, no fuzzy/typo tolerance out of the box, weaker analytics. For most apps that's a fine deal; for a search-first product at scale it isn't.
+
+<Callout kind="tip" title="The interview hook">
+Frame it as a spectrum, not a binary: "`LIKE` is substring matching with no linguistics; PostgreSQL FTS gives you real tokenization, stemming, ranking and an index *without leaving the database*; a dedicated engine adds distributed scale and rich relevance tuning at the cost of running and syncing another system. I reach for PostgreSQL FTS until I provably outgrow it."
+</Callout>
+
+The questions below cover `tsvector`/`tsquery`, building the GIN index, the query-construction functions, ranking, language configurations, and when to graduate to a dedicated engine.

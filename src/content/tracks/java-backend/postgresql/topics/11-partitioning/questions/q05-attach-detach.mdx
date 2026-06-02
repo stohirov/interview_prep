@@ -1,0 +1,54 @@
+**You add and remove partitions live with `ATTACH PARTITION` and `DETACH PARTITION` — and the senior move is staging data offline, then attaching, so the heavy work never holds a disruptive lock.** This is the operational heart of partitioning: cheap retention and bulk loading.
+
+## Two ways to add a partition
+
+Either create it directly as a child:
+
+```sql
+CREATE TABLE logs_2025_07 PARTITION OF logs
+    FOR VALUES FROM ('2025-07-01') TO ('2025-08-01');
+```
+
+…or build a standalone table, load and index it in isolation, then attach:
+
+```sql
+CREATE TABLE logs_2025_07 (LIKE logs INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
+-- bulk load, build indexes, ANALYZE  -- all off-line, no impact on `logs`
+ALTER TABLE logs ATTACH PARTITION logs_2025_07
+    FOR VALUES FROM ('2025-07-01') TO ('2025-08-01');
+```
+
+The staged approach is preferred for big loads: the expensive insert/index work happens on a table nobody is querying.
+
+## ATTACH validates the bounds
+
+When you attach, PostgreSQL must guarantee every existing row in the incoming table fits the declared bounds. If a matching `CHECK` constraint already proves it, the scan is skipped; otherwise it **scans the whole table** to validate. Add the constraint first so the attach is near-instant:
+
+```sql
+ALTER TABLE logs_2025_07 ADD CONSTRAINT c
+    CHECK (ts >= '2025-07-01' AND ts < '2025-08-01');
+-- now ATTACH skips the validating scan
+```
+
+Attach also takes a brief `ACCESS EXCLUSIVE` lock on the parent.
+
+## DETACH for retention
+
+```sql
+ALTER TABLE logs DETACH PARTITION logs_2025_01;   -- becomes a normal table
+DROP TABLE logs_2025_01;                            -- or archive it
+```
+
+Plain `DETACH` needs an `ACCESS EXCLUSIVE` lock on the parent, briefly blocking queries. Since **PG 14** you can avoid that with:
+
+```sql
+ALTER TABLE logs DETACH PARTITION logs_2025_01 CONCURRENTLY;
+```
+
+`DETACH CONCURRENTLY` runs without a long blocking lock (it cannot run inside a transaction block and waits for concurrent transactions to finish). This is the standard way to retire data on a busy system.
+
+<Callout kind="tip" title="The retention pattern">
+`DROP`/`DETACH` of an old partition reclaims space instantly and leaves zero bloat — the whole reason to use RANGE partitioning over a periodic `DELETE`. Pair it with pre-creating future partitions on a schedule.
+</Callout>
+
+<ProbeNote>The probe is knowing the *locking* reality: ATTACH scans to validate unless a CHECK constraint pre-proves the bounds, and DETACH takes ACCESS EXCLUSIVE unless you use `DETACH CONCURRENTLY` (PG 14+). Mentioning the stage-then-attach pattern for bulk loads is the experienced-operator tell.</ProbeNote>

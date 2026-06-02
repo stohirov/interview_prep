@@ -1,0 +1,51 @@
+**Spring delegates input validation to the Jakarta Bean Validation API (Hibernate Validator under the hood); `@Valid` and `@Validated` are the two triggers that turn it on.** You annotate your DTO fields with constraints, mark the parameter to be validated, and Spring runs the validator before your method body executes.
+
+## The constraints live on the DTO
+
+```java
+record CreateOrder(
+    @NotNull Long customerId,
+    @NotBlank @Size(max = 100) String description,
+    @Positive BigDecimal amount,
+    @Email String contactEmail,
+    @Valid List<@NotNull LineItem> items   // cascades into each element
+) {}
+```
+
+Common jakarta constraints: `@NotNull`, `@NotBlank`, `@NotEmpty`, `@Size`, `@Min`/`@Max`, `@Positive`, `@Email`, `@Pattern`, `@Past`/`@Future`.
+
+## `@Valid` — trigger validation on a parameter
+
+`jakarta.validation.@Valid` on a `@RequestBody` (or `@ModelAttribute`) parameter tells Spring to validate the bound object. It also **cascades** into nested objects, which is why you put it on the `items` field above.
+
+```java
+@PostMapping
+OrderDto create(@Valid @RequestBody CreateOrder cmd) { ... }
+```
+
+On a `@RequestBody`, a constraint violation throws `MethodArgumentNotValidException` (→ `400 Bad Request`). On an `@ModelAttribute`, you can instead accept a `BindingResult` immediately after the validated parameter to handle errors yourself.
+
+## `@Validated` — Spring's variant, with groups
+
+`org.springframework.validation.annotation.@Validated` does the same but adds **validation groups** (validate different rules for create vs update), and at **class level** it enables method-level constraint validation on a bean's parameters/return values (throwing `ConstraintViolationException`).
+
+```java
+@Validated
+@Service
+class OrderService {
+    OrderDto find(@NotNull @Positive Long id) { ... } // validated on the bean
+}
+
+// Groups on a controller param:
+OrderDto update(@Validated(OnUpdate.class) @RequestBody UpdateOrder cmd) { ... }
+```
+
+## The rule of thumb
+
+Use `@Valid` for ordinary request-body validation; reach for `@Validated` when you need **groups** or **method-parameter validation on service beans**. Note `@Valid` cannot carry groups — that's a `@Validated`-only feature.
+
+<Callout kind="warn" title="Two different exceptions">
+`@RequestBody` + `@Valid` failures surface as `MethodArgumentNotValidException`; `@Validated` method-parameter failures surface as `ConstraintViolationException`. They need *separate* `@ExceptionHandler`s to produce consistent 400 responses.
+</Callout>
+
+<ProbeNote>Examiners check that you know constraints come from jakarta Bean Validation (Spring just integrates it), that `@Valid` cascades and triggers on `@RequestBody`, and that `@Validated` adds groups plus class-level method validation. Naming the two distinct exceptions is a senior-level tell.</ProbeNote>

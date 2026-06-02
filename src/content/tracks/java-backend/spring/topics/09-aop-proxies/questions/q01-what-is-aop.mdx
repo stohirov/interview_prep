@@ -1,0 +1,52 @@
+**AOP — Aspect-Oriented Programming — is a paradigm for modularizing *cross-cutting concerns*: behavior that's needed across many unrelated classes but isn't the core responsibility of any of them.** Logging, transactions, security, caching, metrics, and retry are the canonical examples. They "cut across" the natural class hierarchy, so OOP alone forces you to scatter and duplicate them. AOP lets you write each concern *once* and declare *where* it applies, keeping business code clean.
+
+## The problem AOP solves
+
+Imagine every service method needing the same boilerplate:
+
+```java
+public Order placeOrder(Order o) {
+    long start = System.nanoTime();
+    if (!securityCtx.isAuthorized()) throw new AccessDenied();
+    tx.begin();
+    try {
+        Order result = doPlaceOrder(o);   // the only line that matters
+        tx.commit();
+        return result;
+    } catch (Exception e) {
+        tx.rollback();
+        throw e;
+    } finally {
+        log.info("placeOrder took {}ns", System.nanoTime() - start);
+    }
+}
+```
+
+The one meaningful line is buried. Multiply this across hundreds of methods and the timing/security/tx logic is copy-pasted everywhere — a change to the logging format means touching every method. This is *tangling* (one method mixing concerns) and *scattering* (one concern spread across methods).
+
+## The AOP solution
+
+Extract each concern into an **aspect** and declare its applicability via a **pointcut**:
+
+```java
+@Around("execution(* com.example.service..*(..))")
+public Object measure(ProceedingJoinPoint pjp) throws Throwable {
+    long start = System.nanoTime();
+    try { return pjp.proceed(); }
+    finally { log.info("{} took {}ns", pjp.getSignature(), System.nanoTime() - start); }
+}
+```
+
+Now `placeOrder` is just `doPlaceOrder(o)` and the timing applies to *every* service method automatically.
+
+## Real cross-cutting concerns
+
+- **Transactions** — `@Transactional`
+- **Security** — `@PreAuthorize`, method-level access checks
+- **Caching** — `@Cacheable`
+- **Async/scheduling** — `@Async`
+- **Logging, auditing, metrics, retry, rate-limiting**
+
+All of these are AOP in Spring — the annotations *are* aspects the framework provides.
+
+<ProbeNote>The interviewer wants the *why*, not just the definition. Name the twin problems — tangling and scattering — and give concrete cross-cutting concerns (tx, security, caching, logging). The strongest finish: "and Spring's own `@Transactional` / `@Cacheable` are exactly this — aspects shipped by the framework."</ProbeNote>

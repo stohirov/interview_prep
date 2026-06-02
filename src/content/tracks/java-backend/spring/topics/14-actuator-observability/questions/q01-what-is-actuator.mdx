@@ -1,0 +1,37 @@
+**Actuator is the Spring Boot starter that exposes operational endpoints for monitoring and managing a running application** — health checks, metrics, environment, loggers, thread and heap dumps — over HTTP (or JMX) under the `/actuator` base path. You get it by adding one dependency:
+
+```xml
+<dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-starter-actuator</artifactId>
+</dependency>
+```
+
+## The common endpoints
+
+- **`/health`** — aggregate UP/DOWN status assembled from all `HealthIndicator` beans (datasource, disk space, Redis, …). The one endpoint your orchestrator polls.
+- **`/info`** — arbitrary descriptive metadata: build version, git commit, custom key/values.
+- **`/metrics`** — Micrometer meters; list names at `/metrics`, drill into one with `/metrics/jvm.memory.used`.
+- **`/env`** — the resolved `Environment`: every property source and value. Includes secrets, so it is *sensitive*.
+- **`/loggers`** — view and **change log levels at runtime** with a `POST`, no restart. Hugely useful for debugging production: `POST /actuator/loggers/com.acme {"configuredLevel":"DEBUG"}`.
+- **`/threaddump`** — a full JVM thread dump for diagnosing deadlocks and stuck threads.
+- **`/heapdump`** — downloads a binary `.hprof` heap dump for memory-leak analysis. Heavy and sensitive.
+- **`/prometheus`** — metrics in Prometheus scrape format (when the Prometheus registry is on the classpath).
+
+## The default you must know
+
+By default, **only `/health` and `/info` are exposed over HTTP.** All others are enabled but not web-exposed; you opt in explicitly:
+
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,loggers,prometheus
+```
+
+`exposure.exclude` blacklists, and `*` exposes everything (never in production). Endpoints can also be individually enabled/disabled via `management.endpoint.<id>.enabled`.
+
+The base path defaults to `/actuator` and is configurable with `management.endpoints.web.base-path`. Each endpoint also surfaces over JMX independently of HTTP exposure.
+
+<ProbeNote>The interviewer wants the endpoint catalogue *and* the security-minded default: only `/health` and `/info` are HTTP-exposed because `/env`, `/heapdump`, and `/threaddump` leak secrets or memory. Mentioning runtime log-level changes via `POST /loggers` is the detail that marks real operational experience.</ProbeNote>

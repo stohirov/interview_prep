@@ -1,0 +1,59 @@
+**Method security moves authorization off the URL and onto the method, so the rule lives next to the code it protects.** You opt in with `@EnableMethodSecurity` (Spring Security 6), then annotate service or controller methods. It works via a Spring AOP proxy, so the usual proxy caveats apply: only external calls through the bean are intercepted.
+
+```java
+@Configuration
+@EnableMethodSecurity   // prePostEnabled=true by default; securedEnabled/jsr250Enabled opt-in
+public class MethodSecurityConfig { }
+```
+
+## @PreAuthorize — the workhorse
+
+Evaluated **before** the method runs, using **SpEL** with full access to the arguments and the current authentication. This is the most powerful and most-used option:
+
+```java
+@PreAuthorize("hasRole('ADMIN')")
+void deleteAccount(Long id) { ... }
+
+// argument-aware: a user may only read their own profile
+@PreAuthorize("hasRole('ADMIN') or #userId == authentication.name")
+Profile getProfile(String userId) { ... }
+```
+
+## @PostAuthorize — check the return value
+
+Evaluated **after** the method, with the result bound to `returnObject`. Use it when the decision depends on what was returned (the method still executes, so avoid it for side-effecting calls):
+
+```java
+@PostAuthorize("returnObject.owner == authentication.name")
+Document loadDocument(Long id) { ... }
+```
+
+(There are also `@PreFilter` / `@PostFilter` to strip disallowed elements from collection arguments/results.)
+
+## @Secured — simple role list, no SpEL
+
+Legacy, coarse: a plain list of authorities, ANDed/ORed by being present. No expressions, and you must spell the full authority:
+
+```java
+@Secured("ROLE_ADMIN")        // requires securedEnabled = true
+void purge() { ... }
+```
+
+## @RolesAllowed — the JSR-250 standard
+
+Same capability as `@Secured` but a Jakarta standard annotation (`jakarta.annotation.security.RolesAllowed`), so it's portable across frameworks:
+
+```java
+@RolesAllowed({"ADMIN", "AUDITOR"})   // requires jsr250Enabled = true
+void exportLedger() { ... }
+```
+
+## Which to use
+
+Reach for `@PreAuthorize` by default — SpEL gives you role checks *and* argument-based ownership checks in one place. Use `@RolesAllowed` only when you want vendor-neutral annotations; `@Secured` is largely superseded.
+
+<Callout kind="warn" title="Self-invocation defeats it">
+Because it's proxy-based, a method calling another annotated method on `this` bypasses the check entirely. Put the guard on the externally-called entry point, not an internal helper.
+</Callout>
+
+<ProbeNote>Lead with `@EnableMethodSecurity` (not the removed `@EnableGlobalMethodSecurity`) and the `@PreAuthorize`/`@PostAuthorize`/`@Secured`/`@RolesAllowed` split. The discriminating detail: only `@PreAuthorize`/`@PostAuthorize` support SpEL and argument/return access; the other two are flat role lists. Expect a follow-up on the self-invocation/proxy limitation.</ProbeNote>

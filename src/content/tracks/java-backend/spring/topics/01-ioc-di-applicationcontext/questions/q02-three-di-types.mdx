@@ -1,0 +1,52 @@
+**Spring supports three injection styles — constructor, setter, and field — and the modern, officially recommended one is constructor injection.** Knowing *why* each is preferred or avoided, not just naming them, is what's being tested.
+
+## Constructor injection (recommended)
+
+Dependencies are parameters of the constructor. Since Spring 4.3, a class with a single constructor needs no `@Autowired`.
+
+```java
+@Service
+public class OrderService {
+    private final PaymentGateway gateway;   // final = immutable, guaranteed set
+    private final OrderRepository repo;
+
+    public OrderService(PaymentGateway gateway, OrderRepository repo) {
+        this.gateway = gateway;
+        this.repo = repo;
+    }
+}
+```
+
+Why it wins:
+- **Mandatory dependencies are enforced** — the object cannot be constructed in an invalid, half-wired state.
+- **Immutability** — fields can be `final`, which is thread-safe and clearly communicates "set once".
+- **Testability with no framework** — `new OrderService(mockGateway, mockRepo)` works in a plain unit test; no reflection, no Spring context.
+- **Fail-fast on cycles** — an unresolvable circular dependency throws at startup instead of hiding.
+- **Visible design smell** — a constructor with 8 parameters screams "this class does too much". Field injection hides that.
+
+## Setter injection
+
+A `@Autowired` setter, used for **optional or reconfigurable** dependencies.
+
+```java
+@Autowired
+public void setNotifier(Notifier notifier) { this.notifier = notifier; }
+```
+
+Legitimate but niche: the field can't be `final`, and the object exists briefly before the setter runs. It's also Spring's escape hatch for breaking a genuine circular dependency that constructor injection would reject.
+
+## Field injection (discouraged)
+
+`@Autowired` directly on the field. Tempting because it's the least typing — and the reason it's discouraged.
+
+```java
+@Autowired private PaymentGateway gateway;   // avoid
+```
+
+Problems: the field can't be `final`; you **cannot instantiate the class without reflection**, so a plain `new` in a unit test leaves it `null`; dependencies are invisible from the public API; and it silently lets a class accumulate unlimited dependencies. IDEs and Spring itself flag `@Autowired` field injection as a warning.
+
+## The nuance
+
+Constructor injection's one historical drawback was circular dependencies — but a cycle is almost always a design problem you should *fix* (extract a third bean, use an event, or `@Lazy`), not paper over with setter injection.
+
+<ProbeNote>The probe is whether you can justify constructor injection beyond "the docs say so". Hit immutability/`final`, mandatory-deps-enforced, no-reflection testability, and the "too many constructor args is a *useful* smell" point. Acknowledging setter injection as the deliberate way to break a real cycle shows senior nuance.</ProbeNote>

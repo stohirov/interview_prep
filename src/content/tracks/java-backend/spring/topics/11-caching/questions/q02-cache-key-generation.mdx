@@ -1,0 +1,54 @@
+**The cache key is what makes two calls "the same call," so getting it wrong silently corrupts results — a too-broad key returns stale data for different arguments, a too-narrow key never hits.** Spring gives you three escalating options: the default generator, SpEL, or a custom `KeyGenerator`.
+
+## The default: SimpleKeyGenerator
+
+When you don't specify `key`, Spring uses `SimpleKeyGenerator`, which builds the key from **all method parameters**:
+
+- zero params → a shared constant `SimpleKey.EMPTY`
+- one param → that param *itself* is the key (so its `equals`/`hashCode` matter)
+- multiple params → a `SimpleKey` wrapping all of them
+
+```java
+@Cacheable("books")
+public Book find(long id, String lang) { ... }
+// key = SimpleKey[id, lang]  — both args participate
+```
+
+The trap: if a parameter shouldn't affect the result (a `Pageable`, a tracing context, a `User` whose `equals` is identity-based), it still becomes part of the key and destroys your hit rate. That's the cue to take control.
+
+## SpEL keys with `key =`
+
+The common fix is a SpEL expression selecting exactly the fields that matter:
+
+```java
+@Cacheable(value = "books", key = "#id")
+@Cacheable(value = "books", key = "#book.isbn")
+@Cacheable(value = "books", key = "#id + '_' + #lang")
+@Cacheable(value = "books", key = "T(java.util.Objects).hash(#a, #b)")
+```
+
+SpEL exposes the arguments by name (needs `-parameters` compilation, otherwise `#a0`, `#a1`), plus `#root.method`, `#root.target`, and `#result` (in `unless`, not `key`). Keep keys cheap and collision-free.
+
+## Custom KeyGenerator
+
+When the same keying logic recurs across many methods, centralise it in a bean instead of repeating SpEL:
+
+```java
+@Bean
+KeyGenerator entityKeyGenerator() {
+  return (target, method, params) ->
+      target.getClass().getSimpleName() + ":" + method.getName()
+          + ":" + Arrays.deepHashCode(params);
+}
+
+@Cacheable(value = "books", keyGenerator = "entityKeyGenerator")
+public Book find(long id) { ... }
+```
+
+You set either `key` **or** `keyGenerator`, never both — Spring throws if both are present. A global default generator can also be wired by implementing `CachingConfigurer.keyGenerator()`.
+
+<Callout kind="warn" title="Keys cross the cache region — and the wire">
+With a distributed cache like Redis, the key is serialized and shared across instances. Avoid mutable objects, identity-based `equals`, or anything that hashes differently per JVM, or two nodes will compute different keys for the same logical call.
+</Callout>
+
+<ProbeNote>The interviewer is probing whether you understand the *default includes every parameter* (the silent hit-rate killer) and can choose between SpEL `key=` for one-offs and a `KeyGenerator` bean for reusable logic. Knowing `key` and `keyGenerator` are mutually exclusive, and that distributed caches serialize the key, is the depth signal.</ProbeNote>

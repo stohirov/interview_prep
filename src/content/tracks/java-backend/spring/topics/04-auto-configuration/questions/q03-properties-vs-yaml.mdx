@@ -1,0 +1,67 @@
+**`application.properties` and `application.yml` are two formats for the same thing — externalized configuration — and Boot binds both into the same Environment.** The real interview content isn't the syntax; it's the **override order** that decides which value wins when a key is defined in several places.
+
+## The two formats
+
+```properties
+# application.properties
+spring.datasource.url=jdbc:postgresql://localhost/shop
+spring.jpa.hibernate.ddl-auto=validate
+logging.level.com.acme=DEBUG
+```
+
+```yaml
+# application.yml — hierarchical, less repetition
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost/shop
+  jpa:
+    hibernate:
+      ddl-auto: validate
+logging:
+  level:
+    com.acme: DEBUG
+```
+
+YAML is nicer for nested structure and lists; `.properties` is flat and avoids YAML's indentation/type gotchas (`on`/`off`/`yes` parse as booleans). If **both** files exist, `.properties` is loaded **after** `.yml`, so a key in `.properties` overrides the same key in `.yml`. Don't rely on that — pick one format.
+
+## The property hierarchy (override order)
+
+Boot layers many property sources; **later sources override earlier ones**. Highest-priority first, roughly:
+
+1. Command-line arguments (`--server.port=9090`)
+2. `SPRING_APPLICATION_JSON` (inline JSON)
+3. OS environment variables (`SERVER_PORT=9090` — relaxed binding)
+4. Java system properties (`-Dserver.port=9090`)
+5. **Profile-specific** files outside the jar (`application-prod.yml` next to the jar)
+6. Profile-specific files inside the jar
+7. **Plain** `application.yml`/`.properties` outside the jar
+8. Plain files inside the jar
+9. `@PropertySource` on `@Configuration`
+10. Default properties (`SpringApplication.setDefaultProperties`)
+
+Two rules cover most cases: **command line / env vars beat files**, and **profile-specific beats plain**, **external beats packaged**.
+
+## Relaxed binding
+
+A single property is reachable under several spellings, which is why env vars work:
+
+```text
+spring.datasource.url   ==   SPRING_DATASOURCE_URL   ==   spring.datasource_url
+```
+
+Kebab-case (`my-prop`), camelCase, and `UPPER_UNDERSCORE` all bind to the same target.
+
+## Profile groups and multi-document files
+
+A single YAML file can hold several profile-specific documents separated by `---`:
+
+```yaml
+spring:
+  config:
+    activate:
+      on-profile: prod
+server:
+  port: 8443
+```
+
+<ProbeNote>The interviewer is probing the precedence chain, not YAML trivia. Nail the two heuristics — *command line and environment variables override files*, *profile-specific overrides plain, external overrides packaged* — and mention relaxed binding so env-var overrides in Docker/Kubernetes make sense.</ProbeNote>

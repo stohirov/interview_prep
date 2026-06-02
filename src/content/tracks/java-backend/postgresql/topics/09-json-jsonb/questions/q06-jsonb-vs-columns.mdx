@@ -1,0 +1,55 @@
+**`jsonb` is a tool for *schema flexibility*, not a default for everything — the trade is query power and integrity for the ability to store shapes you can't predict.** The right answer is a decision rule, not "JSONB is modern so use it."
+
+## Use real columns when the shape is known
+
+If a field is queried, filtered, joined, sorted, or constrained, it belongs in a **typed column**. Columns give you:
+
+- type checking and `NOT NULL` / `CHECK` constraints
+- foreign keys
+- straightforward, cheap B-tree indexes and `ORDER BY`
+- accurate planner statistics — the planner estimates `jsonb` predicates poorly
+
+```sql
+-- good: these are core, queryable attributes
+CREATE TABLE users (
+  id bigint PRIMARY KEY,
+  email text NOT NULL UNIQUE,
+  status text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+```
+
+## Reach for `jsonb` when the shape varies or is open-ended
+
+`jsonb` shines when the data is **genuinely heterogeneous or sparse**: per-tenant custom fields, third-party API payloads with unstable schemas, feature flags, event metadata, or attributes that differ per row and that you mostly read as a blob.
+
+```sql
+ALTER TABLE users ADD COLUMN preferences jsonb NOT NULL DEFAULT '{}';
+-- arbitrary, tenant-defined keys you don't want a migration for each time
+```
+
+A common hybrid is best: typed columns for the stable, queried fields, **plus** a `jsonb` column for the long tail of optional/custom attributes.
+
+## Use a separate table when there's real structure
+
+If the "JSON" is actually a **list of related entities** with their own identity, relationships, or that you query independently — order line items, addresses, tags — model it as rows in a child table. You get foreign keys, per-row constraints, indexing, aggregation, and joins that `jsonb` arrays make painful.
+
+```sql
+CREATE TABLE order_items (
+  order_id bigint REFERENCES orders(id),
+  product_id bigint REFERENCES products(id),
+  qty int NOT NULL CHECK (qty > 0)
+);
+```
+
+## The decision rule
+
+- **Known, queried, constrained → column.**
+- **Variable / sparse / unknown shape, read as a unit → `jsonb`.**
+- **A collection of related rows you query or join → separate table.**
+
+<Callout kind="warn" title="The anti-pattern">
+Stuffing well-known, frequently-filtered fields into `jsonb` "for flexibility" loses constraints and foreign keys, produces bad row estimates, and forces expression or GIN indexes where a plain column index would do. Flexibility you don't need is just lost integrity.
+</Callout>
+
+<ProbeNote>The interviewer wants a principled split, not dogma: typed columns for known/queried/constrained data, `jsonb` for sparse or schemaless attributes read as a blob, and a child table for collections of related entities. The hybrid (columns + a `jsonb` overflow column) and the integrity/statistics downsides of over-using `jsonb` are senior signals.</ProbeNote>

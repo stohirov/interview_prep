@@ -1,0 +1,56 @@
+**Both produce a managed bean, but they answer different questions: `@Component` says "scan *this class* and make it a bean automatically"; `@Bean` says "*I* will construct the bean, in this factory method, and you register what I return".** The decisive distinguisher is **whose class it is** — your own code vs. a third-party class you can't annotate.
+
+## @Component — on a class
+
+`@Component` (and its stereotypes) goes on a class *you own*. Component scanning finds it, calls the constructor, injects dependencies, and registers one bean. You don't write any creation logic — Spring instantiates it for you.
+
+```java
+@Component
+public class EmailNotifier implements Notifier {
+    private final SmtpClient client;
+    public EmailNotifier(SmtpClient client) { this.client = client; }
+}
+```
+
+## @Bean — on a method
+
+`@Bean` goes on a method inside a `@Configuration` class. *You* write the instantiation; Spring registers the return value as a bean. This is the only way to register a class you **cannot annotate** — a third-party type, or an object that needs custom construction logic.
+
+```java
+@Configuration
+public class AppConfig {
+
+    @Bean
+    public ObjectMapper objectMapper() {           // third-party class
+        var mapper = new ObjectMapper();
+        mapper.registerModule(new JavaTimeModule());
+        mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        return mapper;                              // this instance becomes the bean
+    }
+
+    @Bean
+    public DataSource dataSource(DataSourceProperties props) {
+        return props.initializeDataSourceBuilder().build();
+    }
+}
+```
+
+## The key differences
+
+| | `@Component` | `@Bean` |
+|---|---|---|
+| Target | class | method |
+| Discovery | component scanning | explicit declaration in `@Configuration` |
+| Who instantiates | Spring (calls ctor) | you (write the method body) |
+| Use for | classes you own | third-party classes, custom construction |
+| Bean name | class name, camelCased | method name |
+
+## Why you can't always use @Component
+
+You can't add `@Component` to `ObjectMapper`, `RestClient`, a JDBC `DataSource`, or any library class — you don't control its source. `@Bean` is the registration path for those. And when construction is conditional or needs configuration values, the imperative `@Bean` method gives you full control that a passive annotation can't.
+
+## A subtle but important point
+
+`@Bean` methods live in a `@Configuration` class, which Spring CGLIB-proxies so that calling one `@Bean` method from another returns the shared singleton rather than a new object. That inter-bean-call behavior is unique to `@Bean` methods and is covered in the `@Configuration` questions.
+
+<ProbeNote>The interviewer wants the *decision rule*: `@Component` for your own classes (Spring builds them), `@Bean` for third-party classes or custom construction logic (you build them). Naming that `@Bean` is the only way to register a type you can't annotate, and that `@Bean` methods live in CGLIB-proxied `@Configuration`, is the complete answer.</ProbeNote>

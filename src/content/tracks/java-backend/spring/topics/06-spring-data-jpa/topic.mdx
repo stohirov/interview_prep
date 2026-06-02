@@ -1,0 +1,25 @@
+**Spring Data JPA is a repository abstraction that sits on top of JPA — it generates the boilerplate data-access layer for you, while Hibernate does the actual ORM work underneath.** The stack is three layers and interviewers love to see you keep them straight. **JPA** (Jakarta Persistence, `jakarta.persistence.*`) is a *specification* — annotations and an API, no behaviour. **Hibernate 6** is the default *implementation* of that spec: it turns entities into SQL, manages the persistence context, flushes, and runs the queries. **Spring Data JPA** is a *programming model* on top of JPA: you declare an interface, Spring generates the implementation at startup.
+
+```java
+public interface UserRepository extends JpaRepository<User, Long> {
+    List<User> findByEmailAndStatus(String email, Status status);
+}
+```
+
+That interface gives you `save`, `findById`, `findAll`, `delete`, paging, sorting, and the derived query above — with zero implementation code. The repository hierarchy is `Repository` → `CrudRepository` → `ListCrudRepository` / `PagingAndSortingRepository` → `JpaRepository`.
+
+The power — and the danger — is that almost everything happens implicitly. A `findById` returns a **managed** entity; mutate it inside a transaction and the change is flushed at commit with no `save()` call. A `@OneToMany` you forgot to make lazy fires an EAGER join on every load. A loop over parent entities touching a lazy child triggers the **N+1 problem**. None of this is visible in the Java — you have to know the mechanics.
+
+```java
+@Transactional
+public void deactivate(Long id) {
+    User u = repo.findById(id).orElseThrow();
+    u.setStatus(INACTIVE);   // no save() needed — dirty checking flushes at commit
+}
+```
+
+The questions below cover the three-layer stack, the repository hierarchy, derived vs `@Query` (JPQL and native), pagination and sorting, `@Modifying` bulk operations, entity lifecycle callbacks, the relationship annotations and their fetch defaults, why EAGER is almost always wrong, the N+1 problem and its four fixes, the persistence context as first-level cache, `merge` vs `persist`, transaction propagation, and DTO projections.
+
+<Callout kind="tip" title="The interview hook">
+Say it crisply: "JPA is the spec, Hibernate is the implementation, Spring Data JPA is the repository layer that generates my DAO. The trap is that persistence is *implicit* — dirty checking, lazy loading, N+1 — so I reason about what SQL each call actually produces, not just the Java."
+</Callout>

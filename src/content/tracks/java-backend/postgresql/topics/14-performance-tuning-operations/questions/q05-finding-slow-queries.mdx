@@ -1,0 +1,50 @@
+**There are two questions hiding here — "which queries are slow overall?" and "why is *this* query slow?" — and they need different tools.** `pg_stat_statements` answers the first by aggregating across all executions; `auto_explain` answers the second by capturing the real plan when it happens.
+
+## pg_stat_statements — the aggregate view
+
+The contrib extension records one row per **normalized** statement (constants replaced with `$1`, `$2`, so `id = 1` and `id = 2` collapse into one entry), tracking call count, total/mean execution time, rows, and I/O.
+
+```sql
+CREATE EXTENSION pg_stat_statements;
+-- requires shared_preload_libraries = 'pg_stat_statements' + restart
+```
+
+The query that surfaces your worst offenders — **sorted by total time, not mean**:
+
+```sql
+SELECT substring(query, 1, 80) AS query,
+       calls,
+       round(total_exec_time::numeric, 1) AS total_ms,
+       round(mean_exec_time::numeric, 2)  AS mean_ms,
+       rows
+FROM pg_stat_statements
+ORDER BY total_exec_time DESC
+LIMIT 20;
+```
+
+Sorting by `total_exec_time` (= `mean × calls`) finds what consumes the most **database time overall**. A 4 ms query run 2 million times an hour costs far more than a 3-second nightly report — "death by a thousand cuts." Reset with `pg_stat_statements_reset()` to measure a specific window.
+
+## auto_explain — the real plan, automatically
+
+`pg_stat_statements` tells you a query is slow but not *why*, and the slow plan may be impossible to reproduce by hand (different parameters, cold cache, a bad cached plan). `auto_explain` logs the **actual execution plan** of any statement exceeding a threshold:
+
+```ini
+shared_preload_libraries = 'auto_explain'
+auto_explain.log_min_duration = '500ms'
+auto_explain.log_analyze = on        # include real timings (has overhead)
+auto_explain.log_buffers = on
+```
+
+Now every statement over 500 ms drops its full `EXPLAIN (ANALYZE, BUFFERS)` into the server log — catching the slow production plans you'd never trigger interactively.
+
+## The workflow
+
+1. `pg_stat_statements` → which normalized queries dominate total time.
+2. `auto_explain` (or manual `EXPLAIN (ANALYZE, BUFFERS)`) → *why* the worst one is slow.
+3. `pg_stat_activity` → what's running and blocking **right now**.
+
+<Callout kind="tip" title="log_analyze isn't free">
+`auto_explain.log_analyze = on` instruments every statement (not just slow ones) to time it, which adds overhead. Enable it deliberately, or set `auto_explain.sample_rate` to capture a fraction.
+</Callout>
+
+<ProbeNote>The signal: reach for `pg_stat_statements` first and sort by **total** time (aggregate load mindset), then use `auto_explain` to capture real production plans you can't reproduce. Naming `pg_stat_activity` for live diagnosis rounds out the toolkit.</ProbeNote>

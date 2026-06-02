@@ -1,0 +1,43 @@
+**These three all rewrite storage, but they differ in *what* they rewrite and — crucially — *what lock* they take.** The lock is the whole interview, because on a production table an `ACCESS EXCLUSIVE` lock means downtime.
+
+## VACUUM FULL — compact the table
+
+Rewrites the **entire table** into a new, tightly-packed file with no dead space, then swaps it in and drops the old one. Unlike plain `VACUUM`, it actually **returns space to the OS**. It also rebuilds the table's indexes as part of the rewrite.
+
+- **Lock: `ACCESS EXCLUSIVE`** for the full duration — blocks all reads *and* writes.
+- Needs free disk roughly equal to the table size (old + new coexist briefly).
+- Use only as a last resort for severe bloat during a maintenance window. Plain `VACUUM` (which doesn't lock or shrink) is for routine work; `VACUUM FULL` is the heavy hammer.
+
+## CLUSTER — rewrite *and physically order* by an index
+
+Rewrites the table like `VACUUM FULL` but additionally orders the rows on disk to match a chosen index — improving locality for range scans on that key. It's a **one-time** reordering: new writes are not kept clustered.
+
+- **Lock: `ACCESS EXCLUSIVE`** — same downtime profile as `VACUUM FULL`.
+
+```sql
+CLUSTER orders USING orders_created_at_idx;
+```
+
+## REINDEX — rebuild indexes only
+
+Builds a fresh copy of an index (or all indexes on a table) to remove **index bloat** and fragmentation; it doesn't touch table heap bloat.
+
+- Plain `REINDEX INDEX foo;` takes a lock that **blocks writes** to the table while it runs.
+- **`REINDEX ... CONCURRENTLY`** builds the new index alongside the old one and swaps, taking only a brief strong lock at the end — so reads and writes continue. This is the production-safe form, at the cost of more time and disk.
+
+```sql
+REINDEX INDEX CONCURRENTLY orders_pkey;
+REINDEX TABLE CONCURRENTLY orders;
+```
+
+## Choosing
+
+- Index bloat only → **`REINDEX CONCURRENTLY`** (online).
+- Table bloat → **`VACUUM FULL`** (or `pg_repack` for online), accepting `ACCESS EXCLUSIVE`.
+- Want physical ordering for scan locality → **`CLUSTER`**.
+
+<Callout kind="danger" title="ACCESS EXCLUSIVE = downtime">
+`VACUUM FULL` and `CLUSTER` block the entire table. On a hot table, reach for an online rewrite (`pg_repack`) or `REINDEX CONCURRENTLY` where it suffices — never run these casually on a live system.
+</Callout>
+
+<ProbeNote>The discriminator is the lock matrix: `VACUUM FULL`/`CLUSTER` take **`ACCESS EXCLUSIVE`** (full downtime, rewrite the heap), plain `REINDEX` blocks writes, and **`REINDEX CONCURRENTLY`** is the online escape hatch. Knowing `CLUSTER` is a one-time ordering and naming `pg_repack` for online table rewrites are senior tells.</ProbeNote>

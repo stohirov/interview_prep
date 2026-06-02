@@ -1,0 +1,39 @@
+**Both are 128-bit UUIDs, but v4 is fully random while v7 is time-ordered — and that one difference is the whole answer, because PostgreSQL primary keys are stored in a B-tree, and B-trees love sequential inserts and hate random ones.** If you take away one fact: random keys scatter inserts across the entire index, v7 keys append to the right edge.
+
+## Why randomness hurts a B-tree
+
+A primary key index is a sorted B-tree. When the new key is **random (v4)**, each insert lands in an arbitrary leaf page somewhere in the middle of the tree. Consequences:
+
+- **Page splits everywhere.** Inserting into a near-full interior page forces a split, and v4 spreads inserts across *all* pages, so splits happen constantly and leave pages ~50–70% full (bloat).
+- **Poor cache locality.** Consecutive inserts touch unrelated pages, so the working set is effectively the entire index — it won't stay in `shared_buffers`, and you pay random disk/cache misses on a write-heavy table.
+- **More WAL.** Splits and full-page images amplify write-ahead-log volume.
+
+With a **time-ordered key (v7)**, new values are monotonically increasing, so every insert lands on the **rightmost leaf page** — the same hot page stays in cache, pages fill densely before splitting, and the pattern matches what `bigserial` already gave you. You keep UUID's benefits (global uniqueness, client-side generation, no row-count leakage) without the insert penalty.
+
+## The structure of v7
+
+UUID v7 puts a 48-bit Unix-millisecond timestamp in the high bits, then random bits for uniqueness within the millisecond. So byte-wise sort order ≈ creation-time order, which is exactly what the B-tree wants. As a bonus, you get rough time-sortability for free.
+
+## Generating them in PostgreSQL 17
+
+`gen_random_uuid()` (built into core via `pgcrypto`/`uuid-ossp` not required since PG13) produces a **v4**:
+
+```sql
+CREATE TABLE events (
+  id      uuid PRIMARY KEY DEFAULT gen_random_uuid(),  -- v4: random, fragments the index
+  payload jsonb
+);
+```
+
+**As of PostgreSQL 17 there is no built-in v7 generator** (`uuidv7()` is slated for PostgreSQL 18). On 17 you generate v7 **in the application** (most language libraries have it) or via an extension (e.g. `pg_uuidv7`), or a small SQL/PLpgSQL function:
+
+```sql
+-- Insert an app-generated v7, or use an extension's function
+INSERT INTO events (id, payload) VALUES ($1, $2);  -- $1 is a v7 from the app
+```
+
+<Callout kind="warn" title="Don't reflexively reach for UUIDs">
+If you don't need distributed/offline id generation, `bigserial` is smaller (8 vs 16 bytes), naturally ordered, and indexes beautifully. Choose a UUID for its distributed-generation property — and if you do, prefer **v7** so you don't reintroduce the random-insert problem `bigserial` never had.
+</Callout>
+
+<ProbeNote>The killer detail is *why* v7 matters: random v4 keys cause B-tree page splits and destroy cache locality on the index's hot path, while v7's time-ordered prefix makes inserts append to the right edge like a serial. Be accurate about PG 17 — `gen_random_uuid()` is v4, and there's no core `uuidv7()` until PG 18, so v7 comes from the app or an extension today.</ProbeNote>

@@ -1,0 +1,50 @@
+**Both `RETURNS SETOF` and `RETURNS TABLE(...)` make a function return a *set of rows* (a set-returning function), and they're functionally equivalent — `TABLE` is essentially syntactic sugar that also declares named `OUT` columns inline.** The choice is about readability and how you reference the columns, not capability.
+
+## RETURNS SETOF
+
+`SETOF <type>` returns zero or more rows of an existing type — a table's row type, a composite type, or a scalar.
+
+```sql
+-- a set of an existing table's rows
+CREATE FUNCTION active_users() RETURNS SETOF users
+LANGUAGE sql STABLE
+RETURN (SELECT * FROM users WHERE active);
+
+-- a set of scalars
+CREATE FUNCTION recent_ids() RETURNS SETOF bigint
+LANGUAGE sql STABLE
+RETURN (SELECT id FROM orders WHERE ts > now() - interval '1 day');
+```
+
+`SETOF users` is great when the shape *is* an existing table or composite type — the function output automatically tracks the table definition. But if you want an ad-hoc shape, you'd otherwise have to `CREATE TYPE` first.
+
+## RETURNS TABLE
+
+`RETURNS TABLE(col1 type1, col2 type2, ...)` declares the output columns inline, so you get a named, ad-hoc row shape without a separate type definition. Those column names act as `OUT` parameters you can assign to inside the body.
+
+```sql
+CREATE FUNCTION sales_by_region(yr int)
+RETURNS TABLE(region text, total numeric)
+LANGUAGE sql STABLE AS $$
+  SELECT region, sum(amount)
+  FROM sales WHERE extract(year from ts) = yr
+  GROUP BY region;
+$$;
+
+SELECT * FROM sales_by_region(2025);
+```
+
+In PL/pgSQL, the `TABLE` form lets you `RETURN QUERY` or `RETURN NEXT` while referring to the columns by their declared names — usually more readable than `SETOF record` plus an `OUT` list.
+
+## The practical guidance
+
+- Use **`SETOF <table_or_type>`** when the result shape *is* an existing table row or composite type — it stays in sync automatically.
+- Use **`RETURNS TABLE(...)`** when you want a custom result shape defined right at the function, without creating a standalone type. This is the most common choice for reporting/aggregation functions.
+
+One caller-side nuance: a function returning `SETOF record` with no column definitions forces callers to supply a column list (`SELECT * FROM f() AS (a int, b text)`). `RETURNS TABLE` and `SETOF <named type>` both avoid that because the columns are already named.
+
+<Callout kind="tip" title="Either way, call it in FROM">
+Set-returning functions are used in the `FROM` clause: `SELECT * FROM sales_by_region(2025)`. Both forms support `RETURN QUERY` (PL/pgSQL) to stream a query's rows out directly, which is the idiomatic way to write them.
+</Callout>
+
+<ProbeNote>The expected answer is "they're equivalent; `RETURNS TABLE` just names the output columns inline so you skip a `CREATE TYPE`, while `SETOF <type>` reuses an existing row type." Mentioning that bare `SETOF record` forces callers to write a column list — and `TABLE` avoids it — shows you've actually shipped set-returning functions.</ProbeNote>

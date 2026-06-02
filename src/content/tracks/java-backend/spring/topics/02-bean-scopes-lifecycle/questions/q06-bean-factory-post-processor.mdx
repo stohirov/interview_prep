@@ -1,0 +1,53 @@
+**A `BeanFactoryPostProcessor` (BFPP) operates on bean *definitions* — the metadata — *before* any bean is instantiated, whereas a `BeanPostProcessor` operates on bean *instances* after they're created. Definitions vs instances is the entire distinction.** Get that contrast crisp and this question is yours.
+
+## The interface
+
+One callback, handed the whole bean factory while it still holds only definitions:
+
+```java
+public interface BeanFactoryPostProcessor {
+    void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory);
+}
+```
+
+At this point no application bean has been constructed yet. You can inspect and **modify bean definitions** — change a property value, alter a scope, add or remove a definition — and those changes take effect when Spring later instantiates the beans.
+
+## When it runs
+
+Early, during context refresh, **before** singleton instantiation begins — and therefore before any `BeanPostProcessor` callback fires (BPPs need instances to exist; BFPPs run before instances exist).
+
+```text
+refresh()
+  -> invoke BeanFactoryPostProcessors   (edit DEFINITIONS)
+  -> instantiate singletons
+       -> BeanPostProcessors             (edit INSTANCES)
+```
+
+## The canonical example
+
+`PropertySourcesPlaceholderConfigurer` is a `BeanFactoryPostProcessor`. It resolves `${...}` placeholders in bean definitions *before* beans are built, so the right literal values are already in place at instantiation. `ConfigurationClassPostProcessor` (which processes `@Configuration` / `@Bean`) is another.
+
+```java
+@Component
+public class EnforceScopeBfpp implements BeanFactoryPostProcessor {
+    public void postProcessBeanFactory(ConfigurableListableBeanFactory bf) {
+        BeanDefinition def = bf.getBeanDefinition("reportBuilder");
+        def.setScope(BeanDefinition.SCOPE_PROTOTYPE);   // rewrite metadata
+    }
+}
+```
+
+## BFPP vs BPP at a glance
+
+| | BeanFactoryPostProcessor | BeanPostProcessor |
+|---|---|---|
+| Operates on | bean **definitions** (metadata) | bean **instances** |
+| Timing | before instantiation | around init callbacks |
+| Can do | edit/add/remove definitions, resolve `${...}` | wrap in proxies, inject, run init logic |
+| Example | `PropertySourcesPlaceholderConfigurer` | `AutowiredAnnotationBeanPostProcessor` |
+
+<Callout kind="tip" title="One-line mnemonic">
+BeanFactoryPostProcessor edits the *blueprints*; BeanPostProcessor edits the *buildings*. Blueprints are processed first, so `${...}` placeholders are already resolved by the time any instance is born.
+</Callout>
+
+<ProbeNote>The interviewer is checking the definitions-vs-instances boundary and the ordering (BFPP before any instantiation, hence before every BPP). Naming `PropertySourcesPlaceholderConfigurer` as the real-world BFPP is the detail that lands the answer.</ProbeNote>

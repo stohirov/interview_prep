@@ -1,0 +1,57 @@
+**Both create AOP proxies, but they sit at opposite ends of the convenience spectrum.** `ProxyFactoryBean` is the *old, explicit, per-bean* way: you manually wire one proxy, naming its target and interceptors. `@EnableAspectJAutoProxy` is the *modern, declarative, automatic* way: a post-processor scans every bean, matches it against all `@Aspect` pointcuts, and proxies whatever applies. In real Spring 6 / Boot apps you almost never write `ProxyFactoryBean` — but knowing it explains *what the auto-proxy machinery does for you*.
+
+## ProxyFactoryBean — manual, one bean at a time
+
+A `FactoryBean` that produces a single proxy. You spell out the target and the advice chain:
+
+```java
+@Bean
+public ProxyFactoryBean orderService(OrderServiceImpl target,
+                                      TxInterceptor txAdvice) {
+    ProxyFactoryBean pfb = new ProxyFactoryBean();
+    pfb.setTarget(target);
+    pfb.setInterceptorNames("txAdvice");   // advice/advisor bean names
+    pfb.setProxyTargetClass(true);         // force CGLIB
+    return pfb;
+}
+```
+
+Drawbacks that killed it for everyday use:
+
+- **One declaration per proxied bean** — doesn't scale past a handful.
+- You manage targets, interceptor names, and proxy type by hand.
+- Easy to get wrong (forget an interceptor, mis-name an advisor).
+
+It still has niche uses: programmatically building a one-off proxy, or low-level control in framework code.
+
+## @EnableAspectJAutoProxy — declarative, automatic
+
+Registers `AnnotationAwareAspectJAutoProxyCreator`, a `BeanPostProcessor`. As each bean is created, it:
+
+1. collects all `@Aspect` beans and their pointcuts,
+2. checks whether the bean matches any pointcut,
+3. if so, transparently wraps it in a proxy with the matching advice — *without you declaring anything per bean*.
+
+```java
+@Configuration
+@EnableAspectJAutoProxy(proxyTargetClass = true)   // Boot defaults this on
+class AopConfig {}
+```
+
+You just write aspects:
+
+```java
+@Aspect @Component
+class TxAspect {
+    @Around("@annotation(Transactional)")
+    public Object around(ProceedingJoinPoint pjp) throws Throwable { ... }
+}
+```
+
+…and every matching bean is proxied automatically.
+
+<Callout kind="info" title="Spring Boot does this for you">
+You rarely type `@EnableAspectJAutoProxy` in a Boot app — `spring-boot-starter-aop` auto-configures it (`AopAutoConfiguration`) with `proxyTargetClass=true`. Dropping the AOP starter in and declaring `@Aspect` components is all that's needed.
+</Callout>
+
+<ProbeNote>Frame it as *manual vs automatic*. `ProxyFactoryBean` = explicit single-proxy wiring (legacy, doesn't scale); `@EnableAspectJAutoProxy` = a `BeanPostProcessor` that auto-proxies every bean matching any `@Aspect` pointcut. Bonus point: note Boot auto-enables it via the AOP starter, so you almost never write either by hand.</ProbeNote>

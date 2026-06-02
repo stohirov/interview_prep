@@ -1,0 +1,42 @@
+**A bean is simply an object whose lifecycle is managed by the Spring container — instantiated, configured, dependency-injected, and assembled by the `ApplicationContext` from a *bean definition*.** The word sounds grander than it is: a bean is a plain Java object plus the metadata that tells Spring how to build and manage it.
+
+## Bean definition vs. bean instance
+
+Keep two things distinct. A **bean definition** is the recipe — the metadata Spring reads (the class, scope, constructor args, properties, init/destroy callbacks, lazy flag). It comes from a `@Bean` method, a component-scanned `@Component`, or XML. The **bean** is the actual instance the container produces from that recipe. One definition can yield one instance (singleton) or many (prototype).
+
+## What the container does with it
+
+For each definition the container runs a defined lifecycle:
+
+1. **Instantiate** — call the constructor (or factory `@Bean` method).
+2. **Populate / inject** — resolve and set dependencies (`@Autowired`, constructor args).
+3. **Aware callbacks** — `BeanNameAware`, `ApplicationContextAware`, etc.
+4. **`BeanPostProcessor.postProcessBeforeInitialization`** — this is where AOP proxies, `@Transactional`, etc. get applied.
+5. **Initialization** — `@PostConstruct`, then `InitializingBean.afterPropertiesSet()`, then a custom `initMethod`.
+6. **`postProcessAfterInitialization`** — the bean is now ready and registered.
+7. **In use** for the life of the context.
+8. **Destruction** — `@PreDestroy` / `DisposableBean.destroy()` / `destroyMethod` on context shutdown (singletons only).
+
+```java
+@Component
+public class CacheWarmer {
+    @PostConstruct
+    void init()   { /* runs after injection, before the bean is handed out */ }
+    @PreDestroy
+    void cleanup(){ /* runs on context shutdown */ }
+}
+```
+
+## Scope — how many instances
+
+The default scope is **singleton**: one shared instance *per `ApplicationContext`* (not a JVM-wide GoF singleton — two contexts have two instances). Other scopes: `prototype` (a fresh instance every injection/lookup; the container does *not* manage its full lifecycle or call destroy callbacks), and web scopes `request`, `session`, `application`, `websocket`.
+
+```java
+@Bean
+@Scope("prototype")
+PdfReport report() { return new PdfReport(); }
+```
+
+A subtle trap: injecting a `prototype` bean into a `singleton` gives you exactly one prototype instance, captured once at wiring time — to get a fresh one per call you need `ObjectProvider`, a lookup method, or scoped-proxy.
+
+<ProbeNote>The interviewer wants the *definition vs. instance* distinction, awareness of the **lifecycle** (especially that `BeanPostProcessor`s are where proxies are applied), and that singleton means *one per context*, not JVM-wide. The prototype-into-singleton gotcha is the senior flourish.</ProbeNote>

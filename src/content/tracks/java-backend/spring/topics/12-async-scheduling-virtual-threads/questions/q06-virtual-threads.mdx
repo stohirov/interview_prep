@@ -1,0 +1,39 @@
+**In Spring Boot 3.2+ on JDK 21, setting `spring.threads.virtual.enabled=true` flips the framework's thread infrastructure from platform threads to *virtual threads* (Project Loom) — one property, no code changes.** It doesn't make your code reactive; it makes the familiar blocking, thread-per-request model scale, because virtual threads are cheap (you can have millions) and a blocked virtual thread doesn't tie up an OS thread.
+
+## What the flag actually switches
+
+```properties
+spring.threads.virtual.enabled=true
+```
+
+Concretely, Spring auto-configuration redirects these to virtual threads:
+
+- **Web request handling** — the embedded **Tomcat** (and Jetty) servlet executor runs each request on its own virtual thread, so the server is no longer capped by a ~200-thread platform pool. Thousands of concurrent blocking requests become viable.
+- **`@Async` executor** — the auto-configured async executor becomes a virtual-thread-per-task executor instead of the pooled `applicationTaskExecutor`.
+- **`@Scheduled` / task scheduling** — scheduled task execution uses virtual threads too.
+
+So both pillars of this topic — async and scheduling — and the web tier switch together with that one flag.
+
+## Why this matters
+
+A platform thread costs ~1 MB of stack and is a scarce OS resource, which is why traditional servers use a bounded pool and why a slow downstream call (DB, HTTP) ties up a precious thread. A **virtual thread** is a lightweight JVM construct mounted onto a small pool of *carrier* OS threads only while running; when it blocks on IO, it **unmounts**, freeing the carrier for other work.
+
+```java
+// No code change needed — this controller method already benefits:
+@GetMapping("/orders/{id}")
+public Order get(@PathVariable long id) {
+    return restClient.get()...retrieve().body(Order.class);  // blocking call,
+}                                                            // virtual thread unmounts while waiting
+```
+
+## Requirements and caveats
+
+- Needs **JDK 21+** and **Boot 3.2+**.
+- It's opt-in — off by default, because behavior changes (thread-locals, monitoring, pinning) warrant a deliberate choice.
+- It helps **IO-bound/blocking** workloads, not CPU-bound ones, and `synchronized` blocks can still *pin* the carrier (largely a non-issue from JDK 24). Those nuances are the next question.
+
+<Callout kind="info" title="Blocking code, scaled — not reactive">
+Virtual threads are an alternative to WebFlux for the *scalability* problem, not the programming model. You keep writing straightforward blocking code and the runtime handles the concurrency, instead of adopting reactive types and operators.
+</Callout>
+
+<ProbeNote>The interviewer wants the precise scope of the flag: `spring.threads.virtual.enabled=true` (Boot 3.2+, JDK 21) switches Tomcat request handling *and* the async/scheduling executors to virtual threads. The framing that earns points: "it scales the blocking model — IO-bound work — without going reactive."</ProbeNote>

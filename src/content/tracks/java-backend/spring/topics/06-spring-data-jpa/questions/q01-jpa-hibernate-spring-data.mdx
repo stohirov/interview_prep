@@ -1,0 +1,32 @@
+**These are three different things at three different layers, and conflating them is the fastest way to fail this question.** Say it as a stack: JPA is the specification, Hibernate is an implementation of it, Spring Data JPA is a repository abstraction built on top.
+
+## JPA — the specification
+
+JPA (Jakarta Persistence, formerly Java Persistence API) is *just a spec*. It defines the annotations (`@Entity`, `@Id`, `@OneToMany`, …) and the API (`EntityManager`, `persist`, `merge`, JPQL) in the `jakarta.persistence.*` package. It contains **no behaviour** — you cannot run JPA, only a provider that implements it. The rename from `javax.persistence` to `jakarta.persistence` is the Jakarta EE 9+ namespace move, mandatory in Spring Boot 3.x.
+
+## Hibernate — the implementation
+
+Hibernate 6 is the default JPA *provider* in Spring Boot. It does the real ORM work: maps entities to tables, generates SQL, manages the persistence context (first-level cache), performs dirty checking and flushing, handles lazy loading via proxies, and translates JPQL to dialect-specific SQL. Hibernate also has features *beyond* the spec (`@BatchSize`, `@Formula`, native `Session` API, second-level cache). Other implementations exist (EclipseLink), but Hibernate is what you get by default.
+
+## Spring Data JPA — the repository abstraction
+
+Spring Data JPA sits on top of JPA. It removes the boilerplate DAO: you declare an interface, and Spring generates a proxy implementation at startup that delegates to an `EntityManager`.
+
+```java
+public interface UserRepository extends JpaRepository<User, Long> {
+    Optional<User> findByEmail(String email);   // implemented for you
+}
+```
+
+It gives you CRUD methods, derived query parsing (`findByEmailAndStatus`), `@Query`, `Pageable`/`Sort`, and `@Modifying`. Crucially, it is **not** an ORM — it has no idea how to talk to a database. It delegates everything to JPA, which delegates to Hibernate.
+
+## The mental model
+
+```text
+Your code  →  Spring Data JPA repository (generated proxy)
+           →  JPA  (EntityManager, jakarta.persistence.*)
+           →  Hibernate  (SQL, persistence context, proxies)
+           →  JDBC  →  database
+```
+
+<ProbeNote>The interviewer wants the clean separation: **spec vs implementation vs repository layer**. Bonus points for naming the `jakarta.*` namespace (Boot 3), stating that you could swap Hibernate for EclipseLink without touching Spring Data code, and noting Hibernate offers features outside the JPA spec.</ProbeNote>

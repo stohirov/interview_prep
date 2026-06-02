@@ -1,0 +1,61 @@
+**A projection returns only the columns you need instead of the whole entity — and the right answer to "entity or DTO?" for a read-only endpoint is almost always *DTO*.** Entities are heavyweight (managed, lazy proxies, dirty-checked); a projection is a lightweight read shape. Spring Data offers interface-based and class-based projections.
+
+## Why not just return entities?
+
+Returning an entity from a read API drags its full row, its managed state, and lazy associations (which then `LazyInitializationException` or trigger N+1 during serialization). A projection selects a flat subset in one query, returns plain objects, and sidesteps all of that.
+
+## Interface projections
+
+Declare an interface with getters; Spring returns a proxy that exposes only those properties. SELECTs only the mapped columns.
+
+```java
+interface UserView {
+    String getEmail();
+    String getName();
+}
+
+List<UserView> findByStatus(Status status);   // SELECT email, name FROM users WHERE ...
+```
+
+This is a **closed** projection (getters map directly to properties). An **open** projection uses `@Value` with SpEL — but that forces Spring to fetch the *whole* entity to evaluate the expression, losing the column-selection benefit:
+
+```java
+interface UserView {
+    @Value("#{target.firstName + ' ' + target.lastName}")
+    String getFullName();   // open → loads full entity
+}
+```
+
+## Class (DTO) projections
+
+A concrete class whose **constructor** parameters match the selected columns by name and order. Spring uses constructor injection (`record`s are ideal).
+
+```java
+record UserDto(String email, String name) {}
+
+List<UserDto> findByStatus(Status status);     // closed, constructor-bound
+```
+
+With JPQL you spell out the constructor explicitly via `new`:
+
+```java
+@Query("SELECT new com.app.UserDto(u.email, u.name) FROM User u WHERE u.status = :s")
+List<UserDto> find(@Param("s") Status s);
+```
+
+## Interface vs class — which?
+
+```text
+Interface projection  → quick, derived-query friendly, no extra type to write,
+                        supports nested projections; returns a proxy
+Class/record DTO      → a real immutable type you control, easy to pass around,
+                        works cleanly with the JPQL `new` constructor syntax
+```
+
+Prefer **records/class DTOs** when the shape is a real API contract you'll serialize and reuse; **interface projections** for quick, repository-local reads. Both, when *closed*, generate a narrow SELECT.
+
+<Callout kind="info" title="Dynamic projections">
+A repository method can be **generic** in the projection: `<T> List<T> findByStatus(Status s, Class<T> type)`. Callers choose `UserView.class` or `UserDto.class` per call — one method, many shapes.
+</Callout>
+
+<ProbeNote>Lead with *why*: projections avoid the cost and lazy-loading traps of returning entities and select only needed columns. Distinguish **interface** (proxy, closed vs open — open loads the full entity) from **class/record DTO** (constructor-bound, JPQL `new`). Mention closed projections narrow the SQL and dynamic projections via a `Class<T>` parameter.</ProbeNote>

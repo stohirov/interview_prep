@@ -1,0 +1,47 @@
+**Spring AOP creates proxies two ways, and the choice changes what your code can do.** A **JDK dynamic proxy** implements the target's *interfaces* — it's a sibling that delegates to the real object. A **CGLIB proxy** *subclasses* the target and overrides its methods. The historical rule was "JDK if the bean has an interface, CGLIB otherwise," but **since Spring Boot 2.x, CGLIB is the default even for interfaces** (`spring.aop.proxy-target-class=true`).
+
+## JDK dynamic proxy
+
+Built into the JDK via `java.lang.reflect.Proxy`. It generates a class that implements the target's interfaces and routes every call through an `InvocationHandler`.
+
+```java
+public interface PaymentService { void pay(); }
+
+@Service
+class StripePaymentService implements PaymentService {
+    @Transactional public void pay() { ... }
+}
+```
+
+The proxy is a `PaymentService`, **not** a `StripePaymentService`. Consequences:
+
+- You can only inject it by the **interface** type. `@Autowired StripePaymentService` fails.
+- Only interface-declared methods are advised; methods not on the interface are invisible.
+
+## CGLIB proxy
+
+CGLIB (now bundled inside `spring-core`) generates a **runtime subclass** of the target and overrides each method to insert advice.
+
+```java
+class StripePaymentService$$EnhancerBySpringCGLIB extends StripePaymentService { ... }
+```
+
+Because it's a subclass, the proxy *is-a* `StripePaymentService`, so injection by concrete type works. Limitations follow from subclassing:
+
+- **`final` classes can't be proxied**, **`final` methods can't be advised** (you can't override them).
+- The target needs an instantiable constructor (modern CGLIB uses Objenesis, so a no-arg constructor isn't strictly required).
+- It creates an extra subclass per bean.
+
+## How Spring chooses
+
+1. `proxyTargetClass = true` (Spring Boot default) → always CGLIB.
+2. Otherwise, target implements interfaces → JDK proxy.
+3. No interfaces → CGLIB regardless.
+
+You force CGLIB explicitly with `@EnableAspectJAutoProxy(proxyTargetClass = true)`.
+
+<Callout kind="warn" title="The Boot default catches people out">
+Pre-Boot, injecting by concrete type silently failed when a JDK proxy was used. Boot flipped the default to CGLIB precisely to avoid that surprise — so today most apps get CGLIB everywhere, and the "JDK if interface" rule you memorized no longer describes the default.
+</Callout>
+
+<ProbeNote>State the mechanism difference crisply — *JDK implements the interface, CGLIB subclasses the target* — then the consequences: JDK forces interface-typed injection; CGLIB can't proxy `final`. The senior detail that lands every time: **Spring Boot defaults to CGLIB even when interfaces exist** (`proxyTargetClass=true`).</ProbeNote>

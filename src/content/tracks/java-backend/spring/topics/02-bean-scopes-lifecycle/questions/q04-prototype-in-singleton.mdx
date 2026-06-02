@@ -1,0 +1,57 @@
+**The pitfall: a singleton is created and wired exactly once, so a prototype injected into it is resolved exactly once too — you get one prototype instance for the singleton's entire life, defeating the whole point of prototype scope.** Naively `@Autowired`-ing a prototype into a singleton does *not* give you a fresh instance per use.
+
+```java
+@Component
+public class OrderService {           // singleton
+    @Autowired private ReportBuilder builder;  // prototype — but wired ONCE
+
+    void run() { builder.build(); }   // same instance every call. Bug.
+}
+```
+
+There are four standard fixes. All share one idea: don't capture the instance — capture a way to *ask the container for a new one*.
+
+## 1. ApplicationContextAware + getBean
+
+Hold the context and look the bean up on each use. Works, but couples your code to the Spring API.
+
+```java
+@Autowired private ApplicationContext ctx;
+ReportBuilder fresh() { return ctx.getBean(ReportBuilder.class); }  // new each call
+```
+
+## 2. ObjectFactory / ObjectProvider
+
+Inject a factory; call `getObject()` for a fresh instance. `ObjectProvider` (Spring 4.3+) adds null-safe / optional lookups.
+
+```java
+@Autowired private ObjectProvider<ReportBuilder> builders;
+void run() { builders.getObject().build(); }   // new each call
+```
+
+## 3. jakarta.inject.Provider
+
+The JSR-330 equivalent — same pattern, standard API instead of a Spring type, which keeps your bean portable.
+
+```java
+@Inject private Provider<ReportBuilder> builderProvider;
+void run() { builderProvider.get().build(); }
+```
+
+## 4. @Lookup method injection
+
+Declare an abstract/overridable method; Spring overrides it via CGLIB to return a fresh prototype each call. Cleanest at the call site.
+
+```java
+@Lookup
+protected ReportBuilder newBuilder() { return null; }  // Spring replaces the body
+void run() { newBuilder().build(); }
+```
+
+A fifth option is a **scoped proxy** (`@Scope(value="prototype", proxyMode=TARGET_CLASS)`) on the prototype bean — the injected proxy resolves a new target per method call.
+
+<Callout kind="info" title="They all do the same thing">
+Every solution converts "inject the instance once" into "inject a lookup and resolve on demand." Pick by coupling: `ObjectProvider` is the idiomatic Spring choice, `Provider` (JSR-330) for portability, `@Lookup` for the tidiest call site.
+</Callout>
+
+<ProbeNote>The interviewer first checks you can *articulate the pitfall* (singleton wired once → prototype frozen), then wants more than one fix. Naming `ObjectProvider`, `Provider`, `@Lookup`, and `getBean` — and noting they all defer resolution to lookup time — is a strong senior answer.</ProbeNote>

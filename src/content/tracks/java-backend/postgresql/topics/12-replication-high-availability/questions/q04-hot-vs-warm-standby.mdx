@@ -1,0 +1,34 @@
+**The single distinction is whether the standby accepts read queries while it replays WAL: a hot standby is readable, a warm standby is not.** Both continuously apply the primary's WAL and both can be promoted on failover — but only a hot standby lets you actually use it before then.
+
+## Warm standby
+
+The server is up and replaying WAL, but it **rejects all client connections** for queries. It sits idle purely as a failover target — fully caught up, ready to be promoted, but you cannot offload a single `SELECT` to it. Its only job is to take over when the primary dies.
+
+## Hot standby
+
+The standby applies WAL **and serves read-only queries at the same time**. This is the default behavior in modern PostgreSQL — `hot_standby` is `on` by default. It gives you two wins from one machine: a failover target *and* read-scaling capacity.
+
+```ini
+# postgresql.conf on the standby (default is already on)
+hot_standby = on
+```
+
+On a hot standby you can run any read query, but writes are rejected:
+
+```sql
+SELECT count(*) FROM orders;     -- OK on a hot standby
+INSERT INTO orders ...;          -- ERROR: cannot execute INSERT in a read-only transaction
+```
+
+## The tension hot standby introduces
+
+Letting queries run *while WAL is replaying* creates a conflict: the primary might VACUUM away row versions that a long-running query on the standby still needs to see. PostgreSQL resolves this by either pausing replay or **canceling the standby query** ("canceling statement due to conflict with recovery"). Two knobs manage it:
+
+- **`max_standby_streaming_delay`** — how long to delay WAL replay to let standby queries finish before canceling them (trades replay lag for query survival).
+- **`hot_standby_feedback = on`** — the standby tells the primary which old row versions it still needs, so the primary's VACUUM holds off. This avoids query cancellations but can cause **bloat on the primary** because dead tuples linger.
+
+<Callout kind="info" title="Why anyone still runs warm standby">
+Pure warm standby is rare today since hot is the default. You'd only suppress reads when you want the standby's I/O and CPU reserved entirely for replay (minimal lag, fastest possible failover) and refuse to risk replay delays from `max_standby_streaming_delay` or primary bloat from `hot_standby_feedback`.
+</Callout>
+
+<ProbeNote>The crisp line is "hot = readable while replaying, warm = replays but rejects queries." Bonus depth: explain the **replay-vs-query conflict** on a hot standby and the `hot_standby_feedback` / `max_standby_streaming_delay` trade-off (cancellations vs primary bloat vs replay lag).</ProbeNote>

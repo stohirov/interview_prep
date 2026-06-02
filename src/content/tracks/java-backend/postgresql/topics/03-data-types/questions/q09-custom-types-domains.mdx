@@ -1,0 +1,52 @@
+**Domains and custom types let you push rules and structure *into the type system*, so a constraint lives in one place instead of being copy-pasted into every table and every `CHECK`.** They're underused, and knowing them signals you think about schemas as a system, not a pile of columns.
+
+## DOMAIN — a base type plus a reusable constraint
+
+A `DOMAIN` is an existing type with optional `NOT NULL`, a `DEFAULT`, and `CHECK` constraints attached, given a name you reuse everywhere:
+
+```sql
+CREATE DOMAIN email AS text
+    CHECK (VALUE ~ '^[^@\s]+@[^@\s]+\.[^@\s]+$');
+
+CREATE DOMAIN positive_int AS integer
+    CHECK (VALUE > 0);
+
+CREATE TABLE users (
+    id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    contact_email email NOT NULL,        -- format enforced automatically
+    login_count   positive_int NOT NULL DEFAULT 1
+);
+```
+
+Now *every* `email` column shares one validation rule. Change the regex once with `ALTER DOMAIN ... ADD/DROP CONSTRAINT` and it applies everywhere — and Postgres re-validates existing data when you add a constraint. This is the main payoff: **DRY, centrally-managed invariants** instead of duplicated `CHECK` clauses.
+
+One sharp edge: a domain `CHECK` and `NULL`. `NOT NULL` on a domain helps, but a domain constraint can still be bypassed by a `NULL` flowing through certain expressions/casts — keep `NOT NULL` on the *column* too when nullability matters.
+
+## Composite (row) types
+
+`CREATE TYPE` builds a structured value with named fields — useful as a function return type or a single structured column:
+
+```sql
+CREATE TYPE address AS (
+    street text,
+    city   text,
+    zip    text
+);
+
+CREATE TABLE customer (shipping address);
+SELECT (shipping).city FROM customer;   -- access a field
+```
+
+Every table also implicitly defines a composite type of its row shape. Composite *columns* are occasionally handy but often better modeled as plain columns (you can't easily index or constrain individual subfields). Their best use is **function return values** and `RETURNS TABLE`.
+
+## Other custom types
+
+- **Enumerated types** (`CREATE TYPE ... AS ENUM`) — covered separately.
+- **Range types** (`int4range`, `tsrange`, `daterange`) — built-in, and you can define your own; great for "valid between two timestamps" with exclusion constraints.
+- **Base types** via C extensions — rare in application work.
+
+<Callout kind="info" title="What domains buy you">
+A domain centralizes a rule (format, range, non-null) into a named, reusable type. The cost is a layer of indirection in error messages and migrations; the benefit is that "what is a valid email/SKU/percentage?" is defined exactly once.
+</Callout>
+
+<ProbeNote>The interviewer wants: a `DOMAIN` = base type + reusable `CHECK`/`DEFAULT`/`NOT NULL` for DRY, centrally-managed validation across many columns; composite types = named-field rows, most useful as function return types. Bonus for the domain-`NULL` caveat and for naming range types as another built-in custom type.</ProbeNote>

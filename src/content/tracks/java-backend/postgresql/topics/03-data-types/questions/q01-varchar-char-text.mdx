@@ -1,0 +1,38 @@
+**In PostgreSQL the three string types are nearly identical under the hood — and `CHAR(n)` is the one you almost never want.** They all use the same `varlena` storage; the differences are length enforcement and, for `CHAR`, blank-padding. Knowing that lets you default correctly instead of copying `VARCHAR(255)` everywhere.
+
+## TEXT — unlimited, no length check
+
+`TEXT` stores a string of any length with no maximum (up to ~1 GB, the field limit). No length validation, no padding. This is the right default for the overwhelming majority of string columns: names, emails, descriptions, slugs.
+
+## VARCHAR(n) — TEXT with a length cap
+
+`VARCHAR(n)` is identical to `TEXT` except it rejects strings longer than `n` characters. There is **no storage or performance benefit** to a small `n` — Postgres does not pre-allocate `n` bytes. Use `VARCHAR(n)` only when `n` is a real constraint you want the database to enforce (e.g. a 2-char ISO country code, a 3-char currency code). Plain `VARCHAR` with no length is exactly `TEXT`.
+
+## CHAR(n) — blank-padded, fixed-length, avoid
+
+`CHAR(n)` pads shorter values with trailing spaces to exactly `n` characters. This causes real bugs:
+
+```sql
+CREATE TABLE t (code char(5));
+INSERT INTO t VALUES ('ab');
+SELECT code = 'ab' FROM t;        -- true (padding ignored in = comparison)
+SELECT length(code) FROM t;       -- 5, not 2
+SELECT '[' || code || ']' FROM t; -- [ab   ]  -- padding leaks into concatenation
+```
+
+The padding is silently stripped by `=` but **leaks** in concatenation, `length()`, `LIKE`, and when the value crosses into application code. `CHAR(n)` also wastes space and is not faster. There is essentially no modern use case for it.
+
+## What to default to
+
+`TEXT`. Add a `CHECK` constraint if you need more than a length rule (e.g. a format), and use `VARCHAR(n)` only for a genuine maximum length.
+
+```sql
+email text NOT NULL CHECK (position('@' in email) > 1),
+country_code varchar(2) NOT NULL  -- real, meaningful cap
+```
+
+<Callout kind="info" title="The VARCHAR(255) myth">
+`255` comes from old MySQL where it was the largest length storable with a 1-byte length prefix. PostgreSQL has no such rule — `255` carries zero meaning here. Pick `n` from the business, or use `TEXT`.
+</Callout>
+
+<ProbeNote>The interviewer wants to hear "they're the same storage; default to `TEXT`; `VARCHAR(n)` only for a real cap; `CHAR(n)` blank-pads and is a trap." Bonus points for the `VARCHAR(255)` myth and for naming a concrete `CHAR` bug like padding leaking into concatenation or `length()`.</ProbeNote>

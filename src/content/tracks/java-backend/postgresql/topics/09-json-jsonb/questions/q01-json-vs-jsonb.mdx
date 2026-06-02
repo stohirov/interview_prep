@@ -1,0 +1,41 @@
+**`json` stores the original text; `jsonb` stores a parsed binary tree — and you should almost always reach for `jsonb`.** The names hide a fundamental representation difference that decides indexing, query operators, and read performance.
+
+## What `json` actually stores
+
+The `json` type keeps the input **exactly as written**: whitespace, the order of keys, and even duplicate keys are all preserved. It validates that the text is well-formed JSON and then stores the string. Every time you extract a field, PostgreSQL **re-parses** the whole document.
+
+```sql
+SELECT '{"b": 1,   "a": 2, "a": 3}'::json;
+-- {"b": 1,   "a": 2, "a": 3}   <- whitespace, order, duplicate "a" all kept
+```
+
+## What `jsonb` stores
+
+`jsonb` parses the input **once on insert** into a decomposed binary format. Consequences:
+
+- **Keys are deduplicated** — the last value wins.
+- Whitespace is dropped and **key order is not preserved** (it stores keys in a canonical order).
+- Reads don't re-parse, so field access is fast.
+- It supports **GIN indexes** and the containment (`@>`, `<@`) and existence (`?`, `?&`, `?|`) operators.
+
+```sql
+SELECT '{"b": 1, "a": 2, "a": 3}'::jsonb;
+-- {"a": 3, "b": 1}   <- deduped (last wins), reordered, normalized
+```
+
+## The trade-off
+
+| | `json` | `jsonb` |
+|---|---|---|
+| Storage | original text | binary tree |
+| Insert cost | cheap (just validate) | slightly higher (parse) |
+| Read/extract | re-parses each time | fast, no parse |
+| Indexing | none | GIN (and expression B-tree) |
+| Containment / existence ops | no | yes |
+| Preserves whitespace / order / dupes | yes | no |
+
+## When `json` is the right call
+
+Only when **byte-for-byte fidelity matters** and you won't query inside it: storing the *exact* webhook or API payload for an audit trail where you must reproduce what the client sent, including key order or duplicates. Even then, many teams store the raw string in a `text` column and keep a separate `jsonb` for querying.
+
+<ProbeNote>The interviewer wants the crisp default — "use `jsonb`" — with the reasons: parsed once, indexable, supports containment/existence. Bonus points for naming the exact `json`-only guarantees (whitespace, key order, duplicate keys preserved) and the one legitimate use case: faithfully storing an original payload.</ProbeNote>

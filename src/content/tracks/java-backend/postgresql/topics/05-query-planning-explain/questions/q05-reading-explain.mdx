@@ -1,0 +1,36 @@
+**Reading EXPLAIN output is a skill of comparing four numbers on each node and finding where the planner's model of your data diverges from reality.** This is the question that separates people who can *recite* node types from people who can *debug*.
+
+## The numbers on every node
+
+```
+Hash Join  (cost=12.4..210.7 rows=500 width=64) (actual time=0.3..14.2 rows=48000 loops=1)
+```
+
+- **`cost=startup..total`** — estimated, in abstract units. *Startup* is work before the first row (e.g., building a hash table or sorting); *total* is through the last row. A `LIMIT` cares about startup cost; a full aggregate cares about total.
+- **`rows`** — the planner's **estimated** output cardinality.
+- **`width`** — estimated average bytes per row (matters for memory and sorts).
+- **`actual time=first..last`** — real milliseconds to first and last row, **per loop**.
+- **`actual rows`** — what really came out, **per loop**.
+- **`loops`** — how many times this node executed. **True totals = `actual rows × loops` and `actual time × loops`.**
+
+## The one comparison that matters most
+
+Line up **estimated `rows`** against **`actual rows`**. In the example above the planner expected 500 and got 48,000 — a ~100× under-estimate. Everything above this node was planned for 500 rows, so it likely chose a Nested Loop or under-sized a hash, and the query is slow. **Mis-estimation propagates upward**, so find the *lowest* node where the gap first appears — that's the root cause, not the symptom at the top.
+
+## Over- vs under-estimation
+
+- **Under-estimation** (actual ≫ estimated): often causes a Nested Loop that should have been a Hash Join, or a hash that spills. Common causes: correlated predicates the planner assumes are independent, stale stats, or a `LIKE`/function it can't estimate.
+- **Over-estimation** (actual ≪ estimated): can cause an unnecessary Seq Scan or an over-large hash. Often from a `WHERE` on a column with skewed values and a low statistics target.
+
+## Other tells
+
+- **`Rows Removed by Filter: N`** — the node read N rows it then threw away. Large values mean a missing or unusable index for that predicate.
+- **`Heap Fetches: N`** on an Index Only Scan — the visibility map wasn't all-visible, so it had to touch the heap anyway. High fetches → the table needs a `VACUUM`.
+- **`Buffers: shared read=N`** — actual disk reads; high `read` vs `hit` means cold cache or a working set bigger than RAM.
+- **Sort/Hash nodes showing `Disk: N kB`** — they spilled past `work_mem`.
+
+<Callout kind="tip" title="Debugging recipe">
+Run `EXPLAIN (ANALYZE, BUFFERS)`. Scan bottom-up for the first node where estimated and actual rows diverge sharply. Ask *why* the estimate is wrong — then fix the estimate (ANALYZE, `ALTER TABLE ... SET STATISTICS`, `CREATE STATISTICS` for correlated columns) before touching anything else.
+</Callout>
+
+<ProbeNote>The interviewer wants to see you instinctively compare **estimated vs actual rows**, account for `loops` when reading per-iteration numbers, and treat a bad plan as a *statistics* problem. Mentioning `Rows Removed by Filter`, `Heap Fetches`, and spills-to-disk marks a candidate who has actually stared at these plans.</ProbeNote>

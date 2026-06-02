@@ -1,0 +1,37 @@
+**Auto-configuration is Spring Boot automatically registering beans you'd otherwise declare by hand, based on what's on the classpath, what beans already exist, and what properties are set.** It is not magic and it is not reflection-scanning your code — it's a fixed list of `@Conditional`-guarded `@Configuration` classes that Boot evaluates at startup.
+
+## How the decision is made
+
+`@EnableAutoConfiguration` (inside `@SpringBootApplication`) tells Boot to load every auto-configuration class it can find and evaluate it. Each class carries `@Conditional` annotations that act as gates:
+
+- **`@ConditionalOnClass`** — only configure if a type is on the classpath (e.g. `DataSource.class`). This is how "add the jar and it just works" happens.
+- **`@ConditionalOnMissingBean`** — only configure if *you* haven't defined that bean. This is why your own `@Bean` always wins.
+- **`@ConditionalOnProperty`** — only when a property has a given value.
+- **`@ConditionalOnWebApplication`** — only in a servlet/reactive web context.
+
+If every condition on a class passes, it contributes its beans; if any fails, the class is silently skipped.
+
+## The order of operations
+
+1. The application context starts and processes `@EnableAutoConfiguration`.
+2. Boot reads the candidate class names from `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` in every jar on the classpath.
+3. Candidates are ordered (`@AutoConfiguration(before=..., after=...)`, `@AutoConfigureOrder`) and importantly evaluated **after** your own `@Component`/`@Configuration` beans, so user beans exist when `@ConditionalOnMissingBean` runs.
+4. Each surviving class registers its beans.
+
+```java
+@SpringBootApplication
+public class App {
+    public static void main(String[] args) {
+        SpringApplication.run(App.class, args);
+    }
+    // No @Bean DataSource here, yet Boot wires one because
+    // spring-boot-starter-data-jpa is on the classpath and
+    // spring.datasource.* properties are set.
+}
+```
+
+## The mental model to state
+
+Auto-configuration = *"a curated set of `@Configuration` classes, each saying I'll configure X **only if** these conditions hold."* The conditions are classpath presence, absence of a user-defined bean, and property values. Because of `@ConditionalOnMissingBean`, every default is overridable — you opt out simply by defining the bean yourself.
+
+<ProbeNote>The interviewer wants three drivers named explicitly: classpath (`@ConditionalOnClass`), your existing beans (`@ConditionalOnMissingBean`), and properties (`@ConditionalOnProperty`). Bonus points for noting auto-config runs *after* user config so your beans take precedence, and that `--debug` reveals every decision.</ProbeNote>

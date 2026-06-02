@@ -1,0 +1,40 @@
+**`DATE`, `TIME`, and `INTERVAL` round out the temporal family — each simple on its face, each with a gotcha that shows up in interviews.** The theme: know exactly what each one stores and what it deliberately ignores.
+
+## DATE — a calendar day, no time, no zone
+
+`DATE` is 4 bytes, just year-month-day. No clock, no offset. Perfect for birthdays, invoice dates, "the day a report covers." Date arithmetic returns plain integers (days):
+
+```sql
+SELECT '2026-06-02'::date - '2026-05-30'::date;   -- 3  (an integer, not an interval)
+SELECT '2026-06-02'::date + 7;                     -- 2026-06-09  (add days directly)
+```
+
+A subtle gotcha: subtracting two `timestamptz` values yields an `INTERVAL`, but subtracting two `date` values yields an `integer`. Mixing them forces a cast.
+
+## TIME — a wall clock, usually without zone
+
+`TIME` (without time zone) is a time of day, `00:00:00` to `24:00:00`, with no date and no zone. Good for "store opens at 09:00." There is also `TIME WITH TIME ZONE` (`timetz`), but **avoid it** — a time-of-day with a fixed UTC offset is nearly meaningless because the correct offset depends on the date (DST). The Postgres docs themselves discourage it.
+
+## INTERVAL — a span, and it doesn't normalize
+
+`INTERVAL` stores a duration as three independent fields: **months, days, and microseconds**. They are deliberately *not* collapsed into each other because the conversions aren't constant:
+
+```sql
+SELECT interval '1 month';           -- 1 mon   (not "30 days")
+SELECT interval '1 day' = interval '24 hours';  -- false (days ≠ hours across DST)
+SELECT '2026-01-31'::date + interval '1 month'; -- 2026-02-28  (clamped, not 31st)
+```
+
+This is correct, not a bug: a month is 28–31 days, and a calendar day is 23–25 hours across a DST transition. Because the fields are separate, two intervals that "feel equal" can compare unequal, and adding `1 month` does sensible calendar math (clamping Jan 31 + 1 month to the last day of Feb).
+
+```sql
+SELECT justify_interval(interval '36 hours');  -- 1 day 12:00:00  (normalize cautiously)
+```
+
+Use `justify_interval`/`justify_hours`/`justify_days` only when you explicitly want the (lossy) normalization.
+
+<Callout kind="info" title="Adding intervals to timestamptz respects DST">
+`timestamptz + interval '1 day'` advances the wall clock by a calendar day (which may be 23 or 25 hours), whereas `+ interval '24 hours'` adds exactly 24 hours. Across a DST boundary these differ — pick the one that matches your intent.
+</Callout>
+
+<ProbeNote>The interviewer wants: `DATE` is a zoneless calendar day, `date - date` gives an integer; avoid `TIME WITH TIME ZONE`; and the headline — `INTERVAL` keeps months/days/microseconds separate on purpose, so `1 month ≠ 30 days` and `1 day ≠ 24 hours` across DST. Knowing `+ interval '1 month'` clamps month-ends is a strong signal.</ProbeNote>

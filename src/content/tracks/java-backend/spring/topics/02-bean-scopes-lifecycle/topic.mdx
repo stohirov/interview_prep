@@ -1,0 +1,22 @@
+A Spring bean has two orthogonal properties the container manages for you: its **scope** (how many instances exist and how long each lives) and its **lifecycle** (the ordered sequence of callbacks the container drives from raw object to fully-wired, ready-to-use bean). Mastering both is what separates "I annotate things and they work" from "I know exactly when my code runs and why."
+
+**Scope** answers *how many and how long*. The default is `singleton` — one shared instance per container, created eagerly at startup and cached for the application's life. `prototype` gives a brand-new instance on every lookup and the container stops tracking it after creation. The web scopes (`request`, `session`, `application`, `websocket`) tie an instance's life to an HTTP request, an HTTP session, the `ServletContext`, or a WebSocket session respectively.
+
+```java
+@Component
+@Scope("prototype")          // new instance per getBean / injection point
+public class ReportBuilder { }
+
+@Component                     // implicit singleton
+public class ReportService { }
+```
+
+**Lifecycle** answers *what runs and in what order*. After Spring instantiates a bean and injects its dependencies, it fires a fixed chain: `Aware` callbacks → `BeanPostProcessor` *before*-init → `@PostConstruct` → `InitializingBean.afterPropertiesSet()` → custom `init-method` → `BeanPostProcessor` *after*-init → ready. On shutdown it reverses to `@PreDestroy` → `DisposableBean.destroy()` → custom `destroy-method`. Those `BeanPostProcessor` hooks are not academic — they're how `@Autowired`, `@Transactional`, and AOP proxies get woven in.
+
+The two extension points people confuse are `BeanFactoryPostProcessor` (rewrites bean *definitions* before any bean is instantiated — e.g. `PropertySourcesPlaceholderConfigurer` resolving `${...}`) and `BeanPostProcessor` (touches *instances* after instantiation). Knowing which operates on definitions vs instances is a frequent senior probe.
+
+<Callout kind="tip" title="The interview hook">
+Be able to say it cold: "Default scope is singleton, one per context. The lifecycle is instantiate → inject → Aware → BPP-before → @PostConstruct → afterPropertiesSet → init-method → BPP-after → ready, and reverse on destroy. `@Autowired` is itself a `BeanPostProcessor`. And the classic trap — a prototype injected into a singleton is wired once and never refreshed — has four fixes I can name."
+</Callout>
+
+The questions below cover each scope, the exact lifecycle order, `@PostConstruct`/`@PreDestroy`, the prototype-in-singleton pitfall, both post-processor types, and how to choose between interfaces, annotations, and XML.

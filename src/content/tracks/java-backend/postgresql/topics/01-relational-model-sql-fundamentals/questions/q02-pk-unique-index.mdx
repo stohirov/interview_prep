@@ -1,0 +1,41 @@
+**These three are related but not interchangeable: a primary key is a constraint, a unique constraint is a constraint, and a unique index is the *mechanism* both of them use.** Conflating them is a classic junior mistake.
+
+## Unique index — the mechanism
+
+A unique index is a physical structure (in PostgreSQL, a B-tree) that *enforces* uniqueness as a side effect of indexing. You can create one directly:
+
+```sql
+CREATE UNIQUE INDEX idx_users_email ON users (email);
+```
+
+It rejects duplicate keys and speeds up lookups. It is *not* a named constraint in the catalog's constraint sense, and crucially it **cannot be the target of a foreign key**.
+
+## Unique constraint — the rule
+
+A `UNIQUE` constraint is a declared rule that the values in a column (or set of columns) are unique. PostgreSQL *implements* it by automatically creating a unique index behind it.
+
+```sql
+ALTER TABLE users ADD CONSTRAINT uq_users_email UNIQUE (email);
+```
+
+The practical differences from a bare unique index: it appears in `information_schema.table_constraints`, it can be referenced by a foreign key, and a column can be the parent of an FK only if it carries a `UNIQUE` or `PRIMARY KEY` constraint — not merely a unique index.
+
+## Primary key — unique + not null + "the" identity
+
+A `PRIMARY KEY` is a `UNIQUE` constraint plus an implicit `NOT NULL`, and a table can have **only one**. It is the conventional row identity and the default target of foreign keys.
+
+```sql
+CREATE TABLE users (
+    id    bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    email text UNIQUE NOT NULL
+);
+```
+
+## The key distinctions to state out loud
+
+- **NULLs:** A `UNIQUE` constraint *allows multiple NULLs* by default, because `NULL <> NULL` (unknown), so they don't collide. A `PRIMARY KEY` forbids NULL entirely. PostgreSQL 15+ adds `UNIQUE NULLS NOT DISTINCT` to treat NULLs as equal and allow only one.
+- **Count per table:** at most one PK; any number of unique constraints/indexes.
+- **FK target:** an FK can reference a PK or a UNIQUE constraint, *not* a plain unique index.
+- **Partial / expression uniqueness** is only possible via an index, not a constraint: `CREATE UNIQUE INDEX ON users (lower(email)) WHERE active;` — there's no constraint syntax for that.
+
+<ProbeNote>The interviewer wants to hear that a unique constraint is enforced *by* a unique index, that a primary key is "unique + not null + one per table," and the two gotchas seniors know cold: unique allows multiple NULLs (unless `NULLS NOT DISTINCT`), and only constraints — not bare unique indexes — can be FK targets. Bonus points for partial/expression unique indexes.</ProbeNote>

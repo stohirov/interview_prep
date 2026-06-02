@@ -1,0 +1,24 @@
+Choosing the right column type is a **schema decision you live with for years** — it dictates correctness, storage, index behavior, and how painful your next migration is. PostgreSQL has an unusually rich type system, and most "data type" interview questions are really probing whether you reach for the *correct* type by default or cargo-cult habits from MySQL and older Oracle schemas.
+
+A few principles run through every good answer. **Don't over-constrain.** Use `TEXT` (or unconstrained `VARCHAR`) unless a length limit is a genuine business rule — `VARCHAR(255)` is a folklore number with no storage benefit. **Store the real thing.** Money is `NUMERIC`, never `float`; a timestamp that means "an instant in time" is `TIMESTAMPTZ`, never naive `TIMESTAMP`; semi-structured data is `JSONB`, never `JSON`. **Let the type enforce invariants** so your application can't write nonsense — an `INET` column rejects a non-address, a `BOOLEAN` rejects `'maybe'`.
+
+```sql
+CREATE TABLE payment (
+    id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    amount      numeric(12,2) NOT NULL,        -- exact money
+    currency    text NOT NULL,                 -- no arbitrary length cap
+    captured_at timestamptz NOT NULL DEFAULT now(),  -- an instant, in UTC
+    metadata    jsonb NOT NULL DEFAULT '{}',    -- queryable, indexable
+    is_refunded boolean NOT NULL DEFAULT false
+);
+```
+
+The recurring trap is treating type choice as cosmetic. It isn't. `CHAR(n)` silently blank-pads and breaks equality comparisons. `REAL` loses cents. Naive `TIMESTAMP` throws away the offset and produces ambiguous values across DST and across servers in different zones. `JSON` re-parses text on every access. Each of these is a quiet correctness bug that ships fine in a demo and pages you in production.
+
+PostgreSQL also lets you go *beyond* the built-ins with `DOMAIN`s (a base type plus a reusable constraint) and composite/custom types — useful for centralizing a rule like "an email must match this pattern" in one place.
+
+<Callout kind="tip" title="The interview hook">
+Lead with the defaults and *why*: "I default to `TEXT`, `NUMERIC` for money, `TIMESTAMPTZ` for instants, and `JSONB` over `JSON` — each because the alternative is a silent correctness or performance trap, not because of a style preference." Then be ready to defend each one with the specific failure mode it prevents.
+</Callout>
+
+The questions below cover strings, numbers, the date/time family, JSON, arrays, enums, the boolean/binary/network types, and domains — with the gotcha that makes each one an interview question.

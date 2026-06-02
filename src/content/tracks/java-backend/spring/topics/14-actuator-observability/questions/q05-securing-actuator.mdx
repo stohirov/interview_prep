@@ -1,0 +1,59 @@
+**Actuator endpoints are a goldmine for an attacker — `/env` dumps every property including secrets, `/heapdump` ships your process memory, `/loggers` and `/threaddump` reveal internals — so securing them in production is non-negotiable.** Boot's safe-by-default (only `/health` and `/info` exposed) is the starting point, not the finish line. Layer several controls.
+
+## 1. Expose only what you need
+
+Never use `exposure.include: "*"`. Whitelist the minimum, and lean on `exclude` for the dangerous ones if you must use a broad include:
+
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+```
+
+## 2. Move Actuator to a separate port
+
+Put management endpoints on an internal-only port that your ingress never routes externally — scrapeable by Prometheus inside the cluster, unreachable from the internet:
+
+```yaml
+management:
+  server:
+    port: 8081           # app stays on 8080; 8081 not exposed by ingress
+```
+
+## 3. Secure with Spring Security
+
+With `spring-boot-starter-security` on the classpath, protect the actuator path with explicit rules. Use `EndpointRequest` matchers rather than hardcoding `/actuator/**`:
+
+```java
+@Bean
+SecurityFilterChain actuator(HttpSecurity http) throws Exception {
+  http
+    .securityMatcher(EndpointRequest.toAnyEndpoint())
+    .authorizeHttpRequests(reg -> reg
+        .requestMatchers(EndpointRequest.to("health", "info")).permitAll()
+        .anyRequest().hasRole("ACTUATOR_ADMIN"))
+    .httpBasic(Customizer.withDefaults());
+  return http.build();
+}
+```
+
+`/health` and `/info` typically stay open (orchestrators poll them unauthenticated); everything else requires a role.
+
+## 4. Guard health details
+
+Health details (DB names, downstream URLs) are hidden by default — keep them so, or gate them:
+
+```yaml
+management:
+  endpoint:
+    health:
+      show-details: when-authorized
+```
+
+## The endpoints to *never* expose publicly
+
+`/env`, `/heapdump`, `/threaddump`, and `/configprops` leak secrets, memory contents, or internal structure. Even behind auth, prefer keeping `/heapdump` off entirely unless an operator needs it on demand. A misconfigured `include: "*"` on a public port is a textbook breach.
+
+<ProbeNote>Interviewers want defense in depth: minimal exposure, a separate management port off the public ingress, Spring Security with `EndpointRequest` matchers, and `show-details` gated. The red-flag knowledge is naming `/env` and `/heapdump` as the endpoints that must never be publicly reachable.</ProbeNote>

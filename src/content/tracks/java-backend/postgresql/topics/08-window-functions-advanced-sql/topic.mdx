@@ -1,0 +1,26 @@
+Most SQL you write **collapses** rows — `GROUP BY` turns ten orders per customer into one summary row. Window functions are the opposite: they let you compute an aggregate or a ranking *across a set of rows* while **keeping every row visible**. "Show each order alongside its customer's running total" is impossible with `GROUP BY` alone but trivial with a window function. That single idea — compute over a window, but don't collapse — is the heart of this whole topic, and the most common thing interviewers probe.
+
+A window function is any function followed by an `OVER (...)` clause. The `OVER` defines the **window**: optionally `PARTITION BY` (split rows into groups), `ORDER BY` (order within each group), and a **frame** (which rows around the current row to include).
+
+```sql
+SELECT
+  customer_id,
+  created_at,
+  amount,
+  SUM(amount) OVER (
+    PARTITION BY customer_id
+    ORDER BY created_at
+    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+  ) AS running_total
+FROM orders;
+```
+
+Beyond windows, "advanced SQL" in PostgreSQL means the constructs that turn the database into a real computation engine: **CTEs** (`WITH`, including the PG12 inline-vs-materialize change), **recursive CTEs** for trees and graphs, **LATERAL** joins for correlated subqueries in `FROM`, **`DISTINCT ON`** for "latest row per group", and **`GROUPING SETS`/`CUBE`/`ROLLUP`** for multi-level aggregation in one pass.
+
+The ranking family — `ROW_NUMBER`, `RANK`, `DENSE_RANK` — and the offset family — `LAG`, `LEAD` — show up in nearly every data-heavy interview. So does the subtle distinction between `ROWS`, `RANGE`, and `GROUPS` frame modes, which silently changes results when there are ties.
+
+<Callout kind="tip" title="The interview hook">
+Lead with the one-liner: "Aggregates collapse rows; window functions compute across rows but keep them. The moment a question needs a per-row value *and* a group-level computation — running totals, rankings, 'compared to previous row', 'top N per category' — that's a window function, and reaching for a self-join instead is the junior tell."
+</Callout>
+
+The questions below walk through each construct with concrete SQL — when to use it, the traps, and what the interviewer is really listening for.

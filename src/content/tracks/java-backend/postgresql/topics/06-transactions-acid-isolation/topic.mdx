@@ -1,0 +1,20 @@
+A **transaction is a unit of work that either commits entirely or rolls back entirely** — and PostgreSQL wraps every statement in one whether you write `BEGIN` or not. The four letters of **ACID** name the guarantees: Atomicity (all-or-nothing), Consistency (constraints hold across the boundary), Isolation (concurrent transactions don't corrupt each other's view), and Durability (a committed transaction survives a crash). Of the four, *Isolation* is where the interesting questions live, because perfect isolation is expensive and the SQL standard defines weaker levels that trade isolation for concurrency.
+
+```sql
+BEGIN;
+UPDATE accounts SET balance = balance - 100 WHERE id = 1;
+UPDATE accounts SET balance = balance + 100 WHERE id = 2;
+COMMIT;   -- both updates land, or neither does
+```
+
+The SQL standard defines four **isolation levels** — Read Uncommitted, Read Committed, Repeatable Read, Serializable — ranked by which **anomalies** they permit: dirty reads, non-repeatable reads, phantom reads, and serialization anomalies. PostgreSQL's twist is that it implements isolation with **MVCC** (Multi-Version Concurrency Control) rather than read locks, so readers never block writers and writers never block readers. That design choice colours every answer here: PostgreSQL never permits dirty reads at all (Read Uncommitted silently behaves as Read Committed), its Repeatable Read uses a snapshot that also eliminates phantoms (stricter than the standard requires), and its Serializable uses **SSI** (Serializable Snapshot Isolation), which detects conflicts and aborts a transaction with a `40001` error rather than blocking it.
+
+```sql
+SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+```
+
+MVCC is not free: every `UPDATE` and `DELETE` leaves a **dead tuple** behind, and old transaction IDs must eventually be **frozen** before the 32-bit counter wraps around. That is why `VACUUM`, `autovacuum`, and txid-wraparound prevention sit inside this topic — they are the maintenance cost of the very mechanism that gives PostgreSQL its excellent read concurrency.
+
+<Callout kind="tip" title="The interview hook">
+The strongest framing: "PostgreSQL achieves isolation through MVCC, not read locks — so it's *stricter* than the SQL standard at every level, and the price is dead tuples that `VACUUM` must reclaim and old XIDs that must be frozen before wraparound." That single sentence connects ACID, isolation, MVCC, and VACUUM, and it's the thread that runs through every question below.
+</Callout>

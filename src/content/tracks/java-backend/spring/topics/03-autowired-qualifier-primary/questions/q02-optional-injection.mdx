@@ -1,0 +1,45 @@
+**All three say "this dependency may be absent," but they differ in how the absence is represented and which is idiomatic today.** By default `@Autowired` is *mandatory* — a missing bean throws `NoSuchBeanDefinitionException` at startup. These mechanisms opt out of that.
+
+## `@Autowired(required = false)`
+
+The oldest form. If no matching bean exists, the field/setter is simply left at its default (`null` for fields):
+
+```java
+@Autowired(required = false)
+private AuditService auditService;  // null if no AuditService bean
+```
+
+The downside is you now hold a `null` and must guard every use with a null check — exactly the situation modern code tries to avoid. On a *constructor* parameter, `required = false` is awkward because a constructor can't partially run; prefer the alternatives there.
+
+## `Optional<T>`
+
+Declare the dependency as `Optional<T>` and Spring injects an empty `Optional` when the bean is missing, a populated one when present:
+
+```java
+@Autowired
+private Optional<AuditService> auditService;
+
+void doWork() {
+    auditService.ifPresent(a -> a.record("done"));
+}
+```
+
+This is type-safe and self-documenting: the signature *tells* the reader the dependency is optional, and you can't accidentally dereference a null. Works on fields, setters, and constructor parameters.
+
+## `@Nullable`
+
+Annotate the injection point with `@Nullable` (Spring's, or any JSR-305-style annotation). Semantically identical to `required = false` — inject `null` if absent — but it integrates with static analysis and Kotlin null-safety:
+
+```java
+public CheckoutService(@Nullable AuditService auditService) { ... }
+```
+
+It signals intent to tools and readers without changing the type to `Optional`.
+
+## Which to use
+
+`Optional<T>` is the cleanest for plain optional beans because the type carries the meaning. `@Nullable` is good on constructor parameters where you want a real `null` rather than a wrapper. `@Autowired(required = false)` is legacy — avoid it on constructors.
+
+But for the *modern* recommendation, prefer **`ObjectProvider<T>`** (its own question): it covers optional, lazy, and multiple-candidate cases, and resolves the bean lazily at call time rather than at construction.
+
+<ProbeNote>They're probing whether you reach for `null` reflexively. The senior answer: `Optional<T>` for type-safe optionality, `@Nullable` for intent on constructor params, `required = false` is legacy — and `ObjectProvider<T>` is the umbrella modern tool.</ProbeNote>

@@ -1,0 +1,40 @@
+**`@Modifying` tells Spring Data that a `@Query` *writes* rather than reads, so it calls `executeUpdate()` instead of `getResultList()` — and because it's a bulk SQL statement, it bypasses the persistence context, which is exactly the gotcha interviewers probe.** It also needs a write transaction to run in.
+
+## The shape
+
+```java
+@Modifying
+@Transactional
+@Query("UPDATE User u SET u.status = :status WHERE u.lastLogin < :cutoff")
+int deactivateStale(@Param("status") Status status, @Param("cutoff") Instant cutoff);
+```
+
+Without `@Modifying`, Spring tries to run the JPQL as a `SELECT` and fails. The return type is `int` (or `void`) — the **number of rows affected**. Bulk UPDATE/DELETE in JPQL compiles to a single SQL statement: one round trip updates a million rows, versus loading each entity and dirty-checking it.
+
+## Why `@Transactional` is required
+
+A modifying query must run inside a transaction. Repository read methods get a default read-only transaction, but for writes you need a read-write one. If the calling service method is already `@Transactional`, the bulk query joins it; if you call the repository method directly with no surrounding transaction, put `@Transactional` on the repository method (or, better, on the service).
+
+## The persistence-context trap
+
+This is the whole reason the question exists. A bulk `@Modifying` query goes **straight to the database** — it does **not** update entities already loaded in the persistence context, and it ignores cascades and lifecycle callbacks (`@PreUpdate` won't fire). So an entity you loaded *before* the bulk update keeps its **stale** in-memory value:
+
+```java
+User u = repo.findById(1L).orElseThrow();   // status = ACTIVE, now managed
+repo.deactivateStale(INACTIVE, cutoff);     // DB row → INACTIVE
+u.getStatus();                              // still ACTIVE — stale!
+```
+
+The fix is `clearAutomatically`, which clears the persistence context after the query so subsequent reads re-fetch from the DB:
+
+```java
+@Modifying(clearAutomatically = true, flushAutomatically = true)
+@Query("UPDATE User u SET u.status = :s WHERE u.id = :id")
+int updateStatus(@Param("id") Long id, @Param("s") Status s);
+```
+
+<Callout kind="danger" title="clearAutomatically detaches everything">
+`clearAutomatically = true` clears the *entire* persistence context — any managed entity in that transaction becomes detached, so unsaved dirty changes are lost. Prefer scoping bulk updates to their own transaction, or flush pending changes first (`flushAutomatically = true`).
+</Callout>
+
+<ProbeNote>The core answer: `@Modifying` switches the query to `executeUpdate`, needs a write `@Transactional`, returns affected-row count, and **bypasses the persistence context** so loaded entities go stale and callbacks/cascades don't fire. `clearAutomatically`/`flushAutomatically` are the mitigations — and they detach everything, so use them carefully.</ProbeNote>

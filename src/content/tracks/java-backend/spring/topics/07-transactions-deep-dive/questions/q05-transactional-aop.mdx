@@ -1,0 +1,35 @@
+**Under the hood `@Transactional` is pure Spring AOP: at startup Spring wraps each annotated bean in a *proxy*, and that proxy — not your class — is what gets injected everywhere.** When a call comes in through the proxy, a `TransactionInterceptor` runs around your method and drives the transaction. No bytecode of your method is changed.
+
+## The pieces
+
+- **`@EnableTransactionManagement`** (auto-applied by Boot) registers an `InfrastructureAdvisorAutoProxyCreator`, a `BeanPostProcessor` that, during context startup, detects beans with `@Transactional` and replaces them with proxies.
+- The advisor's advice is **`TransactionInterceptor`**, which on each invocation consults a `PlatformTransactionManager` and the method's transaction attributes (propagation, isolation, rollback rules).
+- The interceptor's logic, in essence:
+
+```text
+status = transactionManager.getTransaction(attrs)   // begin or join, per propagation
+try {
+    result = method.invoke()                         // run your code
+} catch (ex) {
+    if (attrs.rollbackOn(ex)) transactionManager.rollback(status);
+    else                      transactionManager.commit(status);
+    throw ex;
+}
+transactionManager.commit(status);                   // normal return
+return result;
+```
+
+## JDK vs CGLIB proxies
+
+Spring picks the proxy style automatically:
+
+- **JDK dynamic proxy** if the bean implements an interface — the proxy implements the same interface.
+- **CGLIB subclass proxy** if there's no interface (or `proxyTargetClass = true`) — Spring generates a runtime subclass that overrides your methods. Boot defaults to CGLIB.
+
+Either way the proxy intercepts only **external calls that go through it**. This is exactly why two limitations exist: `this.method()` self-calls bypass the proxy (the object calls its own real method, not the proxy), and `private`/`final` methods can't be advised (a CGLIB subclass can't override them, and there's no interface entry for a JDK proxy).
+
+<Callout kind="info" title="The alternative: AspectJ weaving">
+`mode = AspectJ` weaves the transactional advice directly into the bytecode (load-time or compile-time) instead of using a proxy. That removes the self-invocation and private-method restrictions entirely — at the cost of a weaving setup. Spring's default proxy mode is the common choice precisely because it needs no build changes.
+</Callout>
+
+<ProbeNote>They're probing whether you know "proxy, not magic." Name `TransactionInterceptor` + `PlatformTransactionManager`, the JDK-vs-CGLIB distinction, and the consequence that only proxy-routed external calls are advised — which sets up the self-invocation question.</ProbeNote>

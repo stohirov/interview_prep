@@ -1,0 +1,43 @@
+**Unused indexes are pure cost: they slow every `INSERT`/`UPDATE`, consume disk, bloat backups, and make autovacuum do more work — all for zero query benefit.** Postgres tracks index usage for you, so finding them is a single catalog query.
+
+## The catalog view
+
+`pg_stat_user_indexes` records `idx_scan` — **how many times the planner has chosen each index** since stats were last reset. An index with `idx_scan = 0` has never been used.
+
+```sql
+SELECT s.schemaname,
+       s.relname  AS table,
+       s.indexrelname AS index,
+       s.idx_scan,
+       pg_size_pretty(pg_relation_size(s.indexrelid)) AS size
+FROM pg_stat_user_indexes s
+JOIN pg_index i ON i.indexrelid = s.indexrelid
+WHERE s.idx_scan = 0
+  AND NOT i.indisunique          -- keep unique/PK constraints
+  AND NOT i.indisprimary
+ORDER BY pg_relation_size(s.indexrelid) DESC;
+```
+
+Sort by size to prioritize the big wins.
+
+## The caveats that separate seniors from juniors
+
+**1. Counters reset.** `idx_scan` resets on `pg_stat_reset()`, a crash, or a restore — and the counters are **per-instance**, not replicated. An index reading zero may simply mean stats were reset yesterday. Trust the numbers only over a representative window (weeks, covering monthly/quarterly jobs).
+
+**2. Check replicas too.** A read replica may serve queries that use an index the primary never touches. The primary's `idx_scan = 0` says nothing about the standby's usage — check `pg_stat_user_indexes` **on each replica** before dropping.
+
+**3. Never blindly drop unique/PK or constraint-backing indexes** even at zero scans — they enforce integrity and back foreign keys, regardless of query usage (the `NOT indisunique`/`NOT indisprimary` filter above).
+
+**4. Drop safely with `CONCURRENTLY`** to avoid an `ACCESS EXCLUSIVE` lock, and confirm it's reversible:
+
+```sql
+DROP INDEX CONCURRENTLY orders_legacy_idx;
+```
+
+You can also look for **rarely-used / redundant** indexes — high `idx_scan` but low `idx_tup_fetch`, or an index that's a left-prefix duplicate of a composite — but the `idx_scan = 0` query is the first pass.
+
+<Callout kind="warn" title="Zero scans ≠ safe to drop yet">
+Before dropping, confirm the stats window is long enough to include infrequent jobs, and that no replica or failover candidate relies on the index.
+</Callout>
+
+<ProbeNote>The discriminator isn't the query — it's the caveats: `idx_scan` counters reset and are **per-node** (check replicas), the window must cover infrequent jobs, never drop unique/PK indexes, and use `DROP INDEX CONCURRENTLY`. Listing those shows you've actually pruned indexes in production.</ProbeNote>

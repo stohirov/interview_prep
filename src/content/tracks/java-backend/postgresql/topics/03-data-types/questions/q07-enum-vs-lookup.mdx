@@ -1,0 +1,50 @@
+**An `ENUM` is a custom type with a fixed, ordered set of label values — compact and self-documenting, but rigid in ways a lookup table isn't.** The interview question is the trade-off: when does the convenience of an enum outweigh the flexibility of a foreign key to a reference table?
+
+## ENUM — a fixed ordered set of labels
+
+```sql
+CREATE TYPE order_status AS ENUM ('pending', 'paid', 'shipped', 'cancelled');
+
+CREATE TABLE orders (
+    id     bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    status order_status NOT NULL DEFAULT 'pending'
+);
+```
+
+**Pros:**
+- **Compact** — stored as a 4-byte OID, not the label text.
+- **Self-validating** — only the declared labels are accepted; no junk values.
+- **Ordered** — sorts in declaration order (`'pending' < 'shipped'`), not alphabetically, which is often exactly what you want.
+- **Readable** — the values appear as words in queries.
+
+**Cons:**
+- **Adding a value:** `ALTER TYPE ... ADD VALUE 'returned';` works, but historically couldn't run inside a transaction block alongside other changes; placing it at a specific position (`BEFORE`/`AFTER`) requires care.
+- **Removing or renaming** a value is genuinely hard — there's no `DROP VALUE`. You rename labels with `ALTER TYPE ... RENAME VALUE`, but pruning requires rebuilding the type.
+- **No extra attributes** — you can't attach a display name, a sort weight, an `is_active` flag, or a description to an enum label.
+- Values are **global to the type**, not per-row data you can query/join as a table.
+
+## Lookup table — a reference table + foreign key
+
+```sql
+CREATE TABLE order_status (
+    code        text PRIMARY KEY,        -- 'pending', 'paid', ...
+    label       text NOT NULL,
+    sort_order  int NOT NULL,
+    is_active   boolean NOT NULL DEFAULT true
+);
+CREATE TABLE orders (
+    status_code text NOT NULL REFERENCES order_status(code)
+);
+```
+
+**Pros:** add/remove/soft-disable values with ordinary `INSERT`/`UPDATE` (no DDL, no locks), attach arbitrary columns, and let admins manage values at runtime. **Cons:** requires a join to read the label, slightly more storage, and integrity depends on the FK being present.
+
+## How to choose
+
+Use an **ENUM** for a short, **stable** set that changes only via deploys and carries no extra attributes — status flags, sizes, weekdays. Use a **lookup table** when values change at runtime, are managed by users, need extra columns, or the set is large or volatile.
+
+<Callout kind="info" title="Enum changes are DDL">
+Every enum modification is schema DDL — it needs migrations and can take locks. If "operations adds a new status without a deploy" is a requirement, that alone points to a lookup table.
+</Callout>
+
+<ProbeNote>The interviewer wants the trade-off articulated, not a dogmatic answer: ENUM = compact, ordered, self-validating, but DDL to change and can't hold extra attributes; lookup table = flexible runtime data with extra columns at the cost of a join. The deciding factors are *stability of the set* and *whether values need their own attributes*.</ProbeNote>

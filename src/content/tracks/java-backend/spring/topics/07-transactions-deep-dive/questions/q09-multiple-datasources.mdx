@@ -1,0 +1,29 @@
+**A single `@Transactional` controls exactly one resource — the connection bound to one `PlatformTransactionManager`.** The moment a business operation must commit across *two* datasources (or a DB and a message broker) atomically, you've left the comfort zone, and there's no free lunch: you choose between true distributed transactions, a best-effort coordination, or giving up atomicity for eventual consistency.
+
+## Option 1: JTA / XA — real distributed transactions
+
+`JtaTransactionManager` backed by a JTA provider (Atomikos, Narayana) coordinates multiple XA-capable resources with **two-phase commit (2PC)**: a *prepare* phase asks every resource "can you commit?", then a *commit* phase tells them all to commit. It gives genuine atomicity across datasources.
+
+```java
+@Transactional   // backed by JtaTransactionManager, spans both XA datasources
+public void transfer(Order o) {
+    ordersRepo.save(o);        // XA datasource A
+    ledgerRepo.record(o);      // XA datasource B  -> both commit or both roll back
+}
+```
+
+The cost is real: every resource must support XA, 2PC adds latency and locking, and the **transaction coordinator** becomes a stateful component you must run and recover. Heavy, but the only path to true cross-resource atomicity.
+
+## Option 2: ChainedTransactionManager — best-effort
+
+`ChainedTransactionManager` (Spring Data) simply **chains** several transaction managers: it begins all of them, runs your code, then commits them in reverse order. It is **not** 2PC — if the second commit fails after the first already committed, you're left **inconsistent**. It's "best-effort 1PC," cheap but unsafe at the boundary, and it's **deprecated**. Mention it only to say you know what it is and why you'd avoid it.
+
+## Option 3: Saga — embrace eventual consistency
+
+For microservices, distributed transactions are usually the wrong shape. A **Saga** replaces one atomic transaction with a *sequence of local transactions*, each with a **compensating action** to undo it. If step 3 fails, you run compensations for steps 2 and 1. Orchestrated (a coordinator drives the steps) or choreographed (services react to each other's events). You trade atomicity for availability and accept temporary inconsistency.
+
+<Callout kind="danger" title="ChainedTransactionManager is not atomic">
+Its window is exactly between committing manager A and manager B. A crash there leaves A committed and B not — silent data divergence. Deprecated for this reason. If you truly need atomicity, use XA; if you can tolerate eventual consistency, use a Saga with an outbox. Don't pretend chaining is 2PC.
+</Callout>
+
+<ProbeNote>They want the three-way map: **JTA/XA** for real atomicity (2PC, heavy, needs a coordinator), **ChainedTransactionManager** as best-effort/deprecated/not-atomic, and **Saga** (local transactions + compensations) as the microservices answer. Knowing the trade-off — atomicity vs availability — is what they're testing.</ProbeNote>

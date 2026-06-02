@@ -1,0 +1,46 @@
+**An aggregate function collapses many rows into one; a window function computes across many rows but returns a value for *every* row.** Same functions (`SUM`, `AVG`, `COUNT`, `MAX`), opposite shapes of output — the `OVER (...)` clause is what flips one into the other.
+
+## Aggregate: rows in, fewer rows out
+
+```sql
+SELECT customer_id, SUM(amount) AS total
+FROM orders
+GROUP BY customer_id;
+```
+
+Ten orders for customer 42 become **one** row. You can no longer see any individual order's `amount` or `created_at` — they were collapsed away. Any column in the `SELECT` must either appear in `GROUP BY` or be wrapped in an aggregate.
+
+## Window: same rows in, same rows out
+
+```sql
+SELECT
+  customer_id,
+  amount,
+  SUM(amount) OVER (PARTITION BY customer_id) AS customer_total
+FROM orders;
+```
+
+Every order row survives. Alongside each one you also get its customer's total. No `GROUP BY` is needed, and you keep `amount`, `created_at`, and everything else. The `OVER (...)` tells PostgreSQL: "aggregate over this window, but don't collapse."
+
+## Why this matters
+
+The classic problem **"show each order and what fraction of the customer's spend it represents"** needs both the per-row value and the group total on the same line:
+
+```sql
+SELECT
+  order_id,
+  amount,
+  amount::numeric
+    / SUM(amount) OVER (PARTITION BY customer_id) AS pct_of_customer
+FROM orders;
+```
+
+With pure aggregation you'd compute the totals in one query and **join** them back — extra work the window function does in a single pass.
+
+<Callout kind="info" title="Execution-order detail">
+Window functions run *after* `WHERE`, `GROUP BY`, and `HAVING`, but *before* `ORDER BY` and `LIMIT`. So you cannot reference a window function's alias in `WHERE` — wrap the query in a CTE or subquery to filter on it (e.g., to keep only `row_number = 1`).
+</Callout>
+
+You can even use both at once: a window function whose input is already grouped, because windows are evaluated on the post-`GROUP BY` rows.
+
+<ProbeNote>The interviewer wants the one-sentence contrast — aggregates collapse, windows preserve — plus the tell that window functions can't be referenced in `WHERE` (they run after it), forcing a subquery/CTE. Bonus: noting that `SUM(...) OVER ()` with an empty window aggregates over the whole result set.</ProbeNote>

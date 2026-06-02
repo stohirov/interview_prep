@@ -1,0 +1,47 @@
+**Without an index, every search recomputes `to_tsvector` on every row and scans the whole table; a GIN index makes search probe only the matching lexemes.** There are two idiomatic ways to build it, and the generated-column approach is the one to reach for in PostgreSQL 17.
+
+## Option A — expression index on `to_tsvector(...)`
+
+Index the exact expression you'll query with:
+
+```sql
+CREATE INDEX idx_docs_fts
+  ON docs USING GIN (to_tsvector('english', body));
+
+SELECT * FROM docs
+WHERE to_tsvector('english', body) @@ to_tsquery('english', 'postgres & index');
+```
+
+The planner only uses the index when the query expression **matches the indexed expression character-for-character** (including the config name). It works, but you repeat the expression everywhere and it's easy to drift.
+
+## Option B — generated column (preferred)
+
+Store the `tsvector` as a `GENERATED ALWAYS` column so it's maintained automatically, then index the plain column:
+
+```sql
+ALTER TABLE docs
+  ADD COLUMN search_vec tsvector
+  GENERATED ALWAYS AS (to_tsvector('english', coalesce(body, ''))) STORED;
+
+CREATE INDEX idx_docs_search ON docs USING GIN (search_vec);
+
+SELECT * FROM docs WHERE search_vec @@ to_tsquery('english', 'postgres & index');
+```
+
+Cleaner queries, the vector stays in sync on every insert/update, and you can combine columns (e.g. weighting title above body) inside the expression.
+
+## Why GIN, and weighting multiple columns
+
+**GIN** (Generalized Inverted Index) stores one entry per lexeme pointing at all rows containing it — the inverted-index structure search needs. GiST also works but is lossy and slower for static text; GIN is the default choice. Use `setweight` to mark which field a lexeme came from for later ranking:
+
+```sql
+to_tsvector('english', coalesce(title,'')) -- weight A
+  || to_tsvector('english', coalesce(body,''));  -- weight B
+-- wrap each with setweight(..., 'A') / setweight(..., 'B')
+```
+
+<Callout kind="tip" title="GIN write cost and fastupdate">
+GIN indexes are slower to update than B-trees. PostgreSQL buffers new entries in a pending list (`fastupdate`, on by default) and flushes them in batches, trading a little read latency for much faster writes — usually the right default for write-heavy tables.
+</Callout>
+
+<ProbeNote>The interviewer wants the GIN index plus awareness that the indexed expression must match the query expression exactly. The senior answer prefers a `GENERATED ALWAYS ... STORED` `tsvector` column (auto-maintained, cleaner queries, supports `setweight`) and knows GIN trades write speed for fast lexeme lookups.</ProbeNote>

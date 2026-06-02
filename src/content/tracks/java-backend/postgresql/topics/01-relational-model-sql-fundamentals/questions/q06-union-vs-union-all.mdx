@@ -1,0 +1,38 @@
+**`UNION` removes duplicate rows; `UNION ALL` keeps every row.** That deduplication is the only functional difference — and it's also why `UNION` is slower. If you don't actually need duplicates removed, `UNION ALL` is both faster and more honest about intent.
+
+## What each does
+
+```sql
+SELECT id FROM active_users
+UNION
+SELECT id FROM trial_users;       -- distinct ids across both sets
+
+SELECT id FROM active_users
+UNION ALL
+SELECT id FROM trial_users;       -- every id, duplicates preserved
+```
+
+Both require the two queries to be **union-compatible**: same number of columns, with compatible types positionally (column *names* come from the first query). The result is a relation built from the set/bag union of both inputs.
+
+## Why UNION ALL is faster
+
+`UNION` must guarantee no duplicate rows, so PostgreSQL appends both inputs and then **eliminates duplicates** — typically via a hash aggregate or a sort, comparing every column of every row. That extra step costs CPU, memory (or temp-disk spill for large inputs), and it's a *blocking* operation: it can't stream results until it has seen enough to dedup.
+
+`UNION ALL` simply concatenates the inputs (an `Append` node) and streams rows straight through — no sort, no hash, no buffering. You can see the difference in `EXPLAIN`:
+
+```sql
+EXPLAIN SELECT ... UNION ALL SELECT ...;   -- Append
+EXPLAIN SELECT ... UNION     SELECT ...;   -- HashAggregate / Unique over Append
+```
+
+## Choosing the right one
+
+- Use **`UNION ALL`** when the inputs are already disjoint, or when duplicates are acceptable/desired (e.g., concatenating partitions, audit feeds, or combining counts you'll `SUM` later). It's the default you should reach for.
+- Use **`UNION`** only when you genuinely need set semantics — distinct rows across sources.
+- A common anti-pattern: writing `UNION` "to be safe" when the sets can't overlap, paying for a dedup that removes nothing. If you know they're disjoint, say so with `UNION ALL`.
+
+<Callout kind="warn" title="Dedup looks at every column">
+`UNION` compares *entire rows*, not a key. Two rows that differ in a single column are both kept. So `UNION` won't collapse "logically duplicate" rows that have differing timestamps or ids — and it still pays the full dedup cost.
+</Callout>
+
+<ProbeNote>The interviewer wants the crisp distinction (UNION = distinct, UNION ALL = keep all) plus *why* UNION is slower: it adds a sort/hash dedup step that UNION ALL's plain Append avoids. The senior signal is reaching for UNION ALL by default and only paying for UNION when set semantics are actually required.</ProbeNote>

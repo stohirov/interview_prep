@@ -1,0 +1,55 @@
+**You index `jsonb` with a GIN index, and choosing between the two GIN operator classes is the real question.** The default indexes everything; `jsonb_path_ops` trades operator coverage for a smaller, faster index.
+
+## Default GIN — `jsonb_ops`
+
+```sql
+CREATE INDEX idx_users_data ON users USING GIN (data);
+```
+
+This builds a GIN index with the default `jsonb_ops` operator class. It indexes **every key and every value** in the document, so it supports the full operator set:
+
+- containment `@>`
+- existence `?`, `?&`, `?|`
+- path match `@?`, `@@`
+
+```sql
+SELECT * FROM users WHERE data @> '{"status":"active"}';   -- uses the GIN index
+SELECT * FROM users WHERE data ? 'phone';                  -- uses the GIN index
+```
+
+The price is size: indexing keys *and* values separately makes it larger and a bit slower to build and maintain.
+
+## Smaller and faster — `jsonb_path_ops`
+
+```sql
+CREATE INDEX idx_users_data_path ON users USING GIN (data jsonb_path_ops);
+```
+
+`jsonb_path_ops` hashes whole **paths-to-values** into single index entries. That makes the index **smaller and faster for containment lookups**, but it supports **only**:
+
+- containment `@>`
+- path match `@?`, `@@`
+
+It does **not** support the existence operators (`?`, `?&`, `?|`). If your queries are all `@>` containment checks — the common case — `jsonb_path_ops` is usually the better default.
+
+<Callout kind="tip" title="Pick by your query shape">
+If you only ever run `data @> '{...}'` filters, use `jsonb_path_ops` — smaller index, faster lookups. If you also need `?` key-existence checks, you need the default `jsonb_ops`.
+</Callout>
+
+## Indexing a single field — B-tree expression index
+
+GIN indexes the whole document. If you filter on **one** scalar field with ranges or equality, a plain B-tree expression index is leaner and supports ordering:
+
+```sql
+CREATE INDEX idx_users_age ON users (((data ->> 'age')::int));
+
+SELECT * FROM users WHERE (data ->> 'age')::int > 30 ORDER BY (data ->> 'age')::int;
+```
+
+This is the right tool for `>`, `<`, `BETWEEN`, and `ORDER BY` on a specific key — GIN can't do range scans or ordering.
+
+<Callout kind="warn" title="The query must match the index expression exactly">
+An expression index on `(data ->> 'age')::int` is only used when the query writes the predicate the same way. `data -> 'age'` (jsonb, not `->>`) won't match it.
+</Callout>
+
+<ProbeNote>The interviewer wants: GIN for containment/existence, with `jsonb_path_ops` as the smaller/faster choice when you only need `@>`, at the cost of dropping `?`/`?&`/`?|`. Senior signal: knowing GIN can't do ranges or ordering, so single-field range/sort queries call for a B-tree **expression** index instead.</ProbeNote>

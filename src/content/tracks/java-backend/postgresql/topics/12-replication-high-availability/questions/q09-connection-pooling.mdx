@@ -1,0 +1,37 @@
+**PostgreSQL uses one OS process per connection, so each connection is expensive — a connection pooler like PgBouncer sits between the app and the database and multiplexes many client connections onto a small set of real server connections.** PgBouncer's pooling *mode* decides how aggressively it can reuse a server connection, and that choice trades efficiency against which session-level features still work.
+
+## Why pooling at all
+
+Each Postgres backend consumes memory and scheduler overhead; a few hundred is fine, thousands hurt. Application connection pools (HikariCP) help per-instance, but with many app instances you still get connection storms. PgBouncer is a lightweight middle layer holding, say, 5,000 client connections while keeping only ~50 actual server connections busy.
+
+## The three modes
+
+**Session pooling** — a server connection is assigned to a client for the **entire duration of its client connection**, returned to the pool only when the client disconnects. Safest: everything works exactly like a direct connection, but reuse is poor — an idle-but-connected client still holds a server slot.
+
+**Transaction pooling** — the server connection is assigned **only for the duration of a transaction**, then returned to the pool. This is the **most common mode** because it gives by far the best reuse: between transactions the connection serves someone else. The catch is that it **breaks anything that relies on session state spanning transactions**.
+
+**Statement pooling** — the connection is returned after **every single statement**. The most aggressive reuse; it forbids multi-statement transactions entirely, so it's rarely used outside specialized read workloads.
+
+```ini
+; pgbouncer.ini
+[pgbouncer]
+pool_mode = transaction
+max_client_conn = 5000
+default_pool_size = 50
+```
+
+## The transaction-mode gotcha (the real interview point)
+
+Because a client doesn't keep the same server connection across transactions, **session-scoped features break** in transaction mode:
+
+- **`SET`** session variables, `SET search_path`, session-level GUCs
+- **Server-side prepared statements** — the prepared statement lives on a server connection the next call may not land on
+- **`LISTEN`/`NOTIFY`**, advisory locks held across transactions, `WITH HOLD` cursors, temporary tables across transactions
+
+For JDBC/HikariCP behind transaction-mode PgBouncer you typically must disable server-side prepared statements (`prepareThreshold=0`) or use protocol-level prepared-statement support. Newer PgBouncer versions added prepared-statement support in transaction mode, but the classic answer is "transaction mode breaks server-side prepared statements and other session state."
+
+<Callout kind="info" title="Pick the mode by what your app needs">
+Use **session** mode if you depend on session features or can't change the app; use **transaction** mode (the default reach) for stateless web apps to maximize connection reuse — just disable server-side prepared statements and avoid session-scoped state.
+</Callout>
+
+<ProbeNote>Name all three modes and what gets returned when (connection lifetime, transaction, statement). The discriminating detail is that **transaction mode — the common choice — breaks session-level features**: server-side prepared statements, `SET`, `LISTEN/NOTIFY`, advisory locks. Mentioning the JDBC `prepareThreshold=0` workaround shows hands-on experience.</ProbeNote>

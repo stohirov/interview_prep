@@ -1,0 +1,60 @@
+**These four annotations each pull data from a different part of the HTTP request — the trick is knowing which part.** A `HandlerMethodArgumentResolver` reads the annotation, extracts the right slice of the request, converts it to your parameter type, and passes it in.
+
+## `@PathVariable` — from the URL template
+
+Binds a segment of the path declared with `{...}` in the mapping. Used for resource identity.
+
+```java
+@GetMapping("/orders/{id}/items/{itemId}")
+Item get(@PathVariable Long id, @PathVariable Long itemId) { ... }
+```
+
+The name must match the template variable (or be given explicitly). Path variables are inherently part of the URL, so they're never optional in a meaningful sense.
+
+## `@RequestParam` — from the query string (or form body)
+
+Binds `?key=value` query parameters, or `application/x-www-form-urlencoded` form fields. Used for filtering, paging, flags.
+
+```java
+@GetMapping("/orders")
+List<OrderDto> list(@RequestParam(defaultValue = "0") int page,
+                    @RequestParam(required = false) String status) { ... }
+```
+
+Supports `required`, `defaultValue`, collections (`?tag=a&tag=b` → `List<String>`), and `Map<String,String>` for all params.
+
+## `@RequestBody` — from the request body, deserialized
+
+Takes the entire body and runs it through an `HttpMessageConverter` (Jackson for JSON) to produce an object. There can be only one per method — there's one body.
+
+```java
+@PostMapping("/orders")
+OrderDto create(@Valid @RequestBody CreateOrder cmd) { ... }
+```
+
+Pair it with `@Valid` to trigger Bean Validation on the deserialized object.
+
+## `@RequestHeader` — from an HTTP header
+
+Binds a single header value, or all headers as a `Map`/`HttpHeaders`.
+
+```java
+@GetMapping("/orders")
+List<OrderDto> list(@RequestHeader("Authorization") String auth,
+                    @RequestHeader(value = "X-Trace-Id", required = false) String trace) { ... }
+```
+
+## The mental table
+
+| Annotation | Source | Typical use |
+|---|---|---|
+| `@PathVariable` | URL path segment | resource identity |
+| `@RequestParam` | query string / form field | filters, paging |
+| `@RequestBody` | request body (deserialized) | create/update payloads |
+| `@RequestHeader` | a request header | auth tokens, tracing, versioning |
+
+<Callout kind="warn" title="@RequestParam vs @RequestBody for forms">
+A classic HTML `<form>` POST sends `application/x-www-form-urlencoded`, which binds via `@RequestParam` (or `@ModelAttribute`), **not** `@RequestBody`. `@RequestBody` is for JSON/XML payloads. Mixing these up yields a confusing 415 or empty body.
+</Callout>
+
+<ProbeNote>This tests whether you can map each annotation to its part of the request — path, query, body, header. The sharp follow-up is form-encoded vs JSON: forms go through `@RequestParam`, JSON through `@RequestBody`, and only the latter pairs with `@Valid` on a converted object.</ProbeNote>

@@ -1,0 +1,71 @@
+**`@Conditional` is the foundation of everything in auto-configuration: it registers a bean or configuration class only when a supplied `Condition` returns true.** Boot ships a family of ready-made conditions so you almost never implement the raw `Condition` interface yourself.
+
+## The base mechanism
+
+```java
+public class OnLinuxCondition implements Condition {
+    public boolean matches(ConditionContext ctx, AnnotatedTypeMetadata md) {
+        return ctx.getEnvironment().getProperty("os.name", "").contains("Linux");
+    }
+}
+
+@Bean
+@Conditional(OnLinuxCondition.class)
+DaemonManager daemonManager() { ... }
+```
+
+Boot's variants are all specializations of this, evaluated at context-startup time.
+
+## @ConditionalOnClass / @ConditionalOnMissingClass
+
+Match on classpath presence. This is *the* mechanism behind "add the jar, get the beans." It uses class **names** via ASM so it works even when the type isn't loadable:
+
+```java
+@ConditionalOnClass(name = "com.zaxxer.hikari.HikariDataSource")
+```
+
+## @ConditionalOnMissingBean / @ConditionalOnBean
+
+`@ConditionalOnMissingBean` is why **your** `@Bean` always wins — Boot only contributes a default if you haven't defined one:
+
+```java
+@Bean
+@ConditionalOnMissingBean        // back off if the user defined an ObjectMapper
+ObjectMapper objectMapper() { return new ObjectMapper(); }
+```
+
+These are ordering-sensitive: they see beans defined *so far*, which is why auto-config runs after user config and why `@AutoConfiguration` ordering matters.
+
+## @ConditionalOnProperty
+
+Gate on a property's presence/value — the standard feature flag:
+
+```java
+@Bean
+@ConditionalOnProperty(prefix = "acme.cache", name = "enabled",
+                       havingValue = "true", matchIfMissing = false)
+CacheManager cacheManager() { ... }
+```
+
+`matchIfMissing = true` makes the feature on-by-default.
+
+## @ConditionalOnWebApplication / @ConditionalOnNotWebApplication
+
+Match only in a web context, optionally narrowed to servlet or reactive:
+
+```java
+@ConditionalOnWebApplication(type = Type.SERVLET)
+```
+
+## Other common variants
+
+- **`@ConditionalOnResource`** — a resource exists (`classpath:schema.sql`).
+- **`@ConditionalOnExpression`** — an arbitrary SpEL expression.
+- **`@ConditionalOnSingleCandidate`** — exactly one candidate bean of a type exists.
+- **`@ConditionalOnJava`** — a JVM version range.
+
+<Callout kind="info" title="All conditions on a class must pass (AND)">
+Multiple `@ConditionalOn*` annotations on the same class/method are combined with logical AND — every one must match for the bean to register. Use `@ConditionalOnExpression` if you need OR-style logic.
+</Callout>
+
+<ProbeNote>The interviewer wants the four named variants explained with their real purpose: `@ConditionalOnClass` = classpath trigger, `@ConditionalOnMissingBean` = user override / back-off, `@ConditionalOnProperty` = feature flag, `@ConditionalOnWebApplication` = context type. State that multiple conditions AND together and that `@ConditionalOnMissingBean` is the reason your beans take precedence.</ProbeNote>

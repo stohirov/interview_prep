@@ -1,0 +1,48 @@
+**Before PostgreSQL 12 a `WITH` CTE was always an optimization fence — materialized into a temp result the planner couldn't see through. Since PG12 the planner *inlines* eligible CTEs by default, and you control it explicitly with `MATERIALIZED` / `NOT MATERIALIZED`.** This behavior change is a favorite interview question because it silently changes plans on upgrade.
+
+## Pre-12: CTEs were always materialized
+
+```sql
+WITH recent AS (
+  SELECT * FROM orders WHERE created_at > now() - interval '7 days'
+)
+SELECT * FROM recent WHERE customer_id = 42;
+```
+
+On PG ≤ 11, `recent` was **fully computed** into a temporary result first, *then* filtered by `customer_id = 42`. The `customer_id` predicate could **not** be pushed down into the CTE, and any index on `customer_id` went unused. People exploited this as a deliberate **optimization fence**, but it often produced slow plans by accident.
+
+## PG12+: inlining by default
+
+From PostgreSQL 12, the planner **inlines** a CTE — folding it into the outer query so predicates push down and indexes apply — when it is:
+
+1. **not recursive**,
+2. **side-effect-free** (no `INSERT`/`UPDATE`/`DELETE`/`SELECT ... FOR UPDATE`), and
+3. **referenced only once**.
+
+For the query above on PG12+, `customer_id = 42` is pushed into the scan and an index can be used — typically much faster.
+
+## Forcing the behavior
+
+```sql
+WITH recent AS MATERIALIZED (        -- force a temp result (old fence)
+  SELECT * FROM expensive_function_call()
+)
+SELECT ...;
+
+WITH recent AS NOT MATERIALIZED (    -- force inlining
+  SELECT * FROM orders WHERE ...
+)
+SELECT ...;
+```
+
+<Callout kind="info" title="When to keep MATERIALIZED">
+Use `MATERIALIZED` when the CTE is **expensive and referenced multiple times** (compute once, reuse), or wraps a **volatile/expensive function** you don't want re-evaluated, or you genuinely want the planner *not* to push predicates through (e.g., to force a particular evaluation order). A CTE referenced more than once is **not** auto-inlined even on PG12+ — it stays materialized unless you say `NOT MATERIALIZED`.
+</Callout>
+
+<Callout kind="warn" title="Upgrade gotcha">
+A query that was fast on PG11 because the fence limited a row explosion can change plans after a 12+ upgrade once the CTE inlines. If a CTE relied on being a fence, pin it with `AS MATERIALIZED` before upgrading.
+</Callout>
+
+Recursive CTEs (`WITH RECURSIVE`) and multiply-referenced CTEs are always materialized regardless of version.
+
+<ProbeNote>The crux: pre-12 always materialized (a fence), 12+ inlines single-reference, non-recursive, side-effect-free CTEs by default, with `MATERIALIZED`/`NOT MATERIALIZED` as explicit overrides. Strong candidates note that multi-reference and recursive CTEs are still always materialized, and that the change can flip plans on upgrade.</ProbeNote>

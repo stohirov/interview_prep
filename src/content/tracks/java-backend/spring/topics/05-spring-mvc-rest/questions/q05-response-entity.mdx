@@ -1,0 +1,44 @@
+**`ResponseEntity<T>` is how you control the *whole* HTTP response — status code, headers, and body — instead of letting Spring assume `200 OK` with just the body.** Returning a bare object (`OrderDto`) is fine when 200 and default headers are correct; `ResponseEntity` is what you reach for the moment they aren't.
+
+## What it wraps
+
+It's a value object holding three things: an `HttpStatus`, an `HttpHeaders`, and an optional body of type `T`. Spring's return-value handler unpacks all three onto the actual response, running the body through a message converter just as it would a plain return value.
+
+```java
+@GetMapping("/{id}")
+ResponseEntity<OrderDto> get(@PathVariable Long id) {
+    return service.findOptional(id)
+        .map(ResponseEntity::ok)                       // 200 + body
+        .orElseGet(() -> ResponseEntity.notFound().build()); // 404, no body
+}
+```
+
+## When it earns its place
+
+**Non-200 success codes.** A POST that creates a resource should return `201 Created` with a `Location` header:
+
+```java
+@PostMapping
+ResponseEntity<OrderDto> create(@Valid @RequestBody CreateOrder cmd) {
+    OrderDto dto = service.create(cmd);
+    return ResponseEntity
+        .created(URI.create("/api/orders/" + dto.id())) // 201 + Location
+        .body(dto);
+}
+```
+
+**Custom headers** — caching (`ETag`, `Cache-Control`), pagination (`X-Total-Count`), or `Content-Disposition` for downloads.
+
+**Conditional status** — `204 No Content` for a delete, `404` when missing, `409 Conflict` on a clash — chosen at runtime from the same method.
+
+**Empty body with meaning** — `ResponseEntity.noContent().build()`.
+
+## The fluent builder
+
+`ResponseEntity` exposes a builder: `ok()`, `created(uri)`, `accepted()`, `noContent()`, `badRequest()`, `notFound()`, `status(HttpStatus)`, each followed by `.header(...)` and `.body(...)` (or `.build()` for no body).
+
+<Callout kind="tip" title="ResponseEntity vs @ResponseStatus vs ProblemDetail">
+For a fixed status on a method, `@ResponseStatus(HttpStatus.CREATED)` is lighter. For *dynamic* status/headers per call, use `ResponseEntity`. For error responses specifically, prefer throwing an exception handled by `@ControllerAdvice` returning a `ProblemDetail` — don't scatter error-shaping `ResponseEntity`s through your happy path.
+</Callout>
+
+<ProbeNote>The interviewer wants you to articulate "status + headers + body control." Strong answers contrast it with a bare return (200 only) and with `@ResponseStatus` (fixed code), and note that error responses are usually better centralized in `@ControllerAdvice`/`ProblemDetail` than returned ad hoc.</ProbeNote>

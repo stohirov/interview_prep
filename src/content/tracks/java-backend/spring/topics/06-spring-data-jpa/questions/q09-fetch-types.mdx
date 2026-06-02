@@ -1,0 +1,35 @@
+**Fetch type controls *when* an association is loaded: EAGER fetches it immediately with the parent, LAZY defers it until you actually touch the field.** LAZY is the right default for nearly everything, and "why EAGER is almost always wrong" is one of the most common JPA interview questions.
+
+## How LAZY works
+
+With LAZY, Hibernate doesn't load the association up front. For a `@ManyToOne`/`@OneToOne` it returns a **proxy** (a subclass with the PK set); for a collection it returns a wrapper. The real SELECT fires only when you call a method on it.
+
+```java
+Order o = repo.findById(1L).orElseThrow();  // one SELECT, customer not loaded
+o.getCustomer().getName();                  // triggers the SELECT now (if in session)
+```
+
+## Why EAGER is almost always wrong
+
+Three concrete failures:
+
+**1. You pay for data you don't use.** EAGER fetches the association on *every* load of the parent, even in queries that never touch it. A `findAll()` of orders drags every customer along, every time.
+
+**2. It silently causes N+1.** When you load a *list* of parents with an EAGER `@ManyToOne`, Hibernate may issue one extra SELECT per parent to fetch each association — the N+1 problem, except you didn't ask for it and can't easily turn it off.
+
+**3. EAGER can't be turned off per query, but LAZY can be turned on.** Fetch type set to EAGER on the mapping is global; you can't make it lazy for one query. LAZY is the opposite — it's the cheap default, and when a *specific* query needs the association, you opt in with `JOIN FETCH` or `@EntityGraph`. That asymmetry is the whole argument: **default to LAZY, fetch eagerly per query.**
+
+```java
+@Query("SELECT o FROM Order o JOIN FETCH o.customer WHERE o.id = :id")
+Optional<Order> findWithCustomer(@Param("id") Long id);
+```
+
+## The catch: LazyInitializationException
+
+LAZY's price is that touching a lazy field **after the persistence context closes** throws `LazyInitializationException` — the proxy has no session to load from. The fix is *not* "make it EAGER" (or `spring.jpa.open-in-view=true`, which is on by default and hides the bug). The fix is to fetch what you need *inside* the transaction — via `JOIN FETCH`, `@EntityGraph`, or by mapping straight to a DTO.
+
+<Callout kind="warn" title="Turn off open-in-view">
+Spring Boot enables Open Session In View by default, keeping the session open through view rendering so lazy access "just works" — masking N+1 and holding DB connections longer. Set `spring.jpa.open-in-view=false` and load associations explicitly.
+</Callout>
+
+<ProbeNote>Core: LAZY uses proxies and defers loading; EAGER loads up front and **can't be disabled per query**, wastes I/O, and causes hidden N+1. The mantra is "default LAZY, fetch per query with `JOIN FETCH`/`@EntityGraph`." Name `LazyInitializationException` and reject EAGER/open-in-view as the "fix."</ProbeNote>

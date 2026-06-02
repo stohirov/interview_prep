@@ -1,0 +1,53 @@
+**Spring abstracts "run this work on some thread(s)" behind the `TaskExecutor` interface — a single-method extension of `java.util.concurrent.Executor` — and `ThreadPoolTaskExecutor` is its production-grade implementation, a thin Spring-friendly wrapper over a JDK `ThreadPoolExecutor` whose core/max/queue knobs you must understand.** `@Async`, and much of the framework, ultimately submit to a `TaskExecutor`.
+
+## The hierarchy
+
+`TaskExecutor` (extends `Executor`) has a few implementations worth naming:
+
+- **`SyncTaskExecutor`** — runs the task on the calling thread (no async at all; useful for tests).
+- **`SimpleAsyncTaskExecutor`** — a *new thread per task*, no pooling. Convenient, dangerous under load. (In recent versions it can be backed by virtual threads.)
+- **`ThreadPoolTaskExecutor`** — the real one: a managed, bounded pool. This is Boot's `applicationTaskExecutor`.
+- **`ConcurrentTaskExecutor`** — adapts an existing `java.util.concurrent.Executor`.
+
+There's a parallel `TaskScheduler` hierarchy (`ThreadPoolTaskScheduler`) for `@Scheduled`.
+
+## ThreadPoolTaskExecutor configuration
+
+```java
+@Bean
+public ThreadPoolTaskExecutor reportExecutor() {
+    var ex = new ThreadPoolTaskExecutor();
+    ex.setCorePoolSize(8);          // threads kept alive always
+    ex.setMaxPoolSize(32);          // upper bound on threads
+    ex.setQueueCapacity(500);       // tasks buffered before growing past core
+    ex.setThreadNamePrefix("report-");
+    ex.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+    ex.initialize();
+    return ex;
+}
+```
+
+## The growth rule (the subtle part)
+
+The pool does **not** grow from core to max until the queue is full. The sequence is:
+
+1. Fewer than `corePoolSize` threads busy → start a new thread.
+2. Core threads all busy → **enqueue** the task (up to `queueCapacity`).
+3. Queue full → grow threads up to `maxPoolSize`.
+4. Queue full *and* `maxPoolSize` reached → apply the **rejection policy**.
+
+The trap: an **unbounded queue** (the default `queueCapacity` is `Integer.MAX_VALUE`) means step 3 never happens, so `maxPoolSize` is effectively ignored and tasks pile up in memory. Set a finite `queueCapacity` if you want `maxPoolSize` to matter.
+
+Rejection policies (`AbortPolicy` default, `CallerRunsPolicy`, `DiscardPolicy`, `DiscardOldestPolicy`) decide what happens when both queue and pool are saturated — `CallerRunsPolicy` provides natural backpressure by running the task on the submitting thread.
+
+```properties
+spring.task.execution.pool.core-size=8
+spring.task.execution.pool.max-size=32
+spring.task.execution.pool.queue-capacity=500
+```
+
+<Callout kind="info" title="Size by workload type">
+CPU-bound → core/max near the number of cores. IO-bound → many more threads, since most sit blocked (or switch to virtual threads and stop pool-sizing entirely).
+</Callout>
+
+<ProbeNote>The interviewer wants the `TaskExecutor` abstraction (with `SimpleAsyncTaskExecutor` vs pooled `ThreadPoolTaskExecutor`) and, critically, the core→queue→max growth order — plus the gotcha that an unbounded queue makes `maxPoolSize` dead code. Mentioning rejection policies and CPU- vs IO-bound sizing rounds it out.</ProbeNote>

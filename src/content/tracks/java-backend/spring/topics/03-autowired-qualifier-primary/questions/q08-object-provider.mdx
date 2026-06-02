@@ -1,0 +1,49 @@
+**`ObjectProvider<T>` is a lazy, fault-tolerant handle to a bean (or beans) that you resolve *on demand* by calling a method, instead of having Spring inject the bean eagerly at construction time.** It's the modern, one-stop replacement for `required = false`, `Optional<T>`, and `@Lazy` rolled into one type-safe API.
+
+## The problem it solves
+
+Plain `@Autowired` resolves *now*, at wiring time, and a missing or ambiguous bean fails the context. `ObjectProvider` defers resolution and hands you methods to deal with absence, multiplicity, and laziness explicitly:
+
+```java
+@Service
+public class CheckoutService {
+    private final ObjectProvider<AuditService> auditProvider;
+
+    public CheckoutService(ObjectProvider<AuditService> auditProvider) {
+        this.auditProvider = auditProvider;   // nothing resolved yet
+    }
+
+    void checkout() {
+        AuditService audit = auditProvider.getIfAvailable();  // resolved here, or null
+        if (audit != null) audit.record("checkout");
+    }
+}
+```
+
+## The API surface
+
+- `getObject()` — resolve exactly one, throw if missing/ambiguous (like plain `@Autowired`).
+- `getIfAvailable()` — the bean or `null` (optional dependency).
+- `getIfAvailable(Supplier<T> fallback)` — the bean or a default you supply.
+- `getIfUnique()` — the bean only if exactly one exists, else `null` (tolerates ambiguity).
+- `ifAvailable(Consumer<T>)` — run code only if present.
+- `stream()` / `orderedStream()` — iterate *all* matching beans (respects `@Order`).
+
+## Why it's the modern recommendation
+
+**1. One abstraction for every edge case.** Optional, lazy, default-fallback, and multiple-candidate handling all live on one injected handle — no annotation soup.
+
+**2. True laziness.** The bean isn't created until you call a getter, so it breaks eager-init chains and can sidestep circular-dependency wiring without `@Lazy` proxies.
+
+**3. Type-safe, no `null` field.** You never store a possibly-`null` dependency; you resolve and handle absence at the point of use.
+
+**4. Prototype-friendly.** For a prototype-scoped collaborator you want a *fresh* instance per call, `provider.getObject()` gives you a new one each time — something a directly injected field can't.
+
+```java
+// fresh prototype instance on each request
+Worker w = workerProvider.getObject();
+```
+
+It supersedes the older `@Lookup` method-injection trick for that pattern.
+
+<ProbeNote>The interviewer wants you to position `ObjectProvider<T>` as the *unifying* modern tool: it covers optional (`getIfAvailable`), default (`getIfAvailable(Supplier)`), multiple (`stream/orderedStream`), and lazy/prototype (`getObject`) cases in one type-safe handle — replacing `required=false`, `Optional<T>`, `@Lazy`, and `@Lookup`.</ProbeNote>

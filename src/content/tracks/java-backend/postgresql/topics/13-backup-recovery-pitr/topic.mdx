@@ -1,0 +1,23 @@
+Backups are the thing you never think about until the morning a `DROP TABLE` ran against prod instead of staging — and at that moment the only question that matters is **how much data you lost and how long until you're back**. PostgreSQL gives you two fundamentally different backup strategies, and a senior answer is built on knowing exactly when each applies.
+
+**Logical backups** (`pg_dump`, `pg_dumpall`) export SQL or an archive that *recreates* the database — `CREATE TABLE`, `COPY`, indexes. They're portable across versions and architectures, let you restore a single table, but they're slow on large databases and capture only a single consistent snapshot in time.
+
+**Physical backups** (`pg_basebackup` and tools built on it) copy the actual data files of the whole cluster, byte for byte. They're fast to restore, identical to the original, and — crucially — they're the foundation for **PITR**.
+
+```bash
+# Logical: one database, portable, single point in time
+pg_dump -Fc mydb > mydb.dump
+
+# Physical: whole cluster, the base for continuous recovery
+pg_basebackup -D /backup/base -Fp -X stream
+```
+
+Point-in-Time Recovery is the capability that separates a real backup strategy from a hopeful one. It combines a **physical base backup** with a **continuous stream of archived WAL** (the write-ahead log). To recover, you restore the base, then replay WAL forward to *any moment you choose* — for example, `recovery_target_time = '2026-06-02 09:14:00'`, stopping one minute before the bad `DROP`. This is how you achieve a low **RPO** (recovery point objective — how much data you can lose) without taking full backups every minute.
+
+Two numbers frame every decision here: **RPO** (acceptable data loss) and **RTO** (acceptable downtime). Nightly `pg_dump` gives you an RPO of up to 24 hours. Base backup + WAL archiving pushes RPO down to seconds. The strategy you pick is whatever meets the business's RPO/RTO at acceptable cost — not "the most backups possible."
+
+<Callout kind="tip" title="The interview hook">
+Lead with the distinction: "Logical backups recreate the database from SQL and are portable; physical backups copy the data files and are the basis for PITR. I choose based on RPO and RTO — and I test restores, because an untested backup isn't a backup." Then mention you'd reach for pgBackRest or WAL-G rather than hand-rolling `archive_command`.
+</Callout>
+
+The questions below cover the dump tools, how PITR actually works, WAL archiving mechanics, the logical-vs-physical trade-offs, the production-grade tooling, and why DR testing is the part everyone skips.

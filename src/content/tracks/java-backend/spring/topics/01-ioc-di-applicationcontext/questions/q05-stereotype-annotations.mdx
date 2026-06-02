@@ -1,0 +1,33 @@
+**Technically they are *nearly* identical — `@Service`, `@Repository`, and `@Controller` are all meta-annotated with `@Component`, so all four make a class a scannable bean — but they are not perfectly interchangeable, and `@Repository` in particular carries real extra behavior.** The honest senior answer is "functionally almost the same, semantically distinct, with one concrete exception."
+
+## They share one mechanism
+
+All four are *stereotype* annotations. `@Service`, `@Repository`, and `@Controller` are themselves annotated with `@Component`:
+
+```java
+@Component   // <-- this is why component scanning picks @Service up
+public @interface Service { ... }
+```
+
+So component scanning treats them the same way: detect the class, register a bean definition, instantiate as a singleton. You *could* annotate everything with plain `@Component` and the app would wire up identically.
+
+## So why have four?
+
+**1. Semantics / readability.** They mark architectural layers — `@Controller` (web), `@Service` (business logic), `@Repository` (persistence). A reader instantly knows a class's role. This is the main reason and it's not nothing.
+
+**2. `@Repository` adds real behavior: exception translation.** When a `PersistenceExceptionTranslationPostProcessor` is present (Boot configures it for you), beans marked `@Repository` get a proxy that translates vendor-specific persistence exceptions (Hibernate's `JDBCException`, raw `SQLException`) into Spring's consistent `DataAccessException` hierarchy. Plain `@Component` does **not** get this.
+
+```java
+@Repository   // gets persistence-exception translation
+public class JpaOrderRepository { ... }
+```
+
+**3. AOP and pointcut targeting.** Because stereotypes are distinct annotations, you can write aspects or pointcuts that target a layer — e.g. `@within(org.springframework.stereotype.Service)` — which you couldn't do if everything were `@Component`.
+
+**4. Tooling and future-proofing.** Frameworks and IDEs key off the specific stereotype, and Spring reserves the right to attach more behavior to a specific one later — `@Repository` is precedent for exactly that.
+
+## `@Controller` / `@RestController`
+
+`@Controller` is a stereotype the web layer (`DispatcherServlet`) scans for to find request handlers; `@RestController` is `@Controller` + `@ResponseBody`. The web framework specifically looks for `@Controller`, so swapping it for `@Component` would break MVC mapping.
+
+<ProbeNote>The trap is answering a flat "they're all the same". The strong answer: all four are `@Component`-based and wire identically, but they differ in **semantics**, in **`@Repository`'s exception translation**, and in **AOP/web-layer targeting** — so use the specific stereotype that matches the layer, not bare `@Component`.</ProbeNote>

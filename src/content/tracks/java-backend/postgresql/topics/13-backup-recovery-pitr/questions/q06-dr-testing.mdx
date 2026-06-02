@@ -1,0 +1,26 @@
+**An untested backup is not a backup — it's a hope.** Disaster recovery testing is the practice of regularly *restoring* your backups and verifying the result, because the only thing that proves a backup works is a successful restore. The two numbers that frame the whole discipline are **RPO** and **RTO**.
+
+## RPO and RTO
+
+- **RPO — Recovery Point Objective**: how much data you can afford to lose, measured in time. A nightly `pg_dump` means RPO up to 24 hours. Base backup + WAL archiving pushes RPO to seconds. RPO is determined by your **backup/archiving frequency**.
+- **RTO — Recovery Time Objective**: how long you can afford to be down. Determined by **restore speed** — which is exactly why physical backups (fast file copy) often win over logical (slow row-by-row replay) for large databases.
+
+You don't pick a backup strategy in the abstract; you pick the cheapest one that meets the business's RPO and RTO.
+
+## Why testing is non-negotiable
+
+Backups fail silently in ways you only discover at restore time: a corrupt WAL segment, a missing `--globals` dump so roles are gone, an archive that filled and stopped weeks ago, a restore runbook nobody has actually run. The failure mode is always the same — the backup *looked* fine until the day you needed it.
+
+## How to test
+
+1. **Restore on a regular cadence** to a throwaway environment — automate it, don't wait for an incident.
+2. **Run a real PITR drill**: restore a base backup, replay WAL to a chosen `recovery_target_time`, and confirm the data is at the expected state.
+3. **Verify integrity, not just exit code**: row counts, checksums, an application smoke test against the restored copy. Tools like `pgbackrest verify` check archive integrity continuously.
+4. **Measure actual RTO** during the drill — time the full restore so your RTO is a measured number, not a guess.
+5. **Keep the runbook current** and let different people execute it, so recovery doesn't depend on one person.
+
+<Callout kind="danger" title="The Schrödinger backup">
+Until you restore it, every backup is simultaneously good and useless. Monitoring that `archive_command` succeeds is necessary but not sufficient — only a completed restore proves recoverability.
+</Callout>
+
+<ProbeNote>The line they're listening for is "an untested backup isn't a backup." Define RPO (data loss, set by backup frequency) and RTO (downtime, set by restore speed) crisply, then describe a concrete restore-drill cadence with integrity verification and a measured RTO. That combination signals someone who has actually owned recovery, not just configured it.</ProbeNote>

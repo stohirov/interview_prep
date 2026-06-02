@@ -1,0 +1,27 @@
+**Each of these parameters controls a different resource, and the classic mistake is treating them as one big "make it faster" dial.** Know precisely what each governs and which ones multiply.
+
+## shared_buffers
+
+Postgres's **own page cache** — the shared-memory region where it keeps recently touched table and index pages. Reads check here first; misses fall through to the OS page cache and then disk. Rule of thumb: **~25% of RAM**. Going much higher rarely helps because Postgres also benefits from the OS cache (double buffering), and very large values can hurt checkpoint behavior.
+
+## work_mem
+
+The memory budget for **a single sort or hash operation**. The trap: it is allocated **per node, per connection** — one complex query with three sorts and two hash joins can use `5 × work_mem`, and 100 connections doing that simultaneously multiplies again. Set conservatively (e.g. 16–64 MB) and raise it locally with `SET work_mem` for known-heavy reporting queries. Exceeding it spills sorts/hashes to temp files on disk.
+
+## maintenance_work_mem
+
+Like `work_mem` but for **maintenance operations**: `VACUUM`, `CREATE INDEX`, `ALTER TABLE ... ADD FOREIGN KEY`. These run rarely and one at a time per session, so it's safe to set it large (e.g. **512 MB–2 GB**) — bigger values make index builds and vacuums substantially faster.
+
+## effective_cache_size
+
+A **planner hint, not an allocation** — it tells the planner how much memory (Postgres buffers *plus* OS cache) is likely available for caching. It changes nothing about actual memory use; it only nudges the planner toward index scans when it believes pages are probably cached. Set to **~50–75% of RAM**.
+
+## max_connections
+
+The hard cap on concurrent connections. Each connection is a **separate backend process** with its own memory overhead, so raising this is expensive and is *not* the way to scale. Use a **pooler** (PgBouncer) instead and keep this modest.
+
+## random_page_cost
+
+The estimated cost of a **random** page read relative to `seq_page_cost = 1.0`. Default `4.0` assumes spinning disks; on SSD/cloud storage lower it to **~1.1** so the planner correctly sees index scans as cheap.
+
+<ProbeNote>The discriminator is knowing which parameters *allocate* memory (`shared_buffers`, `work_mem`, `maintenance_work_mem`) versus which are *planner hints* (`effective_cache_size`, `random_page_cost`), and flagging `work_mem` as per-node-per-connection. Saying "raise `max_connections`" to scale is a red flag — the answer is pooling.</ProbeNote>

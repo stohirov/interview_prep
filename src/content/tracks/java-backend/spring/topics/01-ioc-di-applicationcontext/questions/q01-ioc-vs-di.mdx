@@ -1,0 +1,34 @@
+**These are two different things and interviewers love to hear them separated cleanly: Inversion of Control is the *principle*, Dependency Injection is one *implementation* of that principle.** Conflating them — "IoC and DI are the same" — is the answer that marks you as junior.
+
+## Inversion of Control
+
+Normally *your* code is in control: it decides when to create objects, which concrete classes to instantiate, and how to wire them together. IoC inverts that — a framework takes control of the flow and the object lifecycle, and calls *your* code at the right moments ("don't call us, we'll call you", the Hollywood Principle). Spring's container owning bean creation is IoC. So are template methods, callbacks, and event loops — IoC is a broad pattern, not unique to DI.
+
+## Dependency Injection
+
+DI is the specific technique Spring uses to *achieve* IoC for object wiring: instead of an object obtaining its collaborators itself, they are **supplied from outside**. Contrast the two:
+
+```java
+// WITHOUT DI — the class controls its own dependencies (tight coupling)
+public class OrderService {
+    private final PaymentGateway gateway = new StripeGateway(); // hard-wired
+}
+
+// WITH DI — the dependency is handed in; the class no longer chooses
+public class OrderService {
+    private final PaymentGateway gateway;
+    public OrderService(PaymentGateway gateway) {   // container injects it
+        this.gateway = gateway;
+    }
+}
+```
+
+The second version doesn't know or care that it's `StripeGateway`. In a test you pass a mock; in prod the container passes the real one. That decoupling is the payoff.
+
+## Why the distinction matters
+
+DI is not the only way to do IoC. The **Service Locator** pattern also inverts creation, but the object still *pulls* its dependency from a registry (`context.getBean(PaymentGateway.class)`), which re-introduces a hidden coupling to the locator and hides what a class actually needs. DI *pushes* dependencies in, so a class's collaborators are visible in its constructor signature — self-documenting and trivially testable without any framework.
+
+So: every DI is IoC, but not every IoC is DI. Spring implements DI via the `ApplicationContext`, which reads bean definitions and injects collaborators automatically.
+
+<ProbeNote>The interviewer wants the *relationship*, not two memorized definitions. Strong answers say "IoC is the principle, DI is a concrete implementation of it" and contrast DI (push) with Service Locator (pull) to prove you understand *why* DI is preferred — explicit dependencies, no hidden coupling, testable in isolation.</ProbeNote>

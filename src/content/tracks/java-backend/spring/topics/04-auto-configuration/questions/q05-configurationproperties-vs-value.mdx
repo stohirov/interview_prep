@@ -1,0 +1,69 @@
+**`@Value` injects a single value via SpEL; `@ConfigurationProperties` binds a whole group of related properties onto a typed object.** Pick `@Value` for a one-off, `@ConfigurationProperties` for any cohesive block of config — which is almost always the right default in real applications.
+
+## @Value — one property, one field
+
+```java
+@Component
+public class MailService {
+    @Value("${mail.host}")
+    private String host;
+
+    @Value("${mail.port:25}")     // default if unset
+    private int port;
+
+    @Value("#{systemProperties['user.region'] ?: 'us'}")  // full SpEL
+    private String region;
+}
+```
+
+Strengths: trivial for a single value, supports SpEL expressions and defaults. Weaknesses: no bulk binding, **no relaxed binding** (the key must match exactly), no type-safe grouping, awkward for lists/maps, and validation is manual. A typo in the placeholder fails at startup with a context error rather than being caught by a schema.
+
+## @ConfigurationProperties — typed, bulk binding
+
+```java
+@ConfigurationProperties(prefix = "mail")
+@Validated
+public class MailProperties {
+    @NotBlank
+    private String host;
+    private int port = 25;            // default in the field
+    private List<String> recipients;  // bulk: mail.recipients[0], [1], ...
+    private final Tls tls = new Tls();
+
+    public static class Tls {
+        private boolean enabled;
+        // getters/setters
+    }
+    // getters/setters
+}
+```
+
+Register it and inject the typed object:
+
+```java
+@Configuration
+@EnableConfigurationProperties(MailProperties.class)
+public class MailConfig { }
+
+@Service
+public class MailService {
+    private final MailProperties props;
+    MailService(MailProperties props) { this.props = props; }
+}
+```
+
+This gives you **relaxed binding** (`mail.recipients`, `MAIL_RECIPIENTS`, `mail.recipients` env-var spellings all work), **bulk binding** of lists/maps/nested objects, **JSR-303 validation** with `@Validated`, IDE metadata/autocomplete (via `spring-boot-configuration-processor`), and a single cohesive object instead of scattered fields. Boot's own auto-configuration uses this everywhere (`DataSourceProperties`, `ServerProperties`).
+
+## When to use each
+
+| Use `@Value` | Use `@ConfigurationProperties` |
+|---|---|
+| One isolated value | A group/prefix of related settings |
+| Need a SpEL expression | Lists, maps, nested structure |
+| Quick script-like code | Validation, relaxed binding, type safety |
+
+<Callout kind="tip" title="Default to the typed object">
+For anything beyond a single value, reach for `@ConfigurationProperties`. It's the same pattern Boot uses internally, it's testable, and relaxed binding makes container/env-var overrides painless. `@Value` is for the rare case where you genuinely need one SpEL-evaluated value.
+</Callout>
+
+<ProbeNote>The interviewer wants the axis stated crisply: `@Value` = single SpEL-resolved value; `@ConfigurationProperties` = typed bulk binding with relaxed binding and validation. Naming relaxed binding and `@Validated` as concrete advantages — and admitting `@Value` is fine for true one-offs — signals real experience.</ProbeNote>

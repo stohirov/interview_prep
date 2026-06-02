@@ -1,0 +1,49 @@
+**Component scanning is how Spring *discovers* your beans automatically: `@ComponentScan` tells the container which packages to walk, and any class there carrying `@Component` (or a stereotype meta-annotated with it) becomes a registered bean — no explicit declaration needed.** It's the mechanism that lets you annotate a class and have it "just appear" in the context.
+
+## How it works
+
+`@ComponentScan` is processed by a `ConfigurationClassPostProcessor` at startup. It scans the **classpath** under the given base packages, reads class metadata (via ASM bytecode reading — classes aren't even loaded yet), and for every candidate annotated with `@Component`/`@Service`/`@Repository`/`@Controller`/`@Configuration` it creates a bean definition.
+
+```java
+@Configuration
+@ComponentScan(basePackages = "com.acme.orders")
+public class AppConfig { }
+```
+
+If you don't specify `basePackages`, the scan defaults to the **package of the annotated class and all sub-packages**.
+
+## The Spring Boot shortcut
+
+`@SpringBootApplication` is a meta-annotation that bundles `@ComponentScan` (plus `@Configuration` and `@EnableAutoConfiguration`). With no explicit packages, it scans the package of the main class downward — which is exactly why the convention is to put your `@SpringBootApplication` class in the **root package**. A `@Component` in a sibling package that isn't a descendant of the main class's package will silently not be found — a classic "my bean isn't being injected" bug.
+
+```java
+@SpringBootApplication   // includes @ComponentScan of this package + below
+public class Application {
+    public static void main(String[] args) {
+        SpringApplication.run(Application.class, args);
+    }
+}
+```
+
+## Filtering the scan
+
+You can narrow or widen what's picked up with include/exclude filters:
+
+```java
+@ComponentScan(
+    basePackages = "com.acme",
+    excludeFilters = @ComponentScan.Filter(
+        type = FilterType.ANNOTATION, classes = LegacyComponent.class))
+```
+
+Filter types include `ANNOTATION`, `ASSIGNABLE_TYPE`, `REGEX`, and `ASPECTJ`.
+
+## Scanning vs. explicit registration
+
+Scanning is for **classes you own and annotate**. It does *not* pick up `@Bean` methods' targets (those are registered explicitly) or third-party classes (you can't annotate them — use `@Bean`). Scanning has a small startup cost proportional to how much classpath you walk, which is one reason you point it at your own packages rather than scanning everything.
+
+<Callout kind="warn" title="The root-package gotcha">
+The #1 component-scan bug: a bean in a package *outside* (not below) the `@SpringBootApplication` class's package isn't discovered, so injection fails with "no qualifying bean". Fix by relocating the class under the root package or adding it to `@ComponentScan`'s `basePackages`.
+</Callout>
+
+<ProbeNote>They're checking you know scanning walks **base packages downward**, that `@SpringBootApplication` bundles `@ComponentScan` rooted at the main class (hence root-package placement), and that it only finds annotated classes you own — not `@Bean` targets or third-party types. Naming the "bean outside the root package isn't found" trap proves real experience.</ProbeNote>

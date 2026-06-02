@@ -1,0 +1,44 @@
+**`@PostConstruct` and `@PreDestroy` are JSR-250 lifecycle annotations that mark a method to run right after dependency injection finishes and right before the bean is destroyed, respectively.** They're the modern, framework-agnostic way to hook init and cleanup — no Spring interface required.
+
+## @PostConstruct
+
+Marks a no-arg method that runs **after the constructor and after all dependencies are injected**, but before the bean is considered ready. This is the correct place for initialization that *needs* injected collaborators — something you can't do in the constructor, because at construction time field/setter injection hasn't happened yet.
+
+```java
+@Component
+public class CacheWarmer {
+    private final ProductRepository repo;
+    CacheWarmer(ProductRepository repo) { this.repo = repo; }
+
+    @PostConstruct
+    void warm() {
+        // repo is guaranteed injected here; not safe in a setter-injected field at construction
+        cache.putAll(repo.findHotProducts());
+    }
+}
+```
+
+In the lifecycle order it fires *before* `InitializingBean.afterPropertiesSet()` and any custom `init-method`.
+
+## @PreDestroy
+
+Marks a method that runs when the container shuts down, **before** the bean is destroyed — the spot to release resources: close pools, flush buffers, stop schedulers.
+
+```java
+@PreDestroy
+void shutdown() { executor.shutdownNow(); }
+```
+
+## The critical caveats
+
+**Package matters in Boot 3.x.** With Spring 6 / Boot 3 on Jakarta EE 9+, these are `jakarta.annotation.PostConstruct` / `jakarta.annotation.PreDestroy` — *not* the old `javax.annotation.*`. Using the `javax` import silently does nothing.
+
+**Prototype beans never get `@PreDestroy`.** The container creates and wires a prototype, then forgets it, so it never calls destruction callbacks. You must clean up prototype-scoped resources yourself.
+
+**Destruction only runs on graceful shutdown.** A `kill -9` or JVM crash skips `@PreDestroy` entirely — never rely on it for correctness-critical persistence.
+
+<Callout kind="danger" title="javax vs jakarta is a silent failure">
+If `@PostConstruct` "isn't being called" on Spring Boot 3, the first thing to check is the import. `javax.annotation.PostConstruct` is ignored on Jakarta-based Spring 6; you need `jakarta.annotation.PostConstruct`.
+</Callout>
+
+<ProbeNote>The probe is whether you know *why* `@PostConstruct` exists (collaborators aren't available in the constructor for setter/field injection) and the two gotchas: **prototypes skip `@PreDestroy`**, and **Boot 3 requires the `jakarta.*` import**.</ProbeNote>

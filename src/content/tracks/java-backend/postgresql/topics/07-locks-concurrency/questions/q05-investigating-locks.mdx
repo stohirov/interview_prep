@@ -1,0 +1,56 @@
+**To investigate live lock contention you join `pg_locks` (who holds and who waits for which lock) to `pg_stat_activity` (what each backend is actually doing), then find the *blocking chain* — which session is at the root of the pileup.** The goal is always: identify the one transaction everyone else is waiting on.
+
+## The two views
+
+- **`pg_locks`** — one row per lock held or *awaited*. The `granted` column is the key: `granted = false` means a backend is blocked waiting for this lock.
+- **`pg_stat_activity`** — one row per connection, with the current/last `query`, `state`, `wait_event`, and how long it's been running.
+
+## The fast path: who blocks whom
+
+PostgreSQL ships a helper that does the wait-for-graph join for you:
+
+```sql
+SELECT pid,
+       pg_blocking_pids(pid) AS blocked_by,
+       state,
+       now() - query_start AS duration,
+       query
+FROM pg_stat_activity
+WHERE cardinality(pg_blocking_pids(pid)) > 0;
+```
+
+`pg_blocking_pids(pid)` returns the array of backends directly blocking that PID — the cleanest way to find the blocker without hand-writing the `pg_locks` self-join.
+
+## The explicit join (shows the lock details)
+
+```sql
+SELECT blocked.pid        AS blocked_pid,
+       blocked_act.query  AS blocked_query,
+       blocking.pid       AS blocking_pid,
+       blocking_act.query AS blocking_query,
+       blocked.locktype, blocked.mode
+FROM pg_locks blocked
+JOIN pg_stat_activity blocked_act   ON blocked_act.pid = blocked.pid
+JOIN pg_locks blocking
+     ON blocking.locktype = blocked.locktype
+    AND blocking.database IS NOT DISTINCT FROM blocked.database
+    AND blocking.relation IS NOT DISTINCT FROM blocked.relation
+    AND blocking.granted
+JOIN pg_stat_activity blocking_act  ON blocking_act.pid = blocking.pid
+WHERE NOT blocked.granted;
+```
+
+## What to look for, and the fix
+
+The root blocker is usually a transaction stuck **`idle in transaction`** — it ran a statement, took locks, and then the application forgot to commit (a leaked connection, a hung HTTP call mid-transaction). It holds locks while doing nothing. Once you've identified it:
+
+```sql
+SELECT pg_cancel_backend(pid);     -- cancel the current query (gentle)
+SELECT pg_terminate_backend(pid);  -- kill the whole connection (last resort)
+```
+
+<Callout kind="warn" title="idle in transaction is the usual culprit">
+A backend in state `idle in transaction` holding locks is almost always an application bug — a transaction left open across a slow external call. Set `idle_in_transaction_session_timeout` so the server reaps these automatically instead of letting them block everyone.
+</Callout>
+
+<ProbeNote>The strong answer reaches for `pg_blocking_pids()` rather than hand-rolling the `pg_locks` join, joins to `pg_stat_activity` to see the actual query and state, and immediately suspects `idle in transaction`. Naming `idle_in_transaction_session_timeout` as the systemic prevention is the senior tell.</ProbeNote>

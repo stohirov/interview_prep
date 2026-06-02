@@ -1,0 +1,44 @@
+**Micrometer is a vendor-neutral metrics facade — "SLF4J for metrics."** You instrument your code against Micrometer's API once, and a pluggable `MeterRegistry` ships those meters to whichever backend you choose: Prometheus, Datadog, CloudWatch, New Relic, Graphite. Swap the registry dependency and the same instrumentation publishes somewhere else; your code never changes. Spring Boot auto-configures a `MeterRegistry` and pre-instruments JVM, HTTP, datasource, and cache metrics for you.
+
+## The four core meter types
+
+- **`Counter`** — a monotonically increasing count. Use for *events*: requests served, orders placed, errors. You only ever `increment()`.
+
+  ```java
+  Counter orders = Counter.builder("orders.placed")
+      .tag("channel", "web")
+      .register(registry);
+  orders.increment();
+  ```
+
+- **`Gauge`** — a value that goes up *and* down, sampled on scrape: queue depth, active sessions, cache size. You bind it to a function or object reference rather than setting it:
+
+  ```java
+  Gauge.builder("queue.depth", queue, Queue::size).register(registry);
+  ```
+
+- **`Timer`** — measures both the *count* and the *duration* of short events (latency). It records total time, count, and max, and can emit percentiles/histograms.
+
+  ```java
+  Timer timer = registry.timer("payment.duration");
+  timer.record(() -> gateway.charge(order));   // times the lambda
+  ```
+
+- **`DistributionSummary`** — like a Timer but for non-time magnitudes: request payload size, batch row counts. Tracks count, total, max, and a distribution.
+
+## Tags (dimensions)
+
+Every meter carries **tags** — key/value dimensions like `method=GET`, `status=200`, `uri=/orders`. They let you slice one metric many ways in Grafana. The rule: tags must be **low-cardinality**. Never tag with a user ID, order ID, or raw URL with path params — unbounded tag values explode the registry's memory and the backend's storage.
+
+## The Spring-idiomatic shortcut
+
+`@Timed` on a controller or method auto-creates a Timer:
+
+```java
+@Timed(value = "checkout.time", percentiles = {0.95, 0.99})
+public Receipt checkout(Cart cart) { ... }
+```
+
+With the Prometheus registry on the classpath, all meters surface at `/actuator/prometheus` in scrape format.
+
+<ProbeNote>The signal is naming Micrometer as a *facade* (vendor-neutral, swap registries without touching code) and matching each meter type to its use: Counter for monotonic events, Gauge for up/down samples, Timer for latency, DistributionSummary for non-time sizes. The senior tell is the low-cardinality tag warning.</ProbeNote>

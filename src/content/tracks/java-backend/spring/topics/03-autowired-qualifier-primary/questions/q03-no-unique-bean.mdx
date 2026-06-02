@@ -1,0 +1,49 @@
+**If an unqualified injection point matches two beans of the same type and nothing breaks the tie, the container throws `NoUniqueBeanDefinitionException` at startup.** This is a *fail-fast* error — the application context refuses to start rather than guessing — which is exactly the behavior you want.
+
+## When it happens
+
+```java
+@Bean PaymentGateway stripe()  { return new StripeGateway(); }
+@Bean PaymentGateway paypal()  { return new PayPalGateway(); }
+
+@Service
+class CheckoutService {
+    CheckoutService(PaymentGateway gateway) { ... }  // two candidates -> boom
+}
+```
+
+By-type resolution finds two `PaymentGateway` beans, no `@Qualifier`, no `@Primary`, and the parameter name `gateway` matches neither bean name, so the fallback fails too. The error message is explicit and lists the candidates:
+
+```text
+NoUniqueBeanDefinitionException: No qualifying bean of type
+'PaymentGateway' available: expected single matching bean
+but found 2: stripe,paypal
+```
+
+## The four ways to fix it
+
+**1. `@Primary` on one bean** — declare a default for unqualified injection points:
+
+```java
+@Bean @Primary PaymentGateway stripe() { return new StripeGateway(); }
+```
+
+**2. `@Qualifier` at the injection point** — pick a specific bean explicitly:
+
+```java
+CheckoutService(@Qualifier("paypal") PaymentGateway gateway) { ... }
+```
+
+**3. Match the bean name** — name the parameter/field to equal a bean name (works, but couples code to names — discouraged).
+
+**4. Change the type** — if the two beans genuinely serve different roles, give them distinct interfaces so there's no ambiguity in the first place.
+
+## The collection escape hatch
+
+If you actually *want* all of them, inject `List<PaymentGateway>` or `Map<String, PaymentGateway>` — that's never ambiguous because you're asking for *every* matching bean, not one (its own question).
+
+## Why fail-fast is right
+
+The container could pick arbitrarily, but a wrong gateway in production is far worse than a startup failure in CI. Resolving ambiguity is a *configuration decision* that should be explicit in the code, not delegated to bean-registration order.
+
+<ProbeNote>Name the exception precisely and stress it's a *startup* failure, not a runtime one. The follow-up is "how do you fix it" — list `@Primary` vs `@Qualifier` and explain the difference (default vs explicit pick), and mention `List`/`Map` injection if you want all of them.</ProbeNote>

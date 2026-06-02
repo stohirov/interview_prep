@@ -1,0 +1,32 @@
+**Spring's caching abstraction is a thin, declarative layer over a pluggable cache provider — you annotate methods, Spring weaves an AOP proxy around them, and the proxy decides whether to call the method or short-circuit to a cached value.** The abstraction itself stores nothing; it delegates to a `CacheManager` backed by Caffeine, Redis, Hazelcast, Ehcache, or a no-op `ConcurrentHashMap`. Your code stays provider-agnostic.
+
+Turn it on with `@EnableCaching` on a `@Configuration` class — this registers the cache `BeanPostProcessor` that creates the AOP proxies. Without it, the annotations are inert.
+
+```java
+@Configuration
+@EnableCaching
+class CacheConfig {
+  @Bean
+  CacheManager cacheManager() {
+    return new CaffeineCacheManager("books", "authors");
+  }
+}
+
+@Service
+class BookService {
+  @Cacheable("books")
+  public Book findById(long id) { /* expensive DB call */ }
+}
+```
+
+The three core annotations map to three cache operations. **`@Cacheable`** is lookup-or-store: on a hit it returns the cached value and *skips the method*; on a miss it runs the method and stores the result. **`@CachePut`** *always* runs the method and writes the return value to the cache — the right tool for updates. **`@CacheEvict`** removes entries (`allEntries = true` clears the whole region). **`@Caching`** composes several of these on one method when a single annotation can't express the intent.
+
+The proxy keys each entry. By default `SimpleKeyGenerator` builds a key from all method parameters; you override with SpEL via `key = "#id"` or a custom `KeyGenerator` bean. `condition` (evaluated on arguments, before the call) and `unless` (evaluated on the result, after) let you cache selectively.
+
+Two failure modes dominate interviews: **self-invocation** — calling a `@Cacheable` method from within the same bean bypasses the proxy entirely, exactly like `@Transactional` — and **cache stampede**, where many concurrent misses recompute the same value at once.
+
+<Callout kind="tip" title="The interview hook">
+Frame caching as "an AOP proxy in front of a `CacheManager`." That single sentence explains why `@EnableCaching` is required, why self-invocation breaks it, why the annotations are provider-agnostic, and why keys, `condition`/`unless`, and stampede mitigation are *the proxy's* responsibility — not the cache's.
+</Callout>
+
+The questions below cover the annotation set and composition, key generation, provider trade-offs, stampede prevention, conditional caching, the self-invocation trap, and end-to-end consistency strategies.

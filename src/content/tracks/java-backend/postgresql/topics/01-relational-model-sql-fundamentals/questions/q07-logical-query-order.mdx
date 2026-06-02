@@ -1,0 +1,41 @@
+**SQL is declarative: you write `SELECT` first, but the engine evaluates it almost last.** The clauses are processed in a fixed *logical* order, and nearly every "why can't I use that alias here?" or "why is this filter in the wrong place?" question dissolves once you internalize it.
+
+## The logical order
+
+```text
+1. FROM (+ JOINs)   build and combine the source relations
+2. WHERE            filter individual rows
+3. GROUP BY         collapse rows into groups
+4. HAVING           filter groups
+5. SELECT           compute output columns / aggregates, assign aliases
+6. DISTINCT         remove duplicate result rows
+7. ORDER BY         sort the result
+8. LIMIT / OFFSET   take a slice
+```
+
+This is the *logical* order that defines the result's meaning. The planner is free to execute differently (it might use an index to satisfy `ORDER BY` early, or filter inside a join), but the answer must be *as if* the steps ran in this sequence.
+
+## Why it matters — the consequences fall out of the order
+
+**Aliases from `SELECT` aren't visible in `WHERE`, `GROUP BY`, or `HAVING`.** `SELECT` (step 5) runs *after* them, so the alias doesn't exist yet:
+
+```sql
+-- ERROR: column "revenue" does not exist
+SELECT price * qty AS revenue FROM sales WHERE revenue > 100;
+-- fix: repeat the expression, since WHERE can't see the alias
+SELECT price * qty AS revenue FROM sales WHERE price * qty > 100;
+```
+
+PostgreSQL does grant one *exception*: `ORDER BY` (step 7) and `GROUP BY` may reference `SELECT` aliases, because they run at or after the projection. So `ORDER BY revenue` works even though `WHERE revenue` doesn't.
+
+**`WHERE` can't see aggregates; `HAVING` can.** Aggregation happens at step 3, after `WHERE`. That's why an aggregate condition must live in `HAVING`, not `WHERE`.
+
+**`LIMIT` applies last**, so `LIMIT` without `ORDER BY` returns an *arbitrary* slice — there's no defined order to take "the first 10" from. Likewise `OFFSET` skips already-ordered rows; pagination is only stable with a deterministic `ORDER BY`.
+
+**`DISTINCT` runs after `SELECT`** but before `ORDER BY`, so you can only `ORDER BY` expressions that survive the `DISTINCT` projection — a frequent gotcha with `SELECT DISTINCT ... ORDER BY <column not selected>`.
+
+## The senior framing
+
+Window functions slot in *with* `SELECT` (step 5), after `GROUP BY`/`HAVING` — which is why a window function can't appear in `WHERE` and why you wrap it in a subquery/CTE to filter on its result.
+
+<ProbeNote>The interviewer is probing whether you can derive the rules instead of memorizing them: aliases invisible in WHERE, aggregates only in HAVING, LIMIT-needs-ORDER-BY, window functions evaluated at SELECT time. Reciting the order is table stakes; explaining *which bug each step prevents or causes* is the senior answer.</ProbeNote>

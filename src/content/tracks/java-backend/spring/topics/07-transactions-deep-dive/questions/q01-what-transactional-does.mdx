@@ -1,0 +1,36 @@
+**`@Transactional` tells Spring to wrap a method call in a database transaction via an AOP proxy — begin before the method runs, commit if it returns normally, roll back if it throws.** It does *not* do this by editing your method; it does it from the outside, in a proxy that sits between the caller and your bean.
+
+## What happens on a call
+
+When you call an annotated method *through the proxy*, an interceptor (`TransactionInterceptor`) runs first. It asks a `PlatformTransactionManager` to start (or join) a transaction according to the propagation rule, binds the resulting connection to the current thread, then invokes your method. On normal return it commits; on an unchecked exception it rolls back; then it unbinds the connection.
+
+```java
+@Service
+class AccountService {
+
+    private final JdbcTemplate jdbc;
+    AccountService(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+
+    @Transactional
+    public void transfer(long from, long to, BigDecimal amount) {
+        jdbc.update("UPDATE account SET balance = balance - ? WHERE id = ?", amount, from);
+        jdbc.update("UPDATE account SET balance = balance + ? WHERE id = ?", amount, to);
+        // both run on the SAME thread-bound connection; commit happens after return
+    }
+}
+```
+
+## Where to put it
+
+**On the service layer — public methods of a Spring bean.** That layer is the natural transaction boundary: one business operation, one transaction. Concretely:
+
+- It must be a **Spring-managed bean**, so the proxy exists.
+- The method should be **public**. With the default Spring AOP proxies, `@Transactional` on `private`/`protected`/package-private methods is silently ignored.
+- Don't put it on **repositories** alone (each call becomes its own tiny transaction, defeating atomicity across calls) or on **controllers** (you'd hold the transaction open across view rendering / serialization).
+- Calls must arrive **through the proxy** — external callers, or a self-injected proxy reference. A plain `this.method()` bypasses it (the self-invocation trap).
+
+<Callout kind="info" title="Class vs method level">
+`@Transactional` on the class applies its settings to every public method; a method-level annotation overrides it for that method. A common pattern: `@Transactional(readOnly = true)` on the class, plain `@Transactional` on the write methods.
+</Callout>
+
+<ProbeNote>The interviewer wants "AOP proxy that begins/commits/rolls back around a public service method," not "it makes things transactional somehow." Bonus points for naming the service layer as the boundary and flagging that private methods and `this.` self-calls are silently skipped.</ProbeNote>

@@ -1,0 +1,50 @@
+**Spring 6 builds in `ProblemDetail`, a standard machine-readable error body defined by RFC 7807 (updated by RFC 9457).** Instead of every service inventing its own JSON error shape, you return a `application/problem+json` document with a known set of fields — so clients can parse errors uniformly.
+
+## The standard shape
+
+RFC 7807/9457 defines five members, all optional, plus arbitrary extensions:
+
+```json
+{
+  "type": "https://api.shop.com/errors/out-of-stock",
+  "title": "Out of stock",
+  "status": 409,
+  "detail": "Product 42 has 0 units available",
+  "instance": "/orders/1001",
+  "productId": 42
+}
+```
+
+`type` is a URI identifying the *kind* of error (the stable thing clients branch on), `title` is a short human label, `status` mirrors the HTTP code, `detail` is human-readable specifics, and `instance` identifies *this* occurrence. `productId` above is a custom **extension**.
+
+## Using it in Spring
+
+`ProblemDetail` is a plain class you can return directly or build into a `ResponseEntity`:
+
+```java
+@ExceptionHandler(OutOfStockException.class)
+ProblemDetail handle(OutOfStockException ex) {
+    ProblemDetail pd = ProblemDetail.forStatusAndDetail(
+        HttpStatus.CONFLICT, ex.getMessage());
+    pd.setType(URI.create("https://api.shop.com/errors/out-of-stock"));
+    pd.setTitle("Out of stock");
+    pd.setProperty("productId", ex.getProductId()); // extension member
+    return pd;
+}
+```
+
+The content type is automatically `application/problem+json`.
+
+You also get it for free from the framework's own exceptions: extend `ResponseEntityExceptionHandler` (which now produces `ProblemDetail` bodies) or simply set:
+
+```yaml
+spring.mvc.problemdetails.enabled: true   # webflux: spring.webflux.problemdetails.enabled
+```
+
+so built-in Spring MVC exceptions (validation failures, 404s, etc.) return RFC 7807 bodies without custom handlers.
+
+<Callout kind="info" title="Why a standard beats a custom shape">
+A bespoke `{"error": "..."}` works until a second team consumes your API and has to special-case it. ProblemDetail gives clients one parser, one place to read `status`, and a stable `type` URI to switch on — and it's the same contract across every Spring 6 service in your estate.
+</Callout>
+
+<ProbeNote>Interviewers check that you know error responses are now *standardized in core* (no library needed), can name the key fields — especially `type` as the stable client-facing identifier — and know the two on-ramps: returning `ProblemDetail` from `@ExceptionHandler`, and enabling `spring.mvc.problemdetails.enabled` to convert framework exceptions automatically. Mentioning custom extension members via `setProperty` shows real use.</ProbeNote>

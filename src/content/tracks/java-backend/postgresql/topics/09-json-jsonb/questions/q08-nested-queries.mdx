@@ -1,0 +1,64 @@
+**Querying nested `jsonb` *efficiently* is mostly about making the predicate index-friendly — prefer containment over extract-and-compare, and pick the index that matches the query shape.** The naive `->>`-and-equals filter works but usually can't use a GIN index.
+
+## The slow shape: extract then compare
+
+```sql
+SELECT * FROM users WHERE data #>> '{address,city}' = 'Berlin';
+```
+
+This extracts text and compares it. A whole-document GIN index **cannot** help — it's a sequential scan unless you add a targeted expression index. Functional but not scalable.
+
+## The fast shape: containment
+
+Rewrite as containment so a GIN index can satisfy it:
+
+```sql
+CREATE INDEX idx_users_data ON users USING GIN (data jsonb_path_ops);
+
+SELECT * FROM users WHERE data @> '{"address":{"city":"Berlin"}}';
+```
+
+`@>` matches the nested structure and **uses the GIN index**. This is the idiomatic way to filter on nested equality.
+
+## Expression index for one specific field
+
+When you filter or sort on a single nested scalar — especially with ranges — a B-tree **expression index** beats GIN:
+
+```sql
+CREATE INDEX idx_users_city ON users ((data #>> '{address,city}'));
+
+SELECT * FROM users WHERE data #>> '{address,city}' = 'Berlin';     -- now uses the index
+
+-- ranges and ordering need this; GIN can't do them:
+CREATE INDEX idx_users_age ON users (((data ->> 'age')::int));
+SELECT * FROM users WHERE (data ->> 'age')::int BETWEEN 30 AND 40;
+```
+
+The predicate must be written **identically** to the indexed expression for the planner to use it.
+
+## Querying inside arrays
+
+Containment checks membership; for conditional matches use jsonpath. To **filter** rows:
+
+```sql
+-- "has a line item with product 42"
+SELECT * FROM orders WHERE data @> '{"items":[{"product_id":42}]}';   -- GIN-usable
+
+-- conditional match inside the array
+SELECT * FROM orders WHERE data @? '$.items[*] ? (@.qty > 5)';        -- GIN-usable
+```
+
+To **return** the nested elements as rows, unnest with a set-returning function:
+
+```sql
+SELECT o.id, item ->> 'product_id' AS product
+FROM orders o,
+     jsonb_array_elements(o.data -> 'items') AS item
+WHERE (item ->> 'qty')::int > 5;
+```
+
+<Callout kind="tip" title="Verify with EXPLAIN">
+Always confirm the index is actually used: `EXPLAIN (ANALYZE, BUFFERS)` on the query. A `Bitmap Index Scan` on your GIN index (or an `Index Scan` on the expression index) is the win; a `Seq Scan` on a large table means your predicate didn't match an index.
+</Callout>
+
+<ProbeNote>The interviewer wants the efficiency instinct: rewrite `#>>`-equals filters as `@>` containment so GIN can serve them, use a B-tree expression index for single-field equality/range/sort, and reach for jsonpath (`@?` / `@@`) or `jsonb_array_elements` for array conditions. Confirming with `EXPLAIN ANALYZE` that the index is hit is the senior tell.</ProbeNote>

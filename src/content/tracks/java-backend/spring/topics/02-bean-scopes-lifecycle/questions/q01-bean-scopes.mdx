@@ -1,0 +1,38 @@
+**The default scope is `singleton`, and the single most common mistake is assuming "singleton" means a JVM-wide singleton — it doesn't.** A Spring singleton is one instance *per `ApplicationContext`*, not per classloader. There are six built-in scopes; the first two work in any container, the last four only in a web-aware context.
+
+## singleton (the default)
+
+One shared, cached instance per container, created eagerly at startup (unless `@Lazy`). Because it's shared across threads, a singleton bean **must be stateless** or it becomes a concurrency hazard. This is the right default for services, repositories, and configuration.
+
+## prototype
+
+A new instance every time the bean is requested — per `getBean()` call and per injection point. Crucially, **the container does not manage a prototype's full lifecycle**: it creates and wires the bean but then forgets it, so destruction callbacks like `@PreDestroy` are *not* invoked. Cleanup is your responsibility. Use it for genuinely stateful, short-lived objects.
+
+```java
+@Component
+@Scope("prototype")
+public class ShoppingCart { /* per-user mutable state */ }
+```
+
+## The web scopes
+
+These require a web-aware context (`request`, `session`, `application`, `websocket`):
+
+- **request** — one instance per HTTP request; discarded when the request completes.
+- **session** — one instance per HTTP session; lives across that user's requests.
+- **application** — one instance per `ServletContext`. Subtly different from singleton: a singleton is per `ApplicationContext`, while `application` is per servlet context (which can span multiple contexts).
+- **websocket** — one instance per WebSocket session.
+
+Web-scoped beans are typically injected into singletons via a **scoped proxy**, so the proxy resolves the correct short-lived instance per request/session at call time:
+
+```java
+@Component
+@Scope(value = "request", proxyMode = ScopedProxyMode.TARGET_CLASS)
+public class RequestContext { }
+```
+
+<Callout kind="warn" title="Singleton is shared mutable state">
+The number-one production bug from misunderstanding scope: putting per-request fields on a singleton. All threads share that one instance, so the fields race. Keep singletons stateless, or use a web scope.
+</Callout>
+
+<ProbeNote>The interviewer wants "singleton, one per `ApplicationContext`, eager and stateless" without hesitation, plus awareness that **prototypes skip destruction callbacks** and that web scopes need a **scoped proxy** to be injected into singletons.</ProbeNote>

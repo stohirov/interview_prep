@@ -1,0 +1,17 @@
+The **relational model** is the theory underneath every table you've ever queried: data is organized into *relations* (sets of rows), each row a *tuple* of attribute values, and you manipulate them with set-based operations rather than pointer-chasing. SQL is the practical — and famously imperfect — dialect of that theory. Knowing where SQL faithfully implements the model and where it deliberately departs from it (duplicate rows, three-valued logic, ordered output) is what separates someone who *writes* SQL from someone who *reasons* about it.
+
+A **relation** is a set of tuples sharing the same attributes; in SQL it becomes a **table**. A **tuple** is one row, an **attribute** is one column, and the set of allowed values for an attribute is its **domain** — in SQL, its data type plus any constraints. The model says a relation is a *set*, so it has no duplicate tuples and no inherent order. SQL relaxes both: a table can hold duplicate rows unless a key forbids it, and you must use `ORDER BY` to get a deterministic order. That single relaxation is the source of a huge number of bugs and interview gotchas.
+
+```sql
+SELECT customer_id, status      -- attributes (columns)
+FROM   orders                   -- relation (table)
+WHERE  status = 'shipped';      -- each result row is a tuple
+```
+
+On top of this, SQL gives you the operators to combine relations — joins, `UNION`, `INTERSECT`, `EXCEPT` — and to summarize them with `GROUP BY` and aggregates. The catch is that none of it runs in the order you wrote it: SQL is *declarative*, and the engine processes clauses in a fixed logical order (`FROM` first, `SELECT` near the end) that explains why a column alias isn't visible in `WHERE`, and why `HAVING` and `WHERE` are not interchangeable.
+
+The other constant theme is **NULL**. SQL uses three-valued logic (true/false/unknown), so `NULL = NULL` is *not* true, and NULLs silently vanish from most aggregates and equality joins. Most "my query returns the wrong rows" incidents trace back to NULL semantics or to forgetting that a table is a multiset, not a set.
+
+<Callout kind="tip" title="The interview hook">
+Frame your answers around one sentence: "SQL is a *pragmatic* implementation of the relational model — it keeps the set-based operators but relaxes the no-duplicates and no-order rules and adds three-valued logic for NULL." Every fundamentals question below is really probing whether you know which guarantees the model gives you and which ones SQL takes away.
+</Callout>

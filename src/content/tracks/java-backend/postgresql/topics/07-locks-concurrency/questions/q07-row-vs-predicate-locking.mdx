@@ -1,0 +1,38 @@
+**Row-level locking protects rows that *exist*; predicate locking protects the *condition* you queried — including rows that don't exist yet.** The difference is what defends against phantoms, and it's the heart of how Serializable Snapshot Isolation (SSI) works in PostgreSQL.
+
+## Row locks lock the present
+
+`FOR UPDATE` and friends lock specific, currently-existing rows. If you `SELECT count(*) FROM orders WHERE customer_id = 7 FOR UPDATE`, you've locked the rows that match *now*. Nothing stops a concurrent transaction from **inserting a new** order for customer 7 — that row didn't exist to be locked. This is the **phantom read**: your predicate's result set changes underneath you even though every row you saw is unchanged.
+
+## Predicate locks lock the condition
+
+A predicate lock conceptually locks the *search condition* — "all rows where `customer_id = 7`", present and future. An attempt to insert a row that would satisfy that condition conflicts with the predicate lock. This is what's needed to truly serialize transactions whose correctness depends on a query's *aggregate* result, not on individual rows.
+
+## How PostgreSQL actually does it: SSI
+
+PostgreSQL does **not** take blocking predicate locks. Under `SERIALIZABLE` isolation it uses **Serializable Snapshot Isolation**, which acquires lightweight, *non-blocking* tracking locks called **`SIReadLock`** (visible in `pg_locks` with `mode = SIReadLock`). These don't block anyone — they record which data a transaction *read*. The SSI machinery watches for dangerous read/write dependency cycles among concurrent transactions and, if committing one would break serializability, aborts it:
+
+```text
+ERROR:  could not serialize access due to read/write dependencies among transactions
+SQLSTATE 40001
+```
+
+```sql
+BEGIN ISOLATION LEVEL SERIALIZABLE;
+SELECT count(*) FROM orders WHERE customer_id = 7;   -- takes SIReadLocks, blocks no one
+-- decision based on the count ...
+INSERT INTO orders (customer_id, ...) VALUES (7, ...);
+COMMIT;   -- may fail with 40001 if a concurrent txn made this non-serializable
+```
+
+## The key contrasts
+
+- **Granularity:** row locks = specific tuples; predicate locks (SIReadLocks) = the *query condition*, covering phantom inserts.
+- **Blocking:** `FOR UPDATE` blocks writers; `SIReadLock` blocks no one — conflicts surface as a serialization *failure at commit*, not a wait.
+- **Phantoms:** row locks can't prevent them; predicate locking is exactly the mechanism that does.
+
+<Callout kind="info" title="SSI's bargain: optimistic, so you must retry">
+SERIALIZABLE gives true serializability with no extra blocking — but any transaction can abort with `40001` at commit. The whole model only works if your application **retries** serialization failures. Treat it like deadlock handling: catch `40001`, replay the transaction.
+</Callout>
+
+<ProbeNote>The discriminating answer ties predicate locking to *phantom prevention* and explains that PostgreSQL implements it via non-blocking `SIReadLock`s under SSI — detecting dangerous dependency cycles and aborting with `40001` rather than blocking. Knowing SSI is optimistic and requires retry logic is the senior signal.</ProbeNote>

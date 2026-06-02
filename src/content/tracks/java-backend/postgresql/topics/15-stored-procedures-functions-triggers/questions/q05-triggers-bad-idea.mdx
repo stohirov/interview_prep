@@ -1,0 +1,31 @@
+**Triggers are powerful but they are *invisible action at a distance*: code that runs as a side effect of an ordinary `INSERT`/`UPDATE`/`DELETE`, where no application developer reading the calling code can see it.** That hiddenness is the root of most of the reasons to avoid them.
+
+## The problems
+
+**1. Hidden business logic.** A developer writes `UPDATE orders SET status='shipped'` and three triggers fire — charging a card, writing an audit row, sending a notification. None of it is visible in the application code or the SQL statement. New team members get blindsided; debugging means knowing to go look in `pg_trigger`.
+
+**2. Hard to test.** You can't unit-test a trigger in isolation the way you test an application service. Testing requires a real database, the right table state, and exercising the DML — slow, and easy to forget when reasoning about a code path.
+
+**3. Surprising ordering and cascades.** Multiple triggers on a table fire in **alphabetical order by name**, which nobody intuits. Worse, a trigger that performs DML can fire *other* triggers, producing cascades that are painful to trace and can even recurse.
+
+**4. Performance traps.** A row-level trigger runs once per affected row. A bulk `UPDATE` touching a million rows runs the trigger a million times; a heavy body (or one that itself does queries) turns one statement into a latency cliff that's invisible at the call site.
+
+**5. Migration and replication friction.** Triggers complicate schema migrations (ordering of changes, disabling/re-enabling), and **logical replication does not fire triggers on the subscriber by default** — a denormalization or audit trigger that the app silently relied on simply doesn't run on the replica unless you set `ENABLE ALWAYS`. Bugs that only appear after failover are the worst kind.
+
+**6. Error handling surprises.** An exception inside a trigger aborts the whole user transaction, often with a stack the application author never anticipated.
+
+## When they *are* justified
+
+Use a trigger when the guarantee genuinely must live in the database and apply to **every** writer regardless of code path:
+
+- `updated_at` timestamp maintenance.
+- Audit/history tables that must be tamper-proof and capture *all* writes, including ad-hoc SQL.
+- Enforcing an invariant that can't be expressed as a constraint and must hold even for direct DB access.
+
+The test: *if a side effect is core business logic, keep it in the application where it's visible and testable; if it's a cross-cutting integrity guarantee that must hold for all writers, a trigger may be the only honest place for it.*
+
+<Callout kind="warn" title="The replication gotcha">
+By default triggers fire only on `ORIGIN`/`LOCAL` writes, not during logical replication apply. If you push denormalization or auditing into a trigger and then add a replica, that logic silently stops running on the subscriber unless declared `ENABLE ALWAYS`. Many post-failover bugs start here.
+</Callout>
+
+<ProbeNote>This is a judgement probe. Lead with "hidden logic that's hard to test and reason about," cite alphabetical firing order and the per-row bulk cost, and land the senior point: triggers are right for *integrity guarantees that must hold for every writer* (audit, `updated_at`), wrong for *business logic that belongs in the application*. The replication-apply caveat is the standout detail.</ProbeNote>

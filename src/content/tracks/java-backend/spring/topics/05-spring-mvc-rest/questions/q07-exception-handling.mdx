@@ -1,0 +1,55 @@
+**Spring routes any exception thrown by a handler to a `HandlerExceptionResolver`, and the mechanisms you reach for — `@ExceptionHandler`, `@ControllerAdvice`, `ResponseStatusException` — are progressively broader ways to plug into that.** The goal is to translate exceptions into clean HTTP responses without `try/catch` clutter in your controllers.
+
+## `@ExceptionHandler` — local to a controller
+
+A method annotated `@ExceptionHandler(SomeException.class)` inside a controller handles exceptions of that type thrown by *that controller's* methods. It can return a `ResponseEntity`, a `ProblemDetail`, or a body with `@ResponseStatus`.
+
+```java
+@ExceptionHandler(OrderNotFoundException.class)
+ResponseEntity<String> handle(OrderNotFoundException ex) {
+    return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
+}
+```
+
+## `@ControllerAdvice` — global handlers
+
+Move those handlers into a `@ControllerAdvice` (or `@RestControllerAdvice`, which adds `@ResponseBody`) bean and they apply across **all** controllers. This is the standard place to centralize error mapping.
+
+```java
+@RestControllerAdvice
+class ApiExceptionHandler {
+    @ExceptionHandler(OrderNotFoundException.class)
+    ProblemDetail notFound(OrderNotFoundException ex) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+        pd.setTitle("Order not found");
+        return pd;
+    }
+}
+```
+
+## `ResponseStatusException` — throw status inline
+
+When you don't want a dedicated exception class, throw `ResponseStatusException` directly with a status and reason — no advice needed:
+
+```java
+throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Order " + id + " not found");
+```
+
+## `ProblemDetail` — RFC 7807 (Spring 6)
+
+Spring 6 standardizes error bodies as `ProblemDetail` (media type `application/problem+json`) with `type`, `title`, `status`, `detail`, `instance` fields plus extensions. Extend `ResponseEntityExceptionHandler` to get `ProblemDetail` responses for Spring's built-in exceptions (validation, 404, 405) for free, then override what you need.
+
+```java
+@RestControllerAdvice
+class GlobalHandler extends ResponseEntityExceptionHandler { /* override hooks */ }
+```
+
+## How they compose
+
+A thrown exception is matched first by the most specific `@ExceptionHandler` in the controller, then by `@ControllerAdvice`. `ResponseStatusException` is resolved by `ResponseStatusExceptionResolver` without any handler. Note `@ControllerAdvice` only sees exceptions from the **handler**, not from servlet `Filter`s outside the dispatch.
+
+<Callout kind="tip" title="Standardize on ProblemDetail">
+In Spring 6 / Boot 3, prefer `@RestControllerAdvice extends ResponseEntityExceptionHandler` returning `ProblemDetail`. You get consistent, machine-readable error bodies and inherit sane handling of framework exceptions instead of reinventing them.
+</Callout>
+
+<ProbeNote>Interviewers look for the progression: `@ExceptionHandler` (local) → `@ControllerAdvice` (global) → `ResponseStatusException` (inline) → `ProblemDetail` (RFC 7807 standard body). The senior insight is that advice handles only handler-thrown exceptions, so filter-level errors need a different mechanism.</ProbeNote>

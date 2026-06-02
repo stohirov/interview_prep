@@ -1,0 +1,42 @@
+**A flaky test passes and fails non-deterministically against the *same* code — and that's worse than a consistently failing one, because teams learn to ignore it and it masks real regressions.** Almost all flakiness in Spring suites traces to a handful of root causes, each with a known fix.
+
+## Shared mutable state and test ordering
+
+The most common cause. Because Spring **caches and reuses one context**, singleton beans, static fields, and in-memory caches persist across tests. If test A mutates state and test B assumes a clean slate, B passes alone but fails when A runs first. JUnit doesn't guarantee method order, so the failure is intermittent.
+
+Fix: isolate state. Use `@Transactional` rollback (or Testcontainers cleanup) for the DB, reset mocks/caches in `@AfterEach`, and never let tests depend on execution order. As a *diagnostic* (not a fix) `@DirtiesContext` can confirm pollution is the cause.
+
+## Async without proper waiting
+
+Code under test runs on another thread (`@Async`, an event listener, a message consumer) and the test asserts before the work finishes — or uses a fixed `Thread.sleep` that's too short under load. Both are timing-dependent.
+
+```java
+// Flaky: races the async work
+service.processAsync(order);
+assertThat(repo.findById(id)).isPresent();   // may not be saved yet
+
+// Robust: poll until the condition holds (Awaitility)
+service.processAsync(order);
+await().atMost(5, SECONDS)
+       .untilAsserted(() -> assertThat(repo.findById(id)).isPresent());
+```
+
+Replace `sleep` with **Awaitility** (`await().until(...)`) or a `CountDownLatch` — wait for the *condition*, not the clock.
+
+## Time and ordering dependencies
+
+Tests that read `LocalDateTime.now()`, depend on the current date, or assume a particular result ordering. Inject a fixed `Clock` bean so "now" is deterministic, and never assert on the order of a query result without an explicit `ORDER BY`.
+
+## Port conflicts and external resources
+
+`@SpringBootTest(webEnvironment = DEFINED_PORT)` or hardcoded ports collide in parallel/CI runs. Use `RANDOM_PORT`. Likewise, Testcontainers' random host ports avoid clashes — don't hardcode container ports.
+
+## Parallel execution hazards
+
+Running tests in parallel multiplies shared-state and resource contention. If you enable JUnit parallelism, ensure tests are genuinely independent (no shared static state, isolated DB rows/schemas, random ports).
+
+<Callout kind="danger" title="Never paper over flakiness with retries">
+Auto-retrying a flaky test until it passes hides a real bug — often a genuine race condition in production code, not just the test. Find and fix the root cause (isolation, waiting, determinism); retries should be a temporary stopgap, loudly tracked.
+</Callout>
+
+<ProbeNote>The interviewer wants root-cause thinking, not "add a sleep." Name the big four — shared/static state across the cached context, async without Awaitility, time/ordering non-determinism, port conflicts — and stress that a retry mechanism masks bugs rather than fixing them.</ProbeNote>

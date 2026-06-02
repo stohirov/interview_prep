@@ -1,0 +1,44 @@
+**Matching tells you *which* rows qualify; ranking tells you which ones to show first.** `ts_rank` and `ts_rank_cd` both return a `float4` relevance score for a `(tsvector, tsquery)` pair — you `ORDER BY` it descending. The difference between them is whether they care about *where* the matched terms sit.
+
+## ts_rank — frequency-based
+
+Scores by how *often* the query lexemes appear and their `setweight` weights. More occurrences of the search terms → higher score. It ignores how close the terms are to each other.
+
+```sql
+SELECT title,
+       ts_rank(search_vec, query) AS rank
+FROM docs, websearch_to_tsquery('english', 'postgres index') AS query
+WHERE search_vec @@ query
+ORDER BY rank DESC
+LIMIT 20;
+```
+
+## ts_rank_cd — cover density
+
+`cd` = **cover density**. It additionally rewards documents where the matched lexemes appear **close together**, using the positions stored in the `tsvector`. For multi-word queries this usually feels more relevant — a doc with "postgres" and "index" in the same sentence outranks one where they're paragraphs apart. (It requires positional info, so it's meaningless against a stripped vector.)
+
+```sql
+ts_rank_cd(search_vec, query)
+```
+
+## Weights make fields count differently
+
+If you built the vector with `setweight`, pass an array `{D, C, B, A}` to scale each weight class. Here title (`A`) counts most:
+
+```sql
+ts_rank('{0.1, 0.2, 0.4, 1.0}', search_vec, query)
+```
+
+## Normalization — fight the long-document bias
+
+A raw score grows with document length. The optional **normalization flag** (bitmask) divides it out — e.g. `32` divides by `rank + 1` to bound scores into `[0,1)`, and `1`/`2` divide by document length:
+
+```sql
+ts_rank_cd(search_vec, query, 32)   -- normalize so long docs don't dominate
+```
+
+<Callout kind="warn" title="Ranking is not free and is not indexable">
+Both functions are computed **per matching row** after the index narrows candidates — they cannot use the index themselves. On a query matching millions of rows, ranking + sort is the expensive part. Filter aggressively, then rank, and consider `LIMIT` with a covering pre-filter.
+</Callout>
+
+<ProbeNote>The interviewer wants the distinction: `ts_rank` scores by term frequency/weight, `ts_rank_cd` adds proximity (cover density) using stored positions. Bonus signal: ranking runs per-row and isn't indexable, so you narrow with `@@` first; and the normalization flag corrects the long-document bias.</ProbeNote>

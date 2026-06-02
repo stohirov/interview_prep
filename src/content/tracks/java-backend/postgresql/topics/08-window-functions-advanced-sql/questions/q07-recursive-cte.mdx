@@ -1,0 +1,47 @@
+**A recursive CTE (`WITH RECURSIVE`) repeatedly feeds its own output back into itself until no new rows are produced — the standard tool for walking trees and graphs like a threaded comment hierarchy.** Every recursive CTE has two parts joined by `UNION [ALL]`: a non-recursive **anchor** (the seed rows) and a **recursive term** that references the CTE name.
+
+## Walking a comment tree
+
+Schema: `comments(id, post_id, parent_id, author, body)`, where top-level comments have `parent_id IS NULL`.
+
+```sql
+WITH RECURSIVE thread AS (
+  -- anchor: the roots
+  SELECT id, parent_id, author, body, 1 AS depth,
+         ARRAY[id] AS path
+  FROM comments
+  WHERE post_id = 100 AND parent_id IS NULL
+
+  UNION ALL
+
+  -- recursive term: children of rows already in `thread`
+  SELECT c.id, c.parent_id, c.author, c.body, t.depth + 1,
+         t.path || c.id
+  FROM comments c
+  JOIN thread t ON c.parent_id = t.id
+)
+SELECT repeat('  ', depth - 1) || body AS indented, author, depth
+FROM thread
+ORDER BY path;
+```
+
+## How it executes
+
+1. Run the **anchor** once → the root comments, `depth = 1`.
+2. Run the **recursive term**, joining `comments` to the rows produced *in the previous step*, yielding their direct children.
+3. Repeat step 2 on each new batch until it returns **no rows**.
+4. `UNION ALL` accumulates every batch into the final result.
+
+The `path` array (`ARRAY[id]` extended with `|| c.id`) records the ancestry, so `ORDER BY path` renders the tree in proper depth-first, parent-before-child order — and `depth` drives the indentation.
+
+<Callout kind="warn" title="Guard against infinite loops">
+If the data has a cycle (a comment that is its own ancestor), the recursion never terminates. PostgreSQL 14+ supports a built-in `... CYCLE id SET is_cycle USING cyclepath` clause to detect and stop. Otherwise, track the path yourself and add `WHERE NOT c.id = ANY(t.path)` to the recursive term.
+</Callout>
+
+<Callout kind="tip" title="UNION ALL vs UNION">
+Use `UNION ALL` (no dedup) for trees — it's faster and correct when each node is reached once. Use `UNION` only when the graph can reach the same node by multiple paths and you want it once; note `UNION`'s deduplication is also a crude (but incomplete) loop guard.
+</Callout>
+
+To find a single comment's ancestors instead, flip the join: seed with the target and recurse on `c.id = t.parent_id`.
+
+<ProbeNote>They want the anchor + `UNION ALL` + recursive-term structure and the recursive term joining to the CTE name. Strong answers add a `depth` counter, a `path` array for ordering/indentation, and an explicit cycle guard (`NOT id = ANY(path)` or PG14's `CYCLE` clause).</ProbeNote>

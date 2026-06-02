@@ -1,0 +1,49 @@
+**Reactive Spring Security is a parallel stack to the servlet one, redesigned because the whole servlet model — `ThreadLocal`-based `SecurityContextHolder`, `Filter` chains, blocking `UserDetailsService` — assumes a thread owns the request. On WebFlux that assumption is false.** The core swap is `ThreadLocal` for the Reactor `Context`, and blocking interfaces for `Mono`-returning ones.
+
+## Why ThreadLocal breaks
+
+In MVC, `SecurityContextHolder` stores the authenticated principal in a `ThreadLocal`, which works because one thread handles the whole request. In WebFlux a request hops across event-loop threads as it suspends and resumes on I/O, so a `ThreadLocal` set early is gone (or wrong) later. The fix: carry the security context **inside the reactive pipeline** via the Reactor `Context`, which travels with the subscription, not the thread.
+
+## The reactive equivalents
+
+```java
+// servlet            ->  reactive
+SecurityContextHolder ->  ReactiveSecurityContextHolder   // returns Mono<SecurityContext>
+AuthenticationManager ->  ReactiveAuthenticationManager   // Mono<Authentication>
+UserDetailsService    ->  ReactiveUserDetailsService      // Mono<UserDetails>
+WebSecurityConfigurer ->  SecurityWebFilterChain          // configured via ServerHttpSecurity
+```
+
+**`ReactiveSecurityContextHolder`** exposes the current principal as a `Mono`, so you compose it into your pipeline instead of reading a static field:
+
+```java
+ReactiveSecurityContextHolder.getContext()
+    .map(SecurityContext::getAuthentication)
+    .map(Authentication::getName)
+    .flatMap(username -> repo.findByOwner(username));
+```
+
+**`ReactiveAuthenticationManager`** authenticates non-blockingly, returning `Mono<Authentication>` — its implementations chain to a `ReactiveUserDetailsService` (also `Mono`-returning) so even the user lookup doesn't block the event loop.
+
+## Configuration shape
+
+You configure a `SecurityWebFilterChain` bean using `ServerHttpSecurity` (the reactive analogue of `HttpSecurity`):
+
+```java
+@Bean
+SecurityWebFilterChain chain(ServerHttpSecurity http) {
+    return http
+        .authorizeExchange(e -> e.pathMatchers("/admin/**").hasRole("ADMIN")
+                                 .anyExchange().authenticated())
+        .oauth2ResourceServer(o -> o.jwt(Customizer.withDefaults()))
+        .build();
+}
+```
+
+Note `authorizeExchange` (not `authorizeHttpRequests`) and `WebFilter` (not servlet `Filter`).
+
+<Callout kind="info" title="Method security still works">
+`@PreAuthorize` works in reactive controllers, but the SpEL must resolve against the reactive context — Spring wires that for you when methods return `Mono`/`Flux`. Reading the principal manually inside business logic, however, must go through `ReactiveSecurityContextHolder`.
+</Callout>
+
+<ProbeNote>The crux is *why* there's a separate stack: `ThreadLocal` doesn't survive thread-hopping, so the security context rides the Reactor `Context` instead. Name `ReactiveSecurityContextHolder` (returns `Mono`), `ReactiveAuthenticationManager`, and `ServerHttpSecurity`/`SecurityWebFilterChain` for config.</ProbeNote>

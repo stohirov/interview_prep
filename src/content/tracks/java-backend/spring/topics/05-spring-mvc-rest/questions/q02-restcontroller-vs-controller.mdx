@@ -1,0 +1,43 @@
+**`@RestController` is literally `@Controller` + `@ResponseBody` — that one fact answers the question, and the rest is the consequence.** Both make a class a Spring MVC handler discovered by component scanning; the difference is what happens to a method's *return value*.
+
+## `@Controller`
+
+The classic web-MVC stereotype. A handler method's return value is interpreted as a **logical view name**, and a `ViewResolver` renders a template (Thymeleaf, JSP) to produce HTML. You populate a `Model` for the template to consume.
+
+```java
+@Controller
+class OrderPageController {
+    @GetMapping("/orders/{id}")
+    String show(@PathVariable Long id, Model model) {
+        model.addAttribute("order", service.find(id));
+        return "order-detail"; // -> resolves to a template, renders HTML
+    }
+}
+```
+
+To make a single method in a `@Controller` return data instead of a view, you annotate it with `@ResponseBody` — then its return value goes through an `HttpMessageConverter` and is serialized straight to the body.
+
+## `@RestController`
+
+A meta-annotation that bundles `@Controller` and `@ResponseBody`, so **every** method behaves as if `@ResponseBody`-annotated. Return values bypass view resolution entirely and are written to the response body via a message converter — JSON by default with Jackson on the classpath.
+
+```java
+@RestController
+@RequestMapping("/api/orders")
+class OrderApiController {
+    @GetMapping("/{id}")
+    OrderDto get(@PathVariable Long id) {
+        return service.find(id); // serialized to JSON, no view resolution
+    }
+}
+```
+
+## When each fits
+
+Use `@Controller` for server-rendered pages where the output is HTML from a template. Use `@RestController` for REST/JSON (or XML) APIs where you return data objects. A common hybrid is a `@Controller` with a few `@ResponseBody` methods, but if the whole class is an API, `@RestController` is the honest choice.
+
+<Callout kind="info" title="Both still go through the same dispatch">
+The `DispatcherServlet → HandlerMapping → HandlerAdapter` flow is identical for both. Only the **return-value handler** differs: `@ResponseBody` triggers `RequestResponseBodyMethodProcessor` (message converter), while a plain `@Controller` String triggers view resolution.
+</Callout>
+
+<ProbeNote>The clean answer is "`@RestController` = `@Controller` + `@ResponseBody`." Follow-ups probe whether you know `@ResponseBody` selects a message converter (not a view), and that you can mix `@ResponseBody` onto individual `@Controller` methods for hybrid classes.</ProbeNote>

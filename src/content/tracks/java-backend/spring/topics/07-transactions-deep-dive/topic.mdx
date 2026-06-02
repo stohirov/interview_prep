@@ -1,0 +1,29 @@
+**Spring transactions are *declarative* — you annotate a method with `@Transactional` and an AOP proxy wraps it in begin/commit/rollback — but everything that surprises people in production comes from understanding that the magic is just a proxy around your bean.** Strip away the annotation and the model is simple: a `PlatformTransactionManager` (e.g. `DataSourceTransactionManager` for JDBC, `JpaTransactionManager` for Hibernate) opens a transaction, binds the connection to the current thread via a `ThreadLocal`, and commits or rolls back when your method returns or throws.
+
+The proxy intercepts the call, asks the transaction manager for a transaction according to the **propagation** rule, runs your code, and then decides commit vs rollback from the **rollback rules**. That's the whole lifecycle.
+
+```java
+@Service
+class OrderService {
+
+    private final OrderRepository orders;
+    OrderService(OrderRepository orders) { this.orders = orders; }
+
+    @Transactional                       // join-or-create (REQUIRED), commit on return
+    public Order place(NewOrder cmd) {
+        Order o = orders.save(Order.from(cmd));
+        charge(o);                        // throws RuntimeException -> whole tx rolls back
+        return o;
+    }
+}
+```
+
+Three things decide behavior on every annotated call. **Propagation** — does this method join the caller's transaction, suspend it and start a fresh one, or demand one already exist? **Isolation** — which concurrency anomalies the database is allowed to show, mapped onto the DB's own levels (Postgres defaults to `READ_COMMITTED`). **Rollback rules** — by default Spring rolls back only on `RuntimeException` and `Error`; a *checked* exception commits unless you say `rollbackFor`.
+
+The traps are equally consistent. Put `@Transactional` on a **public service method**, not on a private method or a controller. Beware **self-invocation**: `this.other()` calls the raw bean and bypasses the proxy entirely, so the annotation is silently ignored. And `readOnly = true` is a real optimization, not a no-op.
+
+<Callout kind="tip" title="The interview hook">
+Say it as one sentence: "`@Transactional` is an AOP proxy around the bean that asks a `PlatformTransactionManager` to begin/commit/rollback. So it only works on calls *through* the proxy — public methods, external callers — and it rolls back only on unchecked exceptions by default." Everything below is a knob on that one mechanism.
+</Callout>
+
+The questions below dissect what the annotation actually does, all seven propagation levels, isolation mapped to Postgres, the rollback rules, the AOP internals, the self-invocation trap, `TransactionTemplate`, read-only transactions, and multi-datasource transactions.

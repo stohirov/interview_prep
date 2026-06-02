@@ -1,0 +1,49 @@
+**A `BeanPostProcessor` (BPP) is a container extension point that lets you intercept *every* bean instance right around its initialization callbacks — and it's the machinery behind `@Autowired`, `@Transactional`, and AOP.** If you understand BPP, you understand how "magic" annotations actually work.
+
+## The interface
+
+Two callbacks, both invoked by the container for each bean:
+
+```java
+public interface BeanPostProcessor {
+    default Object postProcessBeforeInitialization(Object bean, String name) { return bean; }
+    default Object postProcessAfterInitialization(Object bean, String name)  { return bean; }
+}
+```
+
+The key superpower: each method **returns an object**, and the container uses the returned reference going forward. So a BPP can *replace* a bean with a proxy that wraps it. That return-and-replace is exactly how Spring creates transactional and AOP proxies.
+
+## When it runs
+
+Per bean, after instantiation and property population:
+
+- `postProcessBeforeInitialization` runs **before** `@PostConstruct` / `afterPropertiesSet()` / init-method.
+- `postProcessAfterInitialization` runs **after** all init callbacks — this is where AOP/transaction proxies are typically created and returned.
+
+It operates on **fully instantiated instances**, which is the defining contrast with `BeanFactoryPostProcessor` (which works on bean *definitions* before any instance exists).
+
+## Real-world examples (Spring's own)
+
+These aren't toy examples — they're how core features are implemented:
+
+- **`AutowiredAnnotationBeanPostProcessor`** — implements `@Autowired` and `@Value` injection.
+- **`CommonAnnotationBeanPostProcessor`** — implements `@PostConstruct`, `@PreDestroy`, `@Resource`.
+- **`AnnotationAwareAspectJAutoProxyCreator`** — wraps beans in AOP/`@Transactional` proxies.
+
+```java
+@Component
+public class TimingBpp implements BeanPostProcessor {
+    public Object postProcessAfterInitialization(Object bean, String name) {
+        if (bean instanceof ExpensiveService) {
+            return Proxy.newProxyInstance(/* ...wrap with timing... */);
+        }
+        return bean;   // pass others through untouched
+    }
+}
+```
+
+<Callout kind="warn" title="BPPs are created before normal beans">
+Because a BPP must process other beans, it (and anything it depends on) is instantiated early — before regular singletons. So a `BeanPostProcessor` shouldn't depend on application beans that themselves need post-processing, or that processing may be skipped for those dependencies.
+</Callout>
+
+<ProbeNote>The interviewer wants you to connect BPP to features you use daily: "`@Autowired` is implemented by `AutowiredAnnotationBeanPostProcessor`; proxies are returned from `postProcessAfterInitialization`." Knowing the methods *return* the bean (enabling proxy substitution) is the senior signal.</ProbeNote>

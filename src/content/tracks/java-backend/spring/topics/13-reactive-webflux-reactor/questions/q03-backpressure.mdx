@@ -1,0 +1,44 @@
+**Backpressure is the mechanism by which a slow consumer tells a fast producer to slow down, so the producer can't overwhelm it.** In Reactive Streams it's not a bolt-on — it's the core of the `Subscription.request(n)` contract: the subscriber signals how many elements it can handle, and a well-behaved publisher emits no more than the outstanding demand.
+
+## Why it matters
+
+Without backpressure, a source emitting faster than you can process (a firehose database cursor, a busy message topic) forces you to either buffer unboundedly until you OOM, or drop data silently. Backpressure makes the flow-control *explicit and bounded*.
+
+## How Reactor wires it for you
+
+Most operators handle demand automatically. When you write `flux.map(...).subscribe(...)`, the final subscriber requests `Long.MAX_VALUE` (unbounded) by default, and operators propagate demand upstream. A truly reactive *source* (R2DBC, a reactive Kafka consumer) honours that demand and fetches lazily. The problem case is a source that *can't* be slowed — a UI event stream, a sensor — where production is inherently faster than consumption.
+
+## Strategies for unstoppable sources
+
+For sources you can't pause, Reactor gives explicit overflow strategies:
+
+```java
+Flux<Tick> ticks = ...;
+
+ticks.onBackpressureBuffer(1000)   // queue up to N, then error/drop
+     .onBackpressureDrop(dropped -> log.warn("dropped {}", dropped))
+     .onBackpressureLatest();      // keep only the most recent, discard the rest
+```
+
+- **`onBackpressureBuffer`** — buffer overflow elements (bounded or unbounded; unbounded risks OOM).
+- **`onBackpressureDrop`** — discard new elements the consumer isn't ready for.
+- **`onBackpressureLatest`** — drop everything but the newest value (great for "current price"-style streams).
+
+The default with no strategy on an overproducing source is an `OverflowException`.
+
+## Controlling demand yourself
+
+You can shape demand from the subscriber side:
+
+```java
+flux.limitRate(100)      // request in batches of 100, not MAX_VALUE
+    .subscribe(...);
+```
+
+`limitRate(n)` is the clean way to cap how much an unbounded subscriber pulls at once, which also bounds upstream prefetch.
+
+<Callout kind="warn" title="Backpressure only works end-to-end">
+If any stage wraps a blocking call or an unbounded buffer, backpressure stops there. A `flatMap` with high concurrency, or `collectList()` on an infinite stream, silently breaks the chain. Reactive flow control is only as strong as its weakest link.
+</Callout>
+
+<ProbeNote>Define backpressure as consumer-driven demand via `request(n)`, then show you know the three `onBackpressure*` strategies and `limitRate`. The senior signal is naming *which* sources need them (unstoppable producers) and that one blocking/buffering stage defeats the whole chain.</ProbeNote>

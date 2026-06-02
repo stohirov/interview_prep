@@ -1,0 +1,44 @@
+**Derived query methods let Spring Data build the query from the method *name* — you write the signature, it parses the name into JPQL and implements it.** No `@Query`, no SQL, no method body. The parser runs at startup, so a typo fails fast rather than at runtime.
+
+## How the name is parsed
+
+The name splits into a *subject* (what to do) and a *predicate* (the criteria after `By`).
+
+```java
+List<User> findByEmailAndStatus(String email, Status status);
+```
+
+Spring reads `findBy`, then walks the property expression `EmailAndStatus`: property `email` (equals), `And`, property `status` (equals). It maps each property to a column on the entity and binds the method parameters **positionally** — first arg to `email`, second to `status`. The generated JPQL is roughly:
+
+```sql
+SELECT u FROM User u WHERE u.email = ?1 AND u.status = ?2
+```
+
+## The keyword vocabulary
+
+The predicate supports a rich grammar:
+
+```java
+findByStatus(Status s);                      // equals
+findByEmailAndStatus(String e, Status s);    // And
+findByStatusOrRole(Status s, Role r);        // Or
+findByAgeGreaterThanEqual(int age);          // >=
+findByCreatedAtBetween(Instant a, Instant b);
+findByNameLike(String pattern);              // LIKE (you supply % )
+findByNameContainingIgnoreCase(String s);    // LIKE %s% , case-insensitive
+findByEmailIsNull();
+findByRoleIn(Collection<Role> roles);
+findFirst5ByOrderByCreatedAtDesc();          // limit + ordering
+```
+
+Subjects beyond `findBy` include `existsBy` (returns `boolean`), `countBy` (returns `long`), `deleteBy` / `removeBy`, and `getBy`/`readBy` as aliases. Return type drives behaviour: `Optional<User>`, `User` (null or exception on >1), `List<User>`, or a `Page<User>` when you add a `Pageable` parameter.
+
+## Traversing relationships
+
+You can navigate nested properties with the path: `findByAddressCity(String city)` joins `User.address.city`. If a property name is ambiguous, disambiguate with an underscore: `findByAddress_City`.
+
+<Callout kind="warn" title="Long names are a smell">
+Derived queries shine for two or three conditions. Once the name reads like `findByStatusAndRoleAndCreatedAtAfterAndEmailContainingIgnoreCase`, switch to `@Query`, a `Specification`, or a Query-by-Example — the method name stops being readable and the parser gets fragile.
+</Callout>
+
+<ProbeNote>They're checking you know Spring *parses the method name* at startup into JPQL, binds parameters positionally, and that return type (`Optional`/`List`/`Page`) and subject (`find`/`exists`/`count`/`delete`) change behaviour. Mention nested-property traversal and the "too long → use `@Query`/`Specification`" cutoff.</ProbeNote>

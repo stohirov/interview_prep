@@ -1,0 +1,38 @@
+**Logical backups recreate the database from SQL; physical backups copy the data files byte for byte. The trade-off is portability and granularity (logical) versus speed and PITR (physical).** A good answer names the axes, not just the tools.
+
+## Logical (`pg_dump` / `pg_dumpall`)
+
+A logical backup is a set of statements — `CREATE TABLE`, `COPY`, index definitions — that rebuild the database from scratch.
+
+- **Portable**: restores across PostgreSQL **major versions** and different OS/CPU architectures. This is the standard path for major-version upgrades.
+- **Granular**: restore a single table, schema, or just the data, into a different database name.
+- **Self-cleaning**: the restore rebuilds tables and indexes fresh, so there's no bloat carried over.
+- **Slow to back up and especially to restore** on large databases — it re-inserts every row and rebuilds every index.
+- **Single point in time only** — a dump is one consistent snapshot; there's no continuous recovery.
+
+## Physical (`pg_basebackup` and friends)
+
+A physical backup is a raw copy of the cluster's data directory.
+
+- **Fast restore**: you copy files back; no SQL replay, no index rebuilds.
+- **Enables PITR**: combined with archived WAL, you can roll forward to any moment.
+- **Whole cluster, all-or-nothing**: you can't extract a single table from it.
+- **Version- and platform-locked**: the copy only works on the **same major version** and compatible architecture — useless for cross-version upgrades.
+- **Can carry bloat** forward, since it's an exact image including dead tuples.
+
+## How to choose
+
+| Need | Reach for |
+|---|---|
+| Cross-major-version upgrade / migration | Logical |
+| Restore one table | Logical |
+| Move data to a different platform | Logical |
+| Low RPO with PITR | Physical + WAL |
+| Fast restore of a large cluster | Physical |
+| Build a replication standby | Physical |
+
+<Callout kind="tip" title="They're not either/or">
+Mature shops run **both**: physical base backups + WAL archiving for fast, low-RPO disaster recovery, *and* periodic logical dumps for portability and granular single-table restores. They cover different failure modes.
+</Callout>
+
+<ProbeNote>The interviewer wants the axes spelled out: portability and per-table granularity (logical) versus restore speed and PITR (physical), plus the version-lock asymmetry — logical crosses major versions, physical doesn't. The senior closer is "I use both, because they protect against different things."</ProbeNote>

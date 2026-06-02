@@ -1,0 +1,42 @@
+**These are the "use the specialized type instead of a string" types — each enforces a real invariant and unlocks operators you'd otherwise reimplement badly in application code.** Storing an IP address as `TEXT` is the kind of shortcut that fails code review.
+
+## BOOLEAN — true three-valued logic
+
+`BOOLEAN` is 1 byte and holds `true`, `false`, or `NULL`. Postgres accepts many input literals (`'t'`, `'yes'`, `'1'`, `'on'` and their negatives) but normalizes to `t`/`f`. The thing to remember is **three-valued logic**: `NULL` means "unknown," so `WHERE active` skips rows where `active IS NULL`, and `NOT NULL` boolean columns avoid a whole class of surprises.
+
+```sql
+is_active boolean NOT NULL DEFAULT false
+-- WHERE is_active        -> only true rows
+-- WHERE NOT is_active    -> only false rows (NULLs excluded by both)
+```
+
+## BYTEA — raw binary bytes
+
+`BYTEA` stores an arbitrary byte string — encryption keys, hashes, thumbnails, protobuf blobs. It's not text and has no encoding. Output uses `hex` format by default (`\x...`). Keep blobs **small**; large files usually belong in object storage with only a key/URL in the database, since big `BYTEA` columns bloat the table and every row version (TOAST helps but doesn't make multi-MB rows free).
+
+```sql
+SELECT digest('hello', 'sha256');  -- returns bytea (pgcrypto)
+INSERT INTO t (payload) VALUES ('\xdeadbeef');
+```
+
+## INET, CIDR, MACADDR — network types
+
+These validate and give you network-aware operators instead of brittle string parsing:
+
+- **`INET`** — a host address, optionally with a netmask, IPv4 or IPv6 (`'192.168.1.10/24'`, `'2001:db8::1'`). Use this for "the IP of a request."
+- **`CIDR`** — a network block; it *rejects* host bits set outside the mask (`'192.168.1.0/24'` is valid, `'192.168.1.10/24'` is not). Use for subnet definitions.
+- **`MACADDR`** (6 bytes) / **`MACADDR8`** (8 bytes, EUI-64) — hardware addresses.
+
+```sql
+SELECT inet '192.168.1.42' << cidr '192.168.1.0/24';  -- true: address in subnet
+SELECT inet '10.0.0.5' + 3;                            -- 10.0.0.8
+SELECT masklen(inet '192.168.1.10/24');                -- 24
+```
+
+The `<<` (contained-by-subnet), `>>`, `&&` operators and helpers like `host()`, `masklen()`, `set_masklen()` make queries like "is this IP in any blocked range?" trivial and indexable — none of which you get from `TEXT`.
+
+<Callout kind="tip" title="Let the type validate">
+`INET`/`CIDR`/`MACADDR` reject malformed input at write time and normalize representation, so you never store `'192.168.01.1'` or `'not-an-ip'`. That validation plus subnet operators is the entire reason to choose them over `TEXT`.
+</Callout>
+
+<ProbeNote>The interviewer wants you to default to the purpose-built type: `BOOLEAN` (and the `NULL`/three-valued-logic caveat), `BYTEA` for raw bytes (keep it small; large blobs to object storage), and `INET`/`CIDR`/`MACADDR` for network data because they validate input and provide subnet operators (`<<`, `>>`) you'd otherwise hand-roll on strings.</ProbeNote>

@@ -1,0 +1,47 @@
+**Logical replication is a publish/subscribe model: a *publication* on the source defines which tables (and which operations) to stream, and a *subscription* on the target connects to it and replays those changes as SQL.** Unlike physical replication's opaque WAL bytes, this works at the table-and-row level, which is what makes it selective, cross-version, and writable on both ends.
+
+## Publication — the source side
+
+A publication names the set of tables to publish. You can publish specific tables, all tables, or filter which operations:
+
+```sql
+-- only these two tables, all DML
+CREATE PUBLICATION orders_pub FOR TABLE orders, order_items;
+
+-- everything in the database
+CREATE PUBLICATION all_pub FOR ALL TABLES;
+
+-- inserts only (e.g. an append-only audit feed)
+CREATE PUBLICATION audit_pub FOR TABLE events WITH (publish = 'insert');
+```
+
+PostgreSQL also supports **row filters** (`FOR TABLE t WHERE (...)`) and **column lists** so a subscriber receives only a slice of the data.
+
+## Subscription — the target side
+
+A subscription points at the publisher's connection string and one or more publications. Creating it kicks off an **initial data copy** (a snapshot of existing rows) and then switches to streaming ongoing changes:
+
+```sql
+CREATE SUBSCRIPTION orders_sub
+  CONNECTION 'host=primary port=5432 dbname=shop user=repl'
+  PUBLICATION orders_pub;
+```
+
+Under the hood the subscription drives a **logical replication slot** on the publisher (so needed WAL is retained) and applies decoded changes via apply workers.
+
+## The constraints that trip people up
+
+- **Replica identity:** published tables need a way to identify rows for UPDATE/DELETE — normally a **primary key**, or `REPLICA IDENTITY FULL` if there isn't one. Without it, UPDATE/DELETE fail to replicate.
+- **No DDL replication:** schema changes (adding a column, etc.) are **not** propagated. You must apply DDL on both publisher and subscriber, in the right order, yourself.
+- **Conflicts:** the subscriber is writable, so a local write colliding with a replicated change (e.g. a duplicate key) **halts the apply worker** until you resolve it.
+- Sequences and large objects aren't replicated either.
+
+## When to use it
+
+Selective replication of some tables, **major-version upgrades with near-zero downtime** (replicate from old to new version, then cut over), consolidating multiple databases into a reporting target, and feeding change-data-capture pipelines.
+
+<Callout kind="tip" title="Logical replication is the modern major-upgrade path">
+To upgrade across major versions with minimal downtime: stand up the new version as a subscriber, let it catch up via logical replication, then switch the application over. Far less downtime than `pg_upgrade` on a huge database.
+</Callout>
+
+<ProbeNote>Show the shape: `CREATE PUBLICATION` on the source, `CREATE SUBSCRIPTION` on the target, initial snapshot then streaming. The depth markers are **replica identity / primary-key requirement**, **DDL is not replicated**, and naming logical replication as the **near-zero-downtime major-upgrade** technique.</ProbeNote>

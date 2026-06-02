@@ -1,0 +1,40 @@
+**`@SpringBootTest` loads the *entire* `ApplicationContext` — every bean, every auto-configuration, your real services and repositories wired together exactly as in production.** That's its power and its cost: it's the most faithful test you can write, and the slowest. Reach for it when you're verifying that the whole app *wires up and behaves end-to-end*, not when you're checking one class in isolation.
+
+## What it actually does
+
+It finds your `@SpringBootConfiguration` (usually via `@SpringBootApplication`), builds the full context, and makes every bean available for `@Autowired` injection into the test. Combined with context caching, the first test pays the startup cost and subsequent classes with the *same* configuration reuse the cached context.
+
+## The webEnvironment knob
+
+This decides whether (and how) a servlet container starts:
+
+```java
+@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
+class OrderApiTest {
+    @LocalServerPort int port;        // injected real port
+    @Autowired TestRestTemplate rest; // talks over real HTTP
+}
+```
+
+- **`MOCK`** (default) — no real port; a mock servlet environment. Pair with `@AutoConfigureMockMvc` to drive it via `MockMvc`.
+- **`RANDOM_PORT`** — starts the embedded server on a random free port (avoids conflicts in parallel/CI). Inject it with `@LocalServerPort`.
+- **`DEFINED_PORT`** — uses the configured port (risky: collisions).
+- **`NONE`** — no web environment at all, for non-web apps.
+
+## When it's the right choice — and when it isn't
+
+Use it for integration tests: REST endpoint through controller → service → repository → real database (via Testcontainers), security filters engaged, message listeners firing. It's the only layer that catches wiring bugs a slice can't see.
+
+Do **not** reach for it to test a single controller's validation (use `@WebMvcTest`) or a query (use `@DataJpaTest`). A common smell is a suite where every test is `@SpringBootTest`: it's slow, and slices would prove the same things faster and with sharper failure messages.
+
+```java
+@SpringBootTest
+class OrderServiceIntegrationTest {
+    @Autowired OrderService service;     // real bean
+    @MockitoBean PaymentGateway gateway; // replace the external edge
+}
+```
+
+You can still `@MockitoBean` the truly external collaborators (payment APIs, third-party clients) inside a full context — keeping the *internal* graph real while stubbing the network edge.
+
+<ProbeNote>The interviewer wants to hear "full context = high fidelity, high cost" and that you reserve it for end-to-end wiring, not unit-level checks. Bonus points for knowing the `webEnvironment` options and pairing `RANDOM_PORT` with `@LocalServerPort` / `TestRestTemplate`.</ProbeNote>

@@ -1,0 +1,52 @@
+**Five abstractions carry an authenticated identity from login to your business code, and they each have one job.** Knowing how they fit together is the difference between "I add `@EnableWebSecurity`" and actually understanding the framework.
+
+## UserDetailsService
+
+A single-method strategy for **loading a user by username** from wherever they live (DB, LDAP, in-memory):
+
+```java
+@Bean
+UserDetailsService users(UserRepository repo) {
+    return username -> repo.findByUsername(username)
+        .map(u -> User.withUsername(u.getUsername())
+            .password(u.getPasswordHash())   // already encoded
+            .authorities(u.getRoles())
+            .build())
+        .orElseThrow(() -> new UsernameNotFoundException(username));
+}
+```
+
+It returns a `UserDetails` or throws `UsernameNotFoundException`. It does **not** check the password — that's the provider's job.
+
+## UserDetails
+
+The user record Spring Security cares about: `getUsername()`, `getPassword()` (the *encoded* hash), `getAuthorities()`, plus account-status flags (`isEnabled`, `isAccountNonLocked`, …). It is the **principal** once authenticated.
+
+## Authentication
+
+Represents the request/result of authenticating. Before login it may hold raw credentials (a token); after success it holds the principal (the `UserDetails`), cleared credentials, the granted authorities, and `isAuthenticated() == true`. Implementations include `UsernamePasswordAuthenticationToken` and `JwtAuthenticationToken`.
+
+## SecurityContext
+
+A thin holder around the current `Authentication`. One per "context of execution" — normally one per request thread.
+
+## SecurityContextHolder
+
+The static accessor for the current `SecurityContext`, backed by a strategy (a thread-local by default). This is how any code reaches the current user:
+
+```java
+Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+String username = auth.getName();
+boolean admin = auth.getAuthorities().stream()
+    .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
+```
+
+## How they chain
+
+`UserDetailsService` → loads `UserDetails` → an `AuthenticationProvider` verifies it and builds an authenticated `Authentication` → it's placed in a `SecurityContext` → stored via `SecurityContextHolder` for the rest of the request.
+
+<Callout kind="tip" title="Prefer Authentication injection">
+In controllers you can inject `Authentication` (or `@AuthenticationPrincipal UserDetails`) directly instead of reaching into `SecurityContextHolder` — cleaner and far easier to test.
+</Callout>
+
+<ProbeNote>Be able to draw the chain in one breath: service loads details, provider verifies, context holds the authentication, holder exposes it. The trap question: "where is the password checked?" — in the `AuthenticationProvider` via the `PasswordEncoder`, never in `UserDetailsService`.</ProbeNote>

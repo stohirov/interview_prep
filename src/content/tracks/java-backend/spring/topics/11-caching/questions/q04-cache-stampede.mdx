@@ -1,0 +1,34 @@
+**Cache stampede (a.k.a. thundering herd or dog-piling) is what happens when a hot key misses or expires and *many concurrent requests* all recompute the same expensive value at once — hammering the database the cache was supposed to protect.** It's most dangerous precisely when a cache is doing its job: a popular entry expires, and the traffic it was absorbing slams the backend in a single spike.
+
+## Why it happens
+
+A naive `@Cacheable` checks the cache, sees a miss, and calls the method. If 500 requests hit the gap between expiry and the first recompute finishing, all 500 see a miss and all 500 run the query. Worse, they may all write the entry back too. The classic trigger is a synchronized TTL where countless keys expire on the same boundary.
+
+## Prevention
+
+**1. `sync = true` — single-flight per key.** Spring's built-in answer. The proxy ensures that for a given key, only *one* thread computes the value; the rest block and receive that result. Backed natively by Caffeine.
+
+```java
+@Cacheable(value = "books", key = "#id", sync = true)
+public Book find(long id) { /* runs once even under a stampede */ }
+```
+
+Caveat: `sync = true` cannot be combined with multiple caches, `unless`, or `condition` — it's deliberately minimal.
+
+**2. Locking for distributed caches.** `sync = true` only coordinates threads in *one* JVM. Across a Redis-backed cluster you need a *distributed* lock (e.g. Redisson `RLock`) so one instance recomputes while others wait, otherwise each node stampedes independently.
+
+**3. Staggered / jittered TTLs.** Add randomness to expiry so a batch of keys loaded together don't all expire on the same tick:
+
+```text
+ttl = base + random(0, jitter)   // e.g. 600s + up to 60s
+```
+
+**4. Probabilistic / early recomputation.** Refresh a key slightly *before* it expires (Caffeine's `refreshAfterWrite` serves the stale value while one thread reloads in the background), so there's never an empty gap.
+
+**5. Never-empty patterns.** Cache a sentinel for "not found" to stop a missing key from stampeding the DB on every request (cache penetration), and pre-warm hot keys at startup.
+
+<Callout kind="warn" title="sync ≠ distributed">
+The number-one mistake is assuming `sync = true` protects a clustered app. It guards a single JVM only. With Redis and N instances you can still get N concurrent recomputes — reach for a distributed lock or `refreshAfterWrite`.
+</Callout>
+
+<ProbeNote>The interviewer wants the definition (concurrent misses recomputing one hot value) plus a layered mitigation: `sync = true` for in-process, a distributed lock for clustered Redis, and TTL jitter / early refresh to remove the expiry cliff. Knowing `sync`'s single-JVM limitation separates seniors from rote answers.</ProbeNote>

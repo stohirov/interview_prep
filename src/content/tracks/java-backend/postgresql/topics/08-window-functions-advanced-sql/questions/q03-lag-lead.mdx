@@ -1,0 +1,60 @@
+**`LAG` and `LEAD` reach to a row *before* or *after* the current one within the ordered window — giving you "previous" and "next" values without a self-join.** They are the go-to tools for row-over-row comparisons: deltas, gaps, trends.
+
+## Signatures
+
+```sql
+LAG(expr [, offset [, default]])  OVER (... ORDER BY ...)
+LEAD(expr [, offset [, default]]) OVER (... ORDER BY ...)
+```
+
+- `offset` defaults to `1` (the immediately preceding/following row).
+- `default` is returned when the offset falls off the edge (otherwise `NULL`).
+- An `ORDER BY` in the window is **mandatory** — "previous" is meaningless without an order.
+
+## Use case 1: day-over-day change
+
+```sql
+SELECT
+  day,
+  revenue,
+  revenue - LAG(revenue) OVER (ORDER BY day) AS delta,
+  revenue - LAG(revenue, 7) OVER (ORDER BY day) AS week_over_week
+FROM daily_revenue;
+```
+
+`LAG(revenue, 7)` compares against the same weekday a week ago — offsets are not limited to 1.
+
+## Use case 2: gap between events, per user
+
+```sql
+SELECT
+  user_id,
+  event_at,
+  event_at - LAG(event_at) OVER (
+    PARTITION BY user_id ORDER BY event_at
+  ) AS time_since_prev
+FROM events;
+```
+
+`PARTITION BY user_id` restarts the lookup at each user, so you never accidentally compare one user's event against another's.
+
+## Use case 3: detecting state changes (sessionization)
+
+```sql
+SELECT *,
+  CASE WHEN status <> LAG(status) OVER (PARTITION BY device ORDER BY ts)
+       THEN 1 ELSE 0 END AS changed
+FROM readings;
+```
+
+Flagging where a value differs from the prior row is the foundation of sessionization and run-length encoding.
+
+<Callout kind="info" title="LAG/LEAD vs FIRST_VALUE/LAST_VALUE">
+`LAG`/`LEAD` are *relative* (N rows away). `FIRST_VALUE`/`LAST_VALUE`/`NTH_VALUE` are *frame-relative* (the first/last/nth row of the window frame). A common trap: `LAST_VALUE` with the default frame (`RANGE ... CURRENT ROW`) returns the current row, not the partition's last — you must specify `ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING`.
+</Callout>
+
+<Callout kind="tip" title="Use the default to avoid NULL math">
+`LAG(revenue, 1, 0)` returns `0` instead of `NULL` for the first row, so `revenue - LAG(...)` doesn't become `NULL` on the boundary.
+</Callout>
+
+<ProbeNote>They want a concrete delta example (`revenue - LAG(revenue) OVER (ORDER BY day)`) and the points that ORDER BY is required and PARTITION BY scopes the offset per group. The senior signal is knowing the `LAST_VALUE` framing trap and using the `default` argument to dodge NULL arithmetic.</ProbeNote>

@@ -1,0 +1,30 @@
+**Spring Boot 3 raised the floor in two ways: Java 17 is the minimum, and the entire enterprise namespace moved from `javax.*` to `jakarta.*`.** The second is the single biggest breaking change and the one that bites every upgrade.
+
+## The Jakarta namespace migration
+
+When Java EE moved to the Eclipse Foundation as Jakarta EE, Oracle's trademark meant the `javax.*` packages could no longer evolve. Jakarta EE 9 therefore performed a *mechanical rename* of every package — no API changes, just `javax.` → `jakarta.`. Spring Framework 6 / Boot 3 target Jakarta EE 9+, so your imports must change:
+
+```java
+// Boot 2 (javax)                  // Boot 3 (jakarta)
+import javax.persistence.Entity;   import jakarta.persistence.Entity;
+import javax.servlet.Filter;       import jakarta.servlet.Filter;
+import javax.validation.Valid;     import jakarta.validation.Valid;
+import javax.transaction.Transactional; // -> jakarta.transaction.Transactional
+```
+
+This touches JPA entities, servlet filters, Bean Validation, JMS, and more. Because it's purely a rename, tools like the **Eclipse Transformer** or **OpenRewrite** (`org.openrewrite.java.migrate.jakarta`) can automate the bulk of it. The painful part is *transitive*: a third-party library still compiled against `javax.*` won't work, so you must upgrade dependencies (Hibernate 6, Tomcat 10, etc.) in lockstep — you can't run a mixed namespace.
+
+## The Java 17 baseline
+
+Boot 3 is compiled against Java 17 and won't run on 11. Practically this means:
+
+- You can adopt **records** for DTOs, **sealed** types for closed hierarchies, and **pattern matching** in your own code.
+- The JVM brings better GC defaults and the foundation for **virtual threads** (Java 21, supported in Boot 3.2+).
+
+<Callout kind="warn" title="It's all-or-nothing">
+You cannot migrate the namespace gradually within one application — the classpath holds one version of, say, the Servlet API. Plan the upgrade as a coordinated bump of Boot, the servlet container, the persistence provider, and every library that imports `javax.*`.
+</Callout>
+
+The reason this matters in practice: most "Boot 3 won't start" failures aren't your code — they're a stray dependency dragging in `javax.servlet` classes that the container no longer provides.
+
+<ProbeNote>Interviewers want to hear that the `javax → jakarta` move is a *namespace rename driven by trademark*, not a feature change, and that it's transitive — so the real work is upgrading dependencies in lockstep. Mentioning OpenRewrite/Eclipse Transformer and the Java 17 floor (records, virtual-thread readiness) rounds it out.</ProbeNote>

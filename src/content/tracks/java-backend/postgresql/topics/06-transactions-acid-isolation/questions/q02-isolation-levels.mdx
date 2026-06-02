@@ -1,0 +1,37 @@
+**The SQL standard defines four isolation levels by which anomalies they forbid — and PostgreSQL forbids *more* than the standard requires at every level.** The standard's table is the starting point; the PostgreSQL reality is the answer that earns credit.
+
+## The standard's matrix
+
+| Level | Dirty Read | Non-Repeatable Read | Phantom Read |
+|---|---|---|---|
+| Read Uncommitted | possible | possible | possible |
+| Read Committed | no | possible | possible |
+| Repeatable Read | no | no | possible |
+| Serializable | no | no | no |
+
+Serialization anomalies (a non-serializable interleaving even with no other anomaly) are only excluded by Serializable.
+
+## What PostgreSQL actually does
+
+PostgreSQL implements only **three distinct** behaviours, because MVCC makes some weak guarantees impossible:
+
+- **Read Uncommitted** — accepted as syntax but behaves exactly as **Read Committed**. PostgreSQL *never* exposes uncommitted data, so true dirty reads don't exist here.
+- **Read Committed** (the default) — each statement sees a fresh snapshot taken at statement start. No dirty reads, but you *can* see different data across two statements in the same transaction (non-repeatable reads and phantoms are possible).
+- **Repeatable Read** — uses one snapshot taken at the *transaction's* first statement, held for the whole transaction. This eliminates non-repeatable reads **and phantoms** — stricter than the standard, which only requires phantom protection at Serializable. A concurrent write to a row you've read causes a `could not serialize access` error (`40001`) on update.
+- **Serializable** — Repeatable Read plus **SSI** (Serializable Snapshot Isolation), which tracks read/write dependencies and aborts a transaction (`40001`) if the interleaving couldn't have occurred in any serial order.
+
+```sql
+BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+-- ... statements ...
+COMMIT;   -- may raise 40001; the app must catch and retry
+```
+
+## The practical takeaway
+
+Read Committed is the right default for most OLTP. Reach for **Repeatable Read** when one transaction must see a *stable snapshot* (reports, consistent multi-query reads). Reach for **Serializable** when correctness depends on invariants spanning rows the standard levels can't protect (e.g., "no two bookings overlap") — but only if your app **retries on `40001`**.
+
+<Callout kind="warn" title="Serializable requires retry logic">
+Both Repeatable Read and Serializable can fail a `COMMIT` with serialization error `40001`. This isn't a bug — it's the contract. Code that uses these levels *must* wrap the transaction in a retry loop, or it will surface spurious failures to users.
+</Callout>
+
+<ProbeNote>The interviewer wants to know you understand PostgreSQL deviates from the standard: Read Uncommitted = Read Committed, and Repeatable Read already blocks phantoms. Bonus points for naming `40001` and the retry requirement at the two upper levels.</ProbeNote>

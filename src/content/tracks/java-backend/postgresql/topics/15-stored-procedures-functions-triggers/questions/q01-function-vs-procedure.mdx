@@ -1,0 +1,48 @@
+**The headline difference is transaction control: a function runs *inside* the caller's transaction and cannot `COMMIT`; a procedure (added in PG11) is invoked with `CALL` and can manage transactions — `COMMIT` and `ROLLBACK` mid-body.** Everything else follows from that.
+
+## Functions
+
+A function returns a value and is meant to be used *as an expression* — inside `SELECT`, a `WHERE` clause, a column default, an index. It executes within the snapshot and transaction of the statement that called it, so it has no business committing — there is no separate transaction for it to commit.
+
+```sql
+CREATE FUNCTION full_name(p person) RETURNS text
+LANGUAGE sql STABLE
+RETURN p.first || ' ' || p.last;
+
+SELECT full_name(p) FROM person p;   -- called as an expression
+```
+
+A function can return a scalar, a composite, `SETOF`/`TABLE` (a set of rows), or `void`. It can have `OUT` parameters. It carries a **volatility** label and can be `SECURITY DEFINER`.
+
+## Procedures
+
+A procedure is called with `CALL`, not `SELECT`, and is built for *doing things* rather than *returning things*. Its defining power is transaction management:
+
+```sql
+CREATE PROCEDURE rebuild_stats()
+LANGUAGE plpgsql AS $$
+DECLARE r record;
+BEGIN
+  FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' LOOP
+    EXECUTE format('ANALYZE %I', r.tablename);
+    COMMIT;                 -- commit after each table; impossible in a function
+  END LOOP;
+END $$;
+
+CALL rebuild_stats();
+```
+
+This makes procedures the right tool for **batch jobs**: delete-in-chunks loops, large backfills, anything where you want to commit progress so a failure doesn't roll back hours of work or hold one giant lock.
+
+## The other differences
+
+| | Function | Procedure |
+|---|---|---|
+| Invoked by | `SELECT f()` / in expressions | `CALL p()` |
+| Returns | a value (scalar/set/void) | nothing (PG14+ can have `OUT` params) |
+| `COMMIT`/`ROLLBACK` | not allowed | allowed (when called outside a txn block) |
+| Usable in a query | yes | no |
+
+A subtle catch: a procedure can only commit when it's *not* itself called inside an explicit `BEGIN ... COMMIT` block — if the application already opened a transaction, the `COMMIT` raises an error.
+
+<ProbeNote>They want the one-sentence discriminator — *procedures can control transactions, functions cannot* — plus the practical "so I use a procedure for chunked batch jobs." Mentioning that procedures arrived in PG11, and that a procedure's `COMMIT` fails inside an outer transaction block, is the senior detail.</ProbeNote>

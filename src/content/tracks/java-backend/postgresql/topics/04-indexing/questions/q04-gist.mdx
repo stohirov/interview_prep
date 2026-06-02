@@ -1,0 +1,46 @@
+**GiST — Generalized Search Tree — is a balanced-tree *framework* for data that has no single linear order: geometry, range types, and nearest-neighbor search.** B-tree assumes "this key is less than that key." GiST drops that assumption: each internal node stores a *predicate* (a bounding box, a range, a region) that's true for everything below it, so a search prunes whole subtrees by asking "could a match be in here?"
+
+## What it's for
+
+**Geometric / spatial data.** "Which shapes overlap this box?" is meaningless to a B-tree but natural to GiST's bounding-box pruning. This is the foundation **PostGIS** builds spatial indexes on.
+
+```sql
+CREATE INDEX ON shapes USING gist (geom);
+SELECT * FROM shapes WHERE geom && box '((0,0),(10,10))';  -- overlaps
+```
+
+**Range types — and exclusion constraints.** Indexing `tstzrange`, `int4range`, etc. for overlap (`&&`) and containment. The standout use is preventing overlapping bookings:
+
+```sql
+CREATE TABLE bookings (
+  room_id int,
+  during  tstzrange,
+  EXCLUDE USING gist (room_id WITH =, during WITH &&)
+);
+-- two reservations for the same room with overlapping times are rejected
+```
+
+**Nearest-neighbor (KNN).** GiST can answer ordered "closest to" queries directly via the distance operator `<->`, returning rows in distance order without a sort.
+
+```sql
+SELECT * FROM places ORDER BY location <-> point '(40.7,-74.0)' LIMIT 5;
+```
+
+**Full-text search**, as the alternative to GIN.
+
+## GiST vs GIN for full-text
+
+Both index `tsvector`, and the trade-off is a classic interview follow-up:
+
+```text
+GIN  → faster searches, slower to build/update, larger   → static/read-heavy text
+GiST → faster updates, smaller, but lossy (rechecks rows) → churning/smaller corpora
+```
+
+GIN is the usual default for full-text because reads dominate; GiST shines when the indexed text changes constantly or when you also need KNN/geometry that GIN simply can't do.
+
+<Callout kind="info" title="Why GiST is 'lossy'">
+GiST nodes store *approximations* (bounding predicates), so a match found in the tree must often be **rechecked** against the actual row. That recheck is the price for handling data types that have no exact linear order.
+</Callout>
+
+<ProbeNote>The signal is recognizing GiST as the method for **non-linearly-orderable** data: spatial/PostGIS, range overlap, and KNN (`<->`). Bonus points for the exclusion-constraint use (no overlapping bookings) and a crisp GIN-vs-GiST trade-off for full-text.</ProbeNote>

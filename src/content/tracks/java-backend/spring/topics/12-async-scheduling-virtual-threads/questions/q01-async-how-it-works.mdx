@@ -1,0 +1,38 @@
+**`@Async` works through an AOP proxy: when you call an `@Async` method *through the bean's proxy*, the proxy submits the method to a `TaskExecutor` and returns to the caller immediately, while the actual body runs on a pool thread.** It's the same proxy mechanism as `@Transactional` — the annotation is meaningless until `@EnableAsync` registers the `AsyncAnnotationBeanPostProcessor` that wraps matching beans.
+
+## What happens on a call
+
+```java
+@Service
+public class MailService {
+    @Async
+    public void send(String to) {            // returns void
+        // runs on a TaskExecutor thread, not the caller's
+        smtp.deliver(to);
+    }
+}
+```
+
+The caller's thread is freed the instant `send()` is invoked; the actual SMTP work happens elsewhere. If the method returns a `Future`/`CompletableFuture`, the proxy hands back a placeholder the caller can poll or chain later.
+
+## The default executor in Spring Boot 3
+
+This is the precise part interviewers probe. Plain Spring (no Boot) historically defaulted to a `SimpleAsyncTaskExecutor`, which **creates a new thread per task** — fine for demos, dangerous in production. **Spring Boot 3** auto-configures a `ThreadPoolTaskExecutor` bean named **`applicationTaskExecutor`** (also exposed as `taskExecutor`), and `@Async` picks it up automatically. Defaults: core pool 8, unbounded queue, max effectively unbounded — sensible but worth tuning.
+
+```properties
+spring.task.execution.pool.core-size=16
+spring.task.execution.pool.max-size=64
+spring.task.execution.pool.queue-capacity=1000
+```
+
+If `spring.threads.virtual.enabled=true` (Boot 3.2+, JDK 21), the async executor switches to a **virtual-thread executor** instead — each task gets its own virtual thread.
+
+## Choosing a specific executor
+
+Name a bean and reference it: `@Async("reportExecutor")`. Define your own by implementing `AsyncConfigurer` (which also lets you set an `AsyncUncaughtExceptionHandler` for `void` methods, whose exceptions are otherwise swallowed).
+
+<Callout kind="warn" title="Don't rely on the plain-Spring default">
+Outside Boot, the default is `SimpleAsyncTaskExecutor` — *new thread per call, no pooling*. Under load that's an unbounded thread leak. Always define an explicit pooled executor (or use Boot's `applicationTaskExecutor`).
+</Callout>
+
+<ProbeNote>The interviewer wants two facts nailed: (1) `@Async` is a proxy that delegates to a `TaskExecutor`, and (2) Boot 3's default is the pooled `applicationTaskExecutor`, not a new thread per call. Bonus points for naming the virtual-thread switch and the `AsyncUncaughtExceptionHandler` gap for `void` returns.</ProbeNote>

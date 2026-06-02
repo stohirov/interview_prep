@@ -1,0 +1,69 @@
+**Advice is the code that runs at a matched joinpoint; the *type* decides *when* relative to the target method.** Spring AOP has five: `@Before`, `@After`, `@AfterReturning`, `@AfterThrowing`, and `@Around`. `@Around` is the most powerful — it wraps the call entirely and is the only one that can prevent it, change arguments, or rewrite the return value.
+
+## The five types
+
+```java
+@Aspect @Component
+class AuditAspect {
+
+    @Before("@annotation(Audited)")
+    public void before(JoinPoint jp) {
+        // runs before the method; cannot stop it
+    }
+
+    @After("@annotation(Audited)")
+    public void after(JoinPoint jp) {
+        // runs after the method — ALWAYS (like a finally), success or exception
+    }
+
+    @AfterReturning(pointcut = "@annotation(Audited)", returning = "result")
+    public void afterReturning(JoinPoint jp, Object result) {
+        // only on normal return; gives you the returned value
+    }
+
+    @AfterThrowing(pointcut = "@annotation(Audited)", throwing = "ex")
+    public void afterThrowing(JoinPoint jp, Exception ex) {
+        // only when the method throws; gives you the exception
+    }
+
+    @Around("@annotation(Audited)")
+    public Object around(ProceedingJoinPoint pjp) throws Throwable {
+        // wraps everything; MUST call proceed() (or deliberately not)
+        Object result = pjp.proceed();
+        return result;
+    }
+}
+```
+
+## What distinguishes them
+
+- **`@Before`** runs first and can't alter the outcome (but can throw to abort).
+- **`@After`** is the *finally* — it always runs, regardless of success or exception. Use it for cleanup.
+- **`@AfterReturning`** runs only on success and binds the return value (`returning = "..."`).
+- **`@AfterThrowing`** runs only on exception and binds it (`throwing = "..."`). It does **not** swallow the exception — it still propagates.
+- **`@Around`** is the superset. It receives a `ProceedingJoinPoint`; calling `proceed()` invokes the target. It can:
+  - skip `proceed()` to suppress the call (e.g. cache hit),
+  - pass modified args via `proceed(newArgs)`,
+  - wrap in try/catch/finally for timing or retry,
+  - transform the returned value.
+
+## Execution order
+
+For a single method, advice fires:
+
+```text
+@Around (before proceed)
+  @Before
+    --- target method ---
+  @AfterReturning / @AfterThrowing
+  @After
+@Around (after proceed)
+```
+
+When multiple aspects match, order them with `@Order` (or `Ordered`).
+
+<Callout kind="tip" title="Use the weakest advice that works">
+Reach for `@Around` only when you genuinely need to control or replace the call. For pure observation, `@Before`/`@AfterReturning` are simpler and can't accidentally swallow an exception or forget to call `proceed()`.
+</Callout>
+
+<ProbeNote>Nail the *when*: `@After` = finally (always), `@AfterReturning` = success only, `@AfterThrowing` = exception only, `@Around` = wraps all and must call `proceed()`. The differentiator: only `@Around` can short-circuit the method or change its return — that's why `@Cacheable` and retry logic are built on it.</ProbeNote>

@@ -1,0 +1,40 @@
+**The bean lifecycle is a fixed, ordered chain, and knowing the exact sequence — especially that `BeanPostProcessor` brackets the init callbacks — is the heart of this question.** The container drives every step; your code only plugs into the hooks.
+
+## Creation order (instantiation to ready)
+
+1. **Instantiate** — Spring calls the constructor (or factory method). Constructor injection happens here.
+2. **Populate properties** — field/setter dependency injection runs; `@Autowired` fields and setters are filled.
+3. **`Aware` callbacks** — in order: `BeanNameAware.setBeanName`, `BeanFactoryAware.setBeanFactory`, then `ApplicationContextAware.setApplicationContext`.
+4. **`BeanPostProcessor.postProcessBeforeInitialization`** — every registered BPP gets a crack at the instance *before* init callbacks. (This is where `@PostConstruct` is actually triggered, via `CommonAnnotationBeanPostProcessor`.)
+5. **`@PostConstruct`** — your annotated init method.
+6. **`InitializingBean.afterPropertiesSet()`** — if the bean implements it.
+7. **Custom `init-method`** — declared via `@Bean(initMethod=...)` or XML.
+8. **`BeanPostProcessor.postProcessAfterInitialization`** — runs *after* init. **AOP proxies (e.g. `@Transactional`) are created here**, so the object handed out can be a proxy wrapping your bean.
+9. **Ready** — the bean is fully initialized and cached (for singletons).
+
+```java
+@Component
+public class Engine implements InitializingBean {
+    @PostConstruct void warmUp() { }          // step 5
+    public void afterPropertiesSet() { }       // step 6 — runs after warmUp()
+}
+```
+
+## Destruction order (reverse-ish)
+
+On context shutdown, for singletons only:
+
+1. **`@PreDestroy`** — your annotated cleanup method.
+2. **`DisposableBean.destroy()`**.
+3. **Custom `destroy-method`**.
+
+```text
+START  -> @PostConstruct -> afterPropertiesSet() -> initMethod
+SHUTDOWN -> @PreDestroy   -> destroy()           -> destroyMethod
+```
+
+<Callout kind="info" title="Why three init mechanisms with the same job">
+`@PostConstruct`, `InitializingBean`, and `init-method` all "initialize," and they *all* fire (in that order) if you declare all three. They coexist because they came from different eras: annotations (modern), the interface (couples you to Spring), and XML/`@Bean` config (decouples framework from bean).
+</Callout>
+
+<ProbeNote>Strong answers recite the order crisply and note two things: `@PostConstruct` runs *before* `afterPropertiesSet()`, and proxies are applied in `postProcessAfterInitialization` — which is *why* the BPP step brackets the init callbacks.</ProbeNote>

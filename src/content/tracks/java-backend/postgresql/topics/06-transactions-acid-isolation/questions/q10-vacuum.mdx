@@ -1,0 +1,51 @@
+**`VACUUM` reclaims the dead tuples that MVCC leaves behind — it's the maintenance that makes multi-versioning sustainable.** Every `UPDATE` and `DELETE` produces a dead tuple; without vacuuming, tables and indexes **bloat**, XIDs march toward wraparound, and the planner's stats go stale. Knowing the three forms and how they differ is the core of this question.
+
+## What VACUUM does
+
+Plain `VACUUM` scans a table and:
+
+- Marks space occupied by **dead tuples** as reusable (it does *not* return it to the OS — the file stays the same size, but new rows fill the freed slots).
+- Updates the **visibility map**, enabling index-only scans and letting future vacuums skip all-visible pages.
+- **Freezes** old tuples, advancing the table's `relfrozenxid` to hold off wraparound.
+- Removes dead index entries pointing at reclaimed tuples.
+
+```sql
+VACUUM orders;            -- reclaim dead space, non-blocking
+VACUUM (VERBOSE) orders;  -- report what it did
+VACUUM ANALYZE orders;    -- also refresh planner statistics
+```
+
+Crucially, plain `VACUUM` runs **concurrently** — it takes only a light lock and does **not** block reads or writes.
+
+## VACUUM FULL — different beast
+
+`VACUUM FULL` **rewrites the entire table** into a new, compact file and returns freed space to the OS. It reclaims bloat that plain VACUUM can't, but it takes an **`ACCESS EXCLUSIVE` lock** — the table is fully unavailable for the duration — and needs disk space for a second copy.
+
+```sql
+VACUUM FULL orders;   -- compacts to disk; LOCKS the table; use sparingly
+```
+
+Reach for it only after pathological bloat (e.g., a mass delete) and during a maintenance window. For online compaction, prefer `pg_repack`.
+
+## AUTOVACUUM — the background daemon
+
+**Autovacuum** runs plain `VACUUM` (and `ANALYZE`) automatically when a table's dead-tuple count crosses a threshold:
+
+```text
+threshold = autovacuum_vacuum_threshold
+          + autovacuum_vacuum_scale_factor * reltuples   (default 0.2 → 20%)
+```
+
+It also has an **anti-wraparound** trigger that vacuums tables whose oldest XID gets too old, independent of dead tuples. For high-churn tables the defaults are often too lax — tune per-table `scale_factor` lower so it runs more often in smaller bites.
+
+| | Plain VACUUM | VACUUM FULL | Autovacuum |
+|---|---|---|---|
+| Reclaims to OS? | no (reusable) | yes (rewrites file) | no |
+| Lock | light, concurrent | ACCESS EXCLUSIVE | light, concurrent |
+| Triggered by | manual | manual | dead-tuple/XID thresholds |
+
+<Callout kind="danger" title="Never disable autovacuum">
+Turning off autovacuum to "save resources" is how production databases bloat into outages and march toward txid wraparound. If it's too aggressive, *tune* its thresholds and cost limits — don't disable it.
+</Callout>
+
+<ProbeNote>Distinguish the three crisply: plain VACUUM reclaims space *for reuse* without locking, VACUUM FULL rewrites the file and takes an exclusive lock, autovacuum is the daemon that triggers plain VACUUM on thresholds. Mention freezing and anti-wraparound, and the rule "never disable autovacuum."</ProbeNote>

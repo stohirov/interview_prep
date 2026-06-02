@@ -1,0 +1,42 @@
+**PostgreSQL has exactly three join strategies, and each is optimal for a different size relationship between the two inputs.** The planner costs all three and picks one; your job in an interview is to explain *when each wins*.
+
+## Nested Loop Join
+
+For each row of the outer relation, probe the inner relation. Naively that's O(N×M), but it's a winner when the **outer side is small** and the **inner side has an index** on the join key — then each probe is a cheap index lookup, not a scan.
+
+```
+Nested Loop
+  ->  Index Scan on small_filtered_table   (a few rows)
+  ->  Index Scan on big_table  (Index Cond: big.id = small.fk)   (loops=few)
+```
+
+Watch the `loops` count on the inner node — that's how many times it ran. A Nested Loop where the outer side was *under*-estimated (planner thought 5 rows, got 50,000) is a classic blow-up.
+
+## Hash Join
+
+Build a hash table on the smaller input (the "build" side), then stream the larger input through it ("probe"). O(N+M), no index required, and excellent for joining two **large, unindexed** sets — but it needs `work_mem` to hold the hash table, or it spills to disk in batches.
+
+```
+Hash Join  (Hash Cond: a.id = b.a_id)
+  ->  Seq Scan on a
+  ->  Hash
+        ->  Seq Scan on b
+```
+
+Only works for **equality** joins.
+
+## Merge Join
+
+Sort both inputs on the join key (or read them already-sorted from indexes), then walk them in lockstep like a zipper. O(N log N + M log M) if sorting is needed, or near-linear if both sides arrive pre-sorted. Wins for **large, already-sorted** inputs and supports range/inequality merges that a hash join can't.
+
+## The decision table
+
+<Callout kind="info" title="Rule of thumb">
+Small outer + indexed inner → **Nested Loop**. Two big unsorted sets, equality → **Hash Join**. Two big sets already sorted (e.g., by their PKs/indexes) → **Merge Join**.
+</Callout>
+
+## The interview trap: when a good plan goes bad
+
+The most-asked follow-up: *"You see a Nested Loop and the query is slow — why?"* Almost always a **row-estimate error**. The planner thought the outer side returned a handful of rows (so a Nested Loop with an indexed inner probe was cheapest), but it actually returned thousands, turning thousands of index probes into a disaster. The fix is the estimate (ANALYZE, statistics target, extended statistics for correlated columns), not banning Nested Loops.
+
+<ProbeNote>They want the three algorithms, their cost shapes, and — critically — that **Hash Join is equality-only** and that a pathological Nested Loop is a symptom of bad cardinality estimates. Bonus points for mentioning `work_mem` driving hash/merge spills to disk.</ProbeNote>

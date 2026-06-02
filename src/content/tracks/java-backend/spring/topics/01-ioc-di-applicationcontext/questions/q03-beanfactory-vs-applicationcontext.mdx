@@ -1,0 +1,37 @@
+**`BeanFactory` is the bare, lazy-loading root container interface; `ApplicationContext` is a superset that adds the enterprise features you actually use in real applications.** In practice you almost never touch `BeanFactory` directly — but knowing the relationship signals you understand Spring's layering.
+
+## BeanFactory — the foundation
+
+`BeanFactory` is the lowest-level container contract: register bean definitions, resolve dependencies, hand back instances. By default it instantiates beans **lazily** — a bean isn't created until something calls `getBean()` for it. It's deliberately minimal and was historically used in memory-constrained environments.
+
+## ApplicationContext — the superset
+
+`ApplicationContext` **extends** `BeanFactory` (so it *is* a `BeanFactory`) and layers on the features Spring apps depend on:
+
+- **Eager singleton instantiation** at startup — beans are created and wired up front, so misconfiguration fails fast rather than on first use.
+- **Automatic `BeanPostProcessor` and `BeanFactoryPostProcessor` registration** — this is what makes annotations like `@Autowired`, `@Transactional`, and AOP proxies work without manual wiring.
+- **Event publishing** via `ApplicationEventPublisher` / `@EventListener`.
+- **Internationalization** through `MessageSource`.
+- **Resource loading** (`ResourceLoader` — classpath, file, URL).
+- **Environment abstraction** — properties, profiles (`@Profile`), `@Value` resolution.
+
+```java
+ApplicationContext ctx =
+    new AnnotationConfigApplicationContext(AppConfig.class);
+// All singletons already built and wired here — startup, not first access:
+OrderService svc = ctx.getBean(OrderService.class);
+```
+
+## The decisive practical difference
+
+With a raw `BeanFactory`, post-processors aren't registered automatically — you'd have to wire them by hand, so `@Autowired` and `@Transactional` simply wouldn't take effect. `ApplicationContext` does this for you. That, plus eager fail-fast startup, is why **every real Spring/Boot application uses an `ApplicationContext`** (Boot builds one for you automatically).
+
+## When BeanFactory still matters
+
+You reference it conceptually, not directly: lazy resolution semantics, and the fact that `ApplicationContext` delegates core bean management down to a `DefaultListableBeanFactory` internally. The only time you'd deliberately prefer the lighter contract is an extremely constrained or custom bootstrap — vanishingly rare today.
+
+<Callout kind="info" title="One-liner">
+"`ApplicationContext` is a `BeanFactory` plus eager startup, automatic post-processor registration (so annotations work), events, i18n, resources, and the environment. You always use `ApplicationContext`; `BeanFactory` is the underlying contract it builds on."
+</Callout>
+
+<ProbeNote>They're checking you know `ApplicationContext` *extends* `BeanFactory` (superset, not alternative) and can name the concrete additions — especially **eager instantiation** and **automatic post-processor registration**, because that's *why* annotation-driven Spring works at all.</ProbeNote>

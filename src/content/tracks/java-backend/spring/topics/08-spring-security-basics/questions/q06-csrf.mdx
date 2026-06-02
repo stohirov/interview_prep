@@ -1,0 +1,43 @@
+**CSRF protection defends against a malicious site tricking a logged-in browser into making a state-changing request using its automatically-attached session cookie.** The whole attack hinges on *ambient credentials* — cookies the browser sends on every request to your domain whether you intended it or not. Whether you need CSRF protection is entirely a function of how you authenticate.
+
+## The attack
+
+You're logged into `bank.com` (session cookie set). You visit `evil.com`, which contains a hidden form that auto-submits `POST bank.com/transfer`. The browser dutifully attaches your `bank.com` cookie, and the server can't tell the request didn't come from your own UI.
+
+## The defense: synchronizer token
+
+Spring Security issues a per-session **CSRF token** that the server requires on every unsafe method (POST/PUT/PATCH/DELETE; safe GET/HEAD are exempt). The token lives somewhere JavaScript on *your* origin can read but a cross-site page cannot, so the attacker can't forge it. It's **on by default**:
+
+```java
+http.csrf(Customizer.withDefaults());
+```
+
+For a JS SPA on the same domain, expose the token via a cookie + header repeater:
+
+```java
+http.csrf(csrf -> csrf
+    .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse()));
+// browser reads XSRF-TOKEN cookie, echoes it in the X-XSRF-TOKEN header
+```
+
+## When you can disable it
+
+CSRF protection guards against the *browser auto-attaching credentials*. If your API is **stateless** and authenticates with a token the client must add **explicitly** — an `Authorization: Bearer ...` header for a JWT — then there is no ambient credential to abuse, and CSRF is moot:
+
+```java
+http
+  .csrf(csrf -> csrf.disable())
+  .sessionManagement(s -> s.sessionCreationPolicy(STATELESS))
+  .oauth2ResourceServer(o -> o.jwt(Customizer.withDefaults()));
+```
+
+## When you must keep it on
+
+- Any session-cookie-based browser app (server-rendered or SPA using a session cookie).
+- **Especially** if you store a JWT in a cookie — now it *is* auto-attached, so you're back to needing CSRF protection.
+
+<Callout kind="warn" title="Don't disable it just to make Postman work">
+The single most common security mistake: a session-based app where someone disables CSRF because the token "got in the way." That re-opens the exact hole. Disable CSRF only when you're genuinely stateless with a non-cookie credential.
+</Callout>
+
+<ProbeNote>The crisp rule: CSRF matters when credentials are sent **automatically** by the browser (cookies/session); it's unnecessary when the client sends the credential **explicitly** in a header (stateless bearer token). Watch for the trap — a JWT stored in a cookie is auto-sent, so it still needs CSRF protection.</ProbeNote>

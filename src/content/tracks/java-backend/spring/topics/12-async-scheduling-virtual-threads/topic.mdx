@@ -1,0 +1,26 @@
+**Spring lets you run work *off the calling thread* — asynchronously with `@Async`, or on a clock with `@Scheduled` — and both are built on the same AOP-proxy + `TaskExecutor` machinery you already know.** `@Async` says "run this method on some other thread and return immediately"; `@Scheduled` says "the framework calls this method for me, on a fixed rate, a fixed delay, or a cron expression." Neither requires you to touch `Thread` or `ExecutorService` directly — you annotate a bean method and Spring wires the execution.
+
+Because both ride on proxies, the same traps reappear: a method only becomes async/scheduled when invoked *through the proxy*, so self-invocation (`this.foo()`) silently runs it inline on the caller's thread.
+
+```java
+@Service
+public class ReportService {
+    @Async
+    public CompletableFuture<Report> generate(long id) {  // runs on a TaskExecutor thread
+        return CompletableFuture.completedFuture(build(id));
+    }
+
+    @Scheduled(fixedDelay = 60_000)
+    public void purgeStale() { ... }                       // framework calls this every 60s
+}
+```
+
+Enable them with `@EnableAsync` and `@EnableScheduling` (Boot turns scheduling on when it sees `@Scheduled`). The **executor** behind `@Async` in Boot 3 is the auto-configured `applicationTaskExecutor`; the **scheduler** behind `@Scheduled` is single-threaded by default — a long task blocks every other scheduled task.
+
+The 2024 plot twist is **virtual threads** (Project Loom, JDK 21). Setting `spring.threads.virtual.enabled=true` switches Tomcat request handling *and* the async/scheduling executors to virtual threads, so blocking IO work scales to thousands of concurrent tasks cheaply — without rewriting anything as reactive. The catch: virtual threads help IO-bound/blocking code, not CPU-bound work, and `synchronized` blocks still *pin* the carrier thread before JDK 24.
+
+<Callout kind="tip" title="The interview hook">
+Frame it as one sentence: "`@Async` and `@Scheduled` are AOP proxies that hand work to a `TaskExecutor`/`TaskScheduler`. Know the default executor (Boot's `applicationTaskExecutor`), know `fixedRate` vs `fixedDelay`, know the scheduler is single-threaded, and know that virtual threads (`spring.threads.virtual.enabled=true`) make the *blocking* model scale — for IO, not CPU."
+</Callout>
+
+The questions below cover how `@Async` works and its return types, the self-invocation trap, `fixedRate`/`fixedDelay`/`cron`, distributed scheduling with ShedLock, what virtual threads actually switch, when they help, and `ThreadPoolTaskExecutor` tuning.

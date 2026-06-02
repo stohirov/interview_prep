@@ -1,0 +1,47 @@
+**Pessimistic locking takes a lock *before* touching data to prevent conflicts; optimistic locking takes no lock and *detects* conflicts at write time, retrying if one occurred.** The choice is a bet on how likely contention is.
+
+## Pessimistic — lock first, assume conflict
+
+You acquire a row lock up front and hold it until commit, so no one else can modify what you're working on. In PostgreSQL that's `SELECT ... FOR UPDATE`:
+
+```sql
+BEGIN;
+SELECT balance FROM accounts WHERE id = 1 FOR UPDATE;  -- row locked
+-- compute new balance in the app; no one can update id=1 meanwhile
+UPDATE accounts SET balance = :new WHERE id = 1;
+COMMIT;                                                 -- lock released
+```
+
+Other transactions wanting that row **block** until you commit. Correct and simple, but it serializes access to hot rows, can cause **lock waits and deadlocks**, and holds resources for the transaction's duration. Best when conflicts are *frequent* and retries would be wasteful.
+
+## Optimistic — no lock, detect at write
+
+You read freely, then verify at write time that nothing changed since you read. The common implementation is a **version column** (or timestamp): the `UPDATE` only succeeds if the version still matches.
+
+```sql
+-- read: id=1, balance=100, version=7
+UPDATE accounts
+SET balance = :new, version = version + 1
+WHERE id = 1 AND version = 7;
+-- 0 rows updated => someone else changed it => retry from the read
+```
+
+If `rowcount = 0`, a concurrent writer won the race; the application re-reads and retries. No locks are held between read and write, so concurrency is high. Best when conflicts are *rare* — the overwhelming common case in web apps.
+
+## How they map to PostgreSQL features
+
+- **Pessimistic** → row locks: `FOR UPDATE`, `FOR NO KEY UPDATE`, `FOR SHARE`, plus advisory locks.
+- **Optimistic** → either a manual version column, or **Serializable/Repeatable Read** isolation, where PostgreSQL itself detects the conflict and raises `40001` for you to retry. SSI is essentially database-managed optimistic concurrency.
+
+| | Pessimistic | Optimistic |
+|---|---|---|
+| Conflict handling | prevent (block) | detect + retry |
+| Best when | high contention | low contention |
+| Cost | lock waits, deadlocks | wasted work on retry |
+| Holds locks? | yes, until commit | no |
+
+<Callout kind="tip" title="ORMs use optimistic by default">
+JPA/Hibernate's `@Version`, and most "version column" patterns, are optimistic locking. They throw an `OptimisticLockException` on a stale write so the app can retry. Knowing your framework's default — and that it maps to the `WHERE version = ?` pattern above — is a frequent follow-up.
+</Callout>
+
+<ProbeNote>Frame it as *prevent vs. detect*, then tie each to PostgreSQL primitives: `FOR UPDATE` for pessimistic, a version column or Serializable+retry for optimistic. The deciding factor is expected contention — name that and you've answered the real question.</ProbeNote>

@@ -1,0 +1,72 @@
+**Profiles let you register different beans and load different properties per environment — dev, test, prod — without changing code.** Two mechanisms do the work: `@Profile` gates beans, and `spring.profiles.active` selects which profiles are live.
+
+## Gating beans with @Profile
+
+`@Profile` on a `@Component`, `@Configuration`, or `@Bean` method makes it eligible only when the named profile is active:
+
+```java
+@Configuration
+public class MailConfig {
+
+    @Bean
+    @Profile("prod")
+    MailSender smtpSender() { return new SmtpMailSender(...); }
+
+    @Bean
+    @Profile("!prod")          // any profile except prod
+    MailSender loggingSender() { return new LoggingMailSender(); }
+}
+```
+
+The expression supports `!`, `&`, `|` and grouping: `@Profile("prod & eu")`. A bean with no `@Profile` is always registered.
+
+## Profile-specific properties
+
+Files named `application-<profile>.yml`/`.properties` are loaded **only** when that profile is active, layered on top of the plain `application.yml`:
+
+```text
+application.yml          # common defaults
+application-dev.yml      # loaded when 'dev' is active
+application-prod.yml     # loaded when 'prod' is active
+```
+
+## How to activate a profile
+
+Many ways, highest precedence last (same hierarchy as any property):
+
+```properties
+# 1. In application.properties (the default fallback)
+spring.profiles.active=dev
+```
+
+```text
+# 2. Command line — wins over the file
+java -jar app.jar --spring.profiles.active=prod
+
+# 3. JVM system property
+java -Dspring.profiles.active=prod -jar app.jar
+
+# 4. Environment variable (relaxed binding) — common in Docker/K8s
+export SPRING_PROFILES_ACTIVE=prod
+```
+
+```java
+// 5. Programmatically, before refresh
+new SpringApplicationBuilder(App.class)
+    .profiles("prod")
+    .run(args);
+```
+
+You can activate several at once: `--spring.profiles.active=prod,eu,metrics`.
+
+## Useful extras
+
+- **`spring.profiles.include`** / **profile groups** (`spring.profiles.group.prod=eu,metrics`) activate bundles of profiles together.
+- **`@ActiveProfiles("test")`** sets profiles in integration tests.
+- If *no* profile is set, the **`default`** profile applies — beans annotated `@Profile("default")` run only when nothing else is active.
+
+<Callout kind="warn" title="active vs default">
+`spring.profiles.active` *replaces* the default set; it doesn't add to it. Setting it to `prod` means `default`-only beans no longer load. Use profile groups or `include` to combine.
+</Callout>
+
+<ProbeNote>The interviewer wants `@Profile` for beans **and** `spring.profiles.active` for selection, plus at least two activation routes (command line, env var) and the precedence between them. Mentioning `application-<profile>.yml` files and the `default` profile rounds out a senior answer.</ProbeNote>

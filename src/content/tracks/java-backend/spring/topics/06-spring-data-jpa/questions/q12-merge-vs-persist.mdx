@@ -1,0 +1,48 @@
+**`persist` makes a *new* entity managed; `merge` takes a *detached* entity and copies its state onto a managed instance. They behave differently, and `saveOrUpdate` is a Hibernate-only method that Spring Data's `save()` effectively replaces.** The confusion is worth untangling because it explains subtle "my update didn't persist" bugs.
+
+## Detached entities — the setup
+
+A **detached** entity was once managed but its persistence context has closed (e.g., it came back from a previous transaction, was deserialized from an HTTP request, or you called `clear()`). It has a PK but is no longer tracked — mutating it does nothing until you reattach it.
+
+## persist
+
+`persist(entity)` makes a **transient** (new) entity managed. It expects no existing row; the entity becomes managed and is INSERTed at flush. The *same* instance you passed in is now managed (the call returns `void`).
+
+```java
+User u = new User("a@b.com");
+em.persist(u);   // u is now managed; INSERT at flush
+```
+
+Calling `persist` on a detached entity throws `EntityExistsException` (or fails at flush).
+
+## merge
+
+`merge(entity)` is for **detached** entities. It does *not* attach your instance. Instead it loads (or finds in the context) the managed entity with that PK, **copies your state onto it**, and returns that managed copy. Your original argument stays detached.
+
+```java
+User detached = ...;           // from a previous tx, with id=5
+detached.setName("New");
+User managed = em.merge(detached);   // SELECT id=5, copy fields, return managed
+managed.setName("Newer");      // affects the row
+detached.setName("Ignored");   // detached → no effect
+```
+
+The trap: `merge` returns the managed instance — **keep working with the return value**, not the argument.
+
+## Spring Data's save()
+
+`JpaRepository.save()` hides this: if the entity is new (no PK, or per `Persistable.isNew()`), it calls `persist`; otherwise it calls `merge`. That's convenient but means `save()` on a detached entity does a `merge` — a SELECT plus copy, and a blanket overwrite of every column.
+
+```java
+public <S> S save(S e) { return isNew(e) ? em.persist(e),e : em.merge(e); }  // conceptually
+```
+
+## saveOrUpdate
+
+`saveOrUpdate` is **Hibernate-native** (`Session`, not JPA). Unlike `merge` it *reattaches* the very instance you pass (no copy, no new instance returned). It can throw `NonUniqueObjectException` if another managed instance with that PK is already in the context. Modern code should prefer JPA `merge` / Spring's `save`.
+
+<Callout kind="tip" title="For an existing row you've loaded, do neither">
+If the entity is already **managed** in the current transaction, you need *no* call at all — dirty checking flushes the change. Reach for `merge`/`save` only when the entity is **detached**.
+</Callout>
+
+<ProbeNote>Crisp distinctions: `persist` = new entity → managed (INSERT); `merge` = detached → copies state onto a managed instance and **returns it** (use the return value!); `saveOrUpdate` = Hibernate-only reattach of the same instance. Spring's `save()` picks persist vs merge by newness. Bonus: a managed entity needs neither — dirty checking handles it.</ProbeNote>

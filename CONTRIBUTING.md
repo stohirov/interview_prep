@@ -13,7 +13,8 @@ src/content/tracks/<track-id>/<module-id>/topics/<NN-slug>/
 ```
 
 - **Track id**: `java-backend`, `kotlin-backend`, etc.
-- **Module id**: `collections`, `concurrency`, `jvm`, `spring`, `system-design`, `dsa`.
+- **Module id**: `collections`, `oop`, `postgresql`, `spring`, and (planned) `concurrency`,
+  `jvm`, `system-design`, `dsa`.
 - **Topic folder name**: `NN-slug` where `NN` is a two-digit ordinal that controls display order
   on the module page (e.g. `04-hashmap`).
 - **Question file name**: `qNN-slug.mdx` where `NN` is two digits.
@@ -55,9 +56,18 @@ src/content/tracks/<track-id>/<module-id>/topics/<NN-slug>/
   is just the body of the page.
 - **No top-level `# h1` heading.** The page already renders a heading from the data; start
   at `## h2` for section subheads.
-- **Code blocks**: triple-backtick fences with a language. Use `java` for Java code, `text`
-  for plain output. Shiki highlights at build time.
+- **Code blocks**: triple-backtick fences with a language. Use `java` for Java code, `sql`
+  for SQL, `yaml`/`properties` for config, `text` for plain output. Shiki highlights at build time.
 - **Length**: topic explainers 200–400 words; question answers 200–500 words.
+- **Put a flow component's closing tag on its own line.** When a component like `<Callout>`
+  opens on its own line, its `</Callout>` must also be on its own line — gluing it to the end
+  of the body text (`…intent.</Callout>`) makes the MDX compiler read the remaining text as an
+  unclosed tag and the build fails. Either keep the whole thing on one line
+  (`<ProbeNote>…</ProbeNote>`) or give the closing tag its own line.
+- **Never escape quotes inside a component attribute.** `title="Why GiST is \"lossy\""` breaks
+  attribute parsing. Use single quotes inside (`title="Why GiST is 'lossy'"`) instead.
+- **Raw `<`, `>` and `{` are JSX in prose.** Wrap things like `List<String>`, `a < b`, or the
+  `<@` / `->` operators in backticks so MDX treats them as code, not markup.
 
 ### Available custom MDX components
 
@@ -118,11 +128,34 @@ The Sources sidebar is a first-class learning surface. We're strict about what g
 - **`recommendedReadingOrder`** (optional, lower = read first) lets you sort the most important
   link to the top of its type group.
 
+### Non-Java modules (PostgreSQL, Spring, …)
+
+The priority order above is Java-specific. For other modules, the same rules apply with
+module-appropriate authoritative sources:
+
+- **PostgreSQL**: official docs are `type: 'official-docs'` and must use
+  `https://www.postgresql.org/docs/current/…` so the link auto-tracks the latest major version.
+  Books (`PostgreSQL: Up and Running`, `The Art of PostgreSQL`, `PostgreSQL Internals`) are `type: 'book'`.
+- **Spring**: official docs are `type: 'official-docs'` under `docs.spring.io/...` (Framework 6.x /
+  Boot 3.x reference paths). Spring Guides are `type: 'tutorial'`; GitHub source is `official-docs`.
+- The loader test enforces that any source typed `official-docs`, `tutorial`, `spec`, `jep`, or
+  `javadoc` has `authoritative: true`. The Java-25 Javadoc URL rule only applies to `javadoc`-typed
+  sources (and `official-docs` whose URL contains `/docs/api/`), so it does not constrain the
+  PostgreSQL/Spring doc URLs.
+
 ### Where sources live
 
-Sources are defined in `src/content/tracks/<track>/sources.ts`, keyed by a stable string id,
-and pulled into the module's `index.ts` via `SOURCES['your-key']`. Keep them out of the topic
-file so they're easy to audit and share between topics.
+Each module owns its sources file, exporting a named `Record<topicId, Source[]>`:
+
+- `tracks/java-backend/sources.ts` → `SOURCES` (collections)
+- `tracks/java-backend/oop/sources.ts` → `OOP_SOURCES`
+- `tracks/java-backend/postgresql/sources.ts` → `PG_SOURCES`
+- `tracks/java-backend/spring/sources.ts` → `SPRING_SOURCES`
+
+The module's `index.ts` pulls them in per topic (e.g. `PG_SOURCES['indexing']`). Keep sources out
+of the topic MDX so they're easy to audit and share between topics. When you add a new module,
+register its source record in `scripts/check-sources.ts` (the `MODULE_SOURCES` array) so the URL
+checker covers it.
 
 ### Checking sources
 
@@ -130,8 +163,9 @@ file so they're easy to audit and share between topics.
 npm run check:sources
 ```
 
-HEAD-requests every URL across the tree and fails on 404. Oracle occasionally moves Javadoc
-paths between releases — this script catches that.
+HEAD-requests every URL across all modules and fails on 404 (it retries with a ranged GET when a
+host rejects HEAD with 403/404/405, so HEAD-hostile docs sites still validate). Vendors
+occasionally move doc paths between releases — this script catches that.
 
 ## Quality bar for answers
 

@@ -1,0 +1,44 @@
+**`condition` and `unless` both gate caching, but they fire at opposite ends of the call and see different data — `condition` is evaluated *before* the method on the arguments, `unless` is evaluated *after* on the result.** Confusing the two is the whole trap.
+
+## condition — gate on the input, before the call
+
+`condition` is a SpEL predicate over the method arguments. If it evaluates `false`, the proxy treats the call as un-cacheable: it doesn't look the value up *and* doesn't store it — the method just runs normally. Because it runs first, `condition` can decide to skip the cache *without* invoking the method (on `@Cacheable`).
+
+```java
+@Cacheable(value = "books", condition = "#id > 0")
+public Book find(long id) { ... }   // negative ids bypass the cache entirely
+```
+
+## unless — veto on the output, after the call
+
+`unless` is evaluated *after* the method returns, and it can reference the return value via `#result`. If it evaluates `true`, the result is **not stored** (note the inverted polarity: `unless` says "don't cache when…"). The method always runs first, so `unless` cannot prevent invocation — only storage.
+
+```java
+@Cacheable(value = "books", unless = "#result == null")
+public Book find(long id) { ... }   // never cache a null/miss
+```
+
+The canonical idiom is "cache only non-empty results":
+
+```java
+@Cacheable(value = "search", key = "#q",
+           unless = "#result == null || #result.isEmpty()")
+public List<Book> search(String q) { ... }
+```
+
+## Putting them together
+
+```java
+@Cacheable(value = "books",
+           condition = "#refresh == false",   // skip lookup when caller forces refresh
+           unless     = "#result == null")     // don't store empty answers
+public Book find(long id, boolean refresh) { ... }
+```
+
+On a `@Cacheable` hit, neither runs the method, but `condition` still controls whether the cache is even consulted. On `@CacheEvict`/`@CachePut`, only `condition` applies (`unless` is meaningful where a result is stored, i.e. `@Cacheable` and `@CachePut`).
+
+<Callout kind="info" title="Two differences to recite">
+**When:** `condition` = before, on args; `unless` = after, on `#result`. **Polarity:** `condition` caches when *true*; `unless` blocks storage when *true*. And only `unless` can see `#result`.
+</Callout>
+
+<ProbeNote>Interviewers check that you place `condition` before the call (can skip invocation on args) and `unless` after (post-result veto, sees `#result`), and that you remember the inverted boolean sense of `unless`. The `unless = "#result == null"` pattern for "never cache misses" is the practical detail they listen for.</ProbeNote>

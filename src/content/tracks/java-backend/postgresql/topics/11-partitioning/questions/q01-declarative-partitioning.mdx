@@ -1,0 +1,33 @@
+**Declarative partitioning is the built-in, first-class syntax — `PARTITION BY` on the parent and `PARTITION OF` on each child — introduced in PostgreSQL 10 (2017).** Before it, "partitioning" meant a hand-rolled pattern using table inheritance, and the difference is worth stating because interviewers want to know you understand *why* the modern feature exists.
+
+## What it looks like
+
+```sql
+CREATE TABLE measurement (
+    city_id   int  NOT NULL,
+    logdate   date NOT NULL,
+    peaktemp  int
+) PARTITION BY RANGE (logdate);
+
+CREATE TABLE measurement_y2025m06 PARTITION OF measurement
+    FOR VALUES FROM ('2025-06-01') TO ('2025-07-01');
+```
+
+The parent table stores no data; it declares the **strategy** (`RANGE`, `LIST`, or `HASH`) and the **partition key**. Rows inserted into `measurement` are routed to the correct child automatically by tuple routing — you `INSERT INTO measurement`, never into a child directly.
+
+## The old way: inheritance-based
+
+Pre-10, you created a plain parent, `CREATE TABLE child () INHERITS (parent)`, added a `CHECK` constraint per child to define its range, and wrote a **trigger or rule on the parent** to redirect every INSERT to the right child. Pruning relied on `constraint_exclusion` matching those CHECK constraints. It worked but was verbose, error-prone, and slow: trigger-based routing, no automatic row routing, and the planner had to evaluate every child's constraints.
+
+## What declarative gives you over inheritance
+
+- **Automatic tuple routing** — no INSERT trigger.
+- **Faster planning** via dedicated partition pruning (not generic `constraint_exclusion`).
+- **`ATTACH`/`DETACH PARTITION`** for live management.
+- Progressive hardening across versions: PG 11 added hash partitioning, default partitions, and per-partition-table indexes that auto-propagate; PG 12 sped up planning with thousands of partitions; PG 14 added `DETACH CONCURRENTLY`.
+
+<Callout kind="info" title="Inheritance still exists">
+Table inheritance is a separate, still-supported feature. Declarative partitions are *implemented on top of* inheritance internally, but you should never mix manual `INHERITS` partitioning with declarative — use `PARTITION BY`.
+</Callout>
+
+<ProbeNote>The probe is the version (PG 10) and the contrast with the old inheritance-plus-trigger approach. Naming automatic tuple routing and the absence of a routing trigger as the headline improvement shows you've actually maintained partitioned tables, not just read the syntax.</ProbeNote>

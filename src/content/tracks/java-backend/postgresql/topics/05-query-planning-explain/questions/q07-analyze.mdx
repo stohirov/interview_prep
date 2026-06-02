@@ -1,0 +1,49 @@
+**`ANALYZE` collects the table statistics the planner uses to estimate row counts — and stale statistics are the number-one cause of bad plans.** Note the name collision: the `ANALYZE` *command* gathers stats; the `ANALYZE` *option* of `EXPLAIN` runs a query. This question is about the command.
+
+## What it gathers
+
+`ANALYZE` samples rows from each table and stores, in `pg_statistic` (readable via the `pg_stats` view):
+
+- **Number of distinct values** per column (`n_distinct`) — drives equality-selectivity estimates.
+- **A list of most-common values and their frequencies** (the MCV list) — handles skew.
+- **A histogram** of value distribution — drives range-selectivity (`>`, `<`, `BETWEEN`).
+- **Physical/logical correlation** — how well row order matches column order, which affects index-scan cost.
+
+```sql
+ANALYZE orders;              -- one table
+ANALYZE;                     -- whole database
+ANALYZE orders (customer_id) -- specific columns
+```
+
+## When to run it manually
+
+Autovacuum runs an autovacuum-analyze automatically once enough rows change, so for steady workloads you rarely run it by hand. You **do** need it manually after:
+
+- A **bulk load / restore / large `COPY`** — fresh data the planner hasn't seen, and autovacuum may not have caught up before your queries run.
+- A **major data shift** — e.g., a migration that rewrites a column's distribution.
+- Right after **creating an expression index** — `ANALYZE` then gathers stats on the expression.
+- Inside a **post-deploy migration script**, as a cheap insurance step before traffic hits new tables.
+
+## Tuning the resolution
+
+The sample size (and thus MCV/histogram detail) is controlled by `default_statistics_target` (default 100). Raise it for a specific column when a skewed distribution causes mis-estimates:
+
+```sql
+ALTER TABLE orders ALTER COLUMN status SET STATISTICS 1000;
+ANALYZE orders;
+```
+
+<Callout kind="warn" title="ANALYZE ≠ VACUUM">
+`ANALYZE` only refreshes statistics — it does **not** reclaim dead-tuple space. `VACUUM` reclaims space and updates the visibility map. `VACUUM ANALYZE` does both. Don't conflate them.
+</Callout>
+
+## The correlated-columns gotcha
+
+Plain `ANALYZE` assumes columns are **independent**. If `city` and `postal_code` are tightly correlated, the planner multiplies their selectivities and badly under-estimates `WHERE city = 'X' AND postal_code = 'Y'`. The fix is **extended statistics**:
+
+```sql
+CREATE STATISTICS s_city_zip (dependencies) ON city, postal_code FROM addresses;
+ANALYZE addresses;
+```
+
+<ProbeNote>They're checking you know plans live or die by statistics, that you run `ANALYZE` after bulk loads and in migrations, and ideally that you know the independence assumption and `CREATE STATISTICS` for correlated columns. Distinguishing the `ANALYZE` command from `EXPLAIN ANALYZE` cleanly is a quick credibility check.</ProbeNote>

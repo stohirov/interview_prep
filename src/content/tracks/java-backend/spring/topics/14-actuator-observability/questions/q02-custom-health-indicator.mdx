@@ -1,0 +1,50 @@
+**The `/health` endpoint is not a single check — it's an aggregate of every `HealthIndicator` bean in the context, and you add your own by implementing that one-method interface.** Boot auto-registers indicators for the things on your classpath (datasource, disk space, Redis, RabbitMQ, …); custom ones cover *your* dependencies — a downstream API, a license server, a message queue you talk to directly.
+
+## The interface
+
+```java
+@Component
+class PaymentGatewayHealthIndicator implements HealthIndicator {
+
+  private final PaymentGatewayClient client;
+
+  PaymentGatewayHealthIndicator(PaymentGatewayClient client) {
+    this.client = client;
+  }
+
+  @Override
+  public Health health() {
+    try {
+      var latency = client.ping();           // cheap round-trip
+      return Health.up()
+          .withDetail("latencyMs", latency)
+          .build();
+    } catch (Exception e) {
+      return Health.down(e)
+          .withDetail("gateway", client.url())
+          .build();
+    }
+  }
+}
+```
+
+`health()` returns a `Health` built via `Health.up()`, `Health.down()`, `Health.outOfService()`, or `Health.unknown()`. Add diagnostic context with `.withDetail(...)`. The bean name minus the `HealthIndicator` suffix becomes the key in the JSON, so the example above appears under `paymentGateway`.
+
+## How aggregation works
+
+The overall status is the *worst* of all indicators, resolved by an ordered `StatusAggregator` (default order: `DOWN` > `OUT_OF_SERVICE` > `UP` > `UNKNOWN`). One `DOWN` indicator makes the whole endpoint `DOWN` and returns **HTTP 503**; all `UP` returns **200**.
+
+Details are hidden by default — callers see only `{"status":"UP"}`. Reveal them deliberately:
+
+```yaml
+management:
+  endpoint:
+    health:
+      show-details: when-authorized   # never | when-authorized | always
+```
+
+## Reactive and composite variants
+
+For WebFlux, implement `ReactiveHealthIndicator` returning `Mono<Health>` so a slow check doesn't block. To group several checks under one key, use `CompositeHealthContributor`. And keep checks **cheap and fast** — `/health` is polled every few seconds by Kubernetes; an expensive query inside an indicator becomes a self-inflicted load problem and can cascade into failed probes.
+
+<ProbeNote>Strong answers name the contract precisely — implement `HealthIndicator`, return `Health.up()`/`down()` — and the aggregation rule: any `DOWN` makes the endpoint 503. Mentioning `show-details: when-authorized` (details hidden by default) and "keep the check cheap because it's polled constantly" shows production awareness.</ProbeNote>

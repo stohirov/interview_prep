@@ -1,0 +1,46 @@
+**PITR lets you restore the cluster to *any arbitrary moment* — not just the time of your last backup — by replaying the write-ahead log forward from a base backup.** It's the answer to "someone ran a bad `DELETE` at 09:14, can we get back to 09:13?"
+
+## The two ingredients
+
+PITR needs exactly two things, captured continuously:
+
+1. A **physical base backup** — a `pg_basebackup` (or tool equivalent) taken at some point in the past.
+2. A **continuous archive of WAL segments** — every change since that base backup, shipped out via `archive_command`.
+
+The base is your starting state; the WAL is the journal of everything that happened afterward. Recovery = restore the base, then replay WAL up to a chosen stopping point.
+
+## How recovery works (PG12+)
+
+You restore the base backup into a fresh data directory, then tell PostgreSQL how to fetch archived WAL and where to stop. Since **PostgreSQL 12 there is no `recovery.conf`** — recovery settings live in `postgresql.conf` (or `postgresql.auto.conf`), and you signal recovery mode by creating an empty **`recovery.signal`** file.
+
+```ini
+# postgresql.conf
+restore_command = 'cp /archive/%f %p'
+recovery_target_time = '2026-06-02 09:13:00'
+recovery_target_action = 'promote'
+```
+
+```bash
+touch /var/lib/postgresql/17/main/recovery.signal
+pg_ctl start
+```
+
+On startup PostgreSQL replays WAL via `restore_command`, stops at `recovery_target_time`, and (with `recovery_target_action = 'promote'`) opens the database for writes. When recovery completes it removes `recovery.signal`.
+
+## Recovery targets
+
+You don't have to stop at a timestamp. Targets include:
+
+- `recovery_target_time` — a wall-clock instant (most common).
+- `recovery_target_lsn` — a precise WAL position.
+- `recovery_target_xid` — a specific transaction ID.
+- `recovery_target_name` — a label you created earlier with `pg_create_restore_point()`.
+- `recovery_target = 'immediate'` — stop as soon as the backup is consistent.
+
+<Callout kind="warn" title="Pick the time just before the mistake">
+For `recovery_target_time`, stop *before* the destructive statement, not at it. And because timestamps are inclusive/imprecise, an LSN or named restore point is more surgical when you know the exact boundary.
+</Callout>
+
+The payoff is a dramatically lower **RPO**: instead of losing everything since last night's dump, you lose only the WAL not yet archived — seconds, if archiving is healthy.
+
+<ProbeNote>Say "base backup + continuous WAL archiving + a recovery target." The PG12 detail — `recovery.signal` and settings in `postgresql.conf`, no more `recovery.conf` — proves you've actually done this on a modern version. Bonus: naming targets beyond just time (LSN, xid, named restore points).</ProbeNote>

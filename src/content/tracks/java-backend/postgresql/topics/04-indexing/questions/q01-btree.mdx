@@ -1,0 +1,38 @@
+**A B-tree is a balanced, ordered tree that keeps lookups, range scans, and sorted retrieval all at `O(log n)`** — and that breadth is exactly why PostgreSQL makes it the default. One structure answers `=`, `<`, `>`, `BETWEEN`, `IN`, `ORDER BY`, and `LIMIT`.
+
+## How it's structured
+
+The index is a tree of fixed-size pages. **Internal pages** hold separator keys that route a search; **leaf pages** hold the actual indexed keys, each paired with a TID (a `(page, offset)` pointer into the heap). The tree is kept *balanced* — every leaf sits at the same depth — so even a billion-row table is only a handful of page reads deep.
+
+The detail that makes range scans fast: leaf pages are **doubly linked**. Once a search descends to the first matching leaf, the scan walks the leaf chain left or right without re-descending the tree.
+
+```sql
+CREATE INDEX ON orders (created_at);
+-- descends once to created_at >= '2024-01-01',
+-- then walks leaves forward until the upper bound
+SELECT * FROM orders
+WHERE created_at >= '2024-01-01' AND created_at < '2024-02-01';
+```
+
+## A lookup, step by step
+
+```text
+root  → "customer_id < 5000 goes left"
+  ↓
+internal → "4200..4400 on this page"
+  ↓
+leaf  → key 4242 → TID (page 88, offset 3)
+  ↓
+heap  → fetch the actual row (skippable if index-only)
+```
+
+## Why it's the default
+
+- **Ordered**, so it serves both equality *and* ranges, and can satisfy `ORDER BY` directly — no sort node, which is what makes `ORDER BY ... LIMIT` so cheap.
+- **Self-balancing**, so performance stays predictable as the table grows.
+- Backs **primary keys and unique constraints** — `UNIQUE`/`PRIMARY KEY` build a B-tree automatically.
+- Handles **`NULL`s** and multi-column (composite) keys.
+
+The one thing it can't beat is a specialized method on its own turf: containment queries (`@>` on jsonb/arrays) want GIN, geometry and ranges want GiST, and a huge append-only table wants BRIN. But if you don't know which index to use, B-tree is almost always the correct first guess.
+
+<ProbeNote>Strong answers name the balanced tree and the linked leaf pages (why ranges and `ORDER BY` are cheap), and connect "default" to the fact that one structure covers equality, ranges, and ordering. Bonus: noting that primary keys and unique constraints are B-trees under the hood.</ProbeNote>

@@ -1,0 +1,43 @@
+**A row version is one physical *tuple* in the heap, and its visibility is governed by two hidden system columns: `xmin` (the transaction that created it) and `xmax` (the transaction that expired it).** These two transaction IDs are how MVCC decides which version each snapshot sees.
+
+## xmin and xmax
+
+Every tuple carries hidden columns you can `SELECT` explicitly:
+
+- **`xmin`** — the transaction ID (XID) of the transaction that **inserted** (created) this tuple.
+- **`xmax`** — the XID of the transaction that **deleted or updated-away** this tuple, expiring it. It's `0` while the tuple is still live.
+
+```sql
+SELECT xmin, xmax, * FROM products WHERE id = 5;
+--  xmin | xmax | id | price
+--   205 |    0 |  5 |   120     <- live: created by txn 205, not yet expired
+```
+
+## How an UPDATE moves them
+
+An `UPDATE` is internally a delete-plus-insert at the tuple level:
+
+```text
+Before:  (xmin=100, xmax=0)    price=100      <- live
+UPDATE by txn 205 ->
+  old:   (xmin=100, xmax=205)  price=100      <- expired by 205
+  new:   (xmin=205, xmax=0)    price=120      <- live, created by 205
+```
+
+The old tuple now has `xmax=205`; a new tuple appears with `xmin=205`. The two are linked (via `ctid`/`t_ctid`) into a version chain.
+
+## How visibility uses them
+
+For a tuple to be **visible** to a transaction's snapshot, roughly: its `xmin` must belong to a transaction that **committed** and is in the snapshot's past, *and* its `xmax` must be `0`/aborted/in-the-future (i.e., not yet deleted from this snapshot's view). Combined with **commit status** (from the commit log, `pg_xact`) and **hint bits** that cache that status on the tuple, this lets PostgreSQL answer "can I see this version?" cheaply.
+
+## Related fields worth a mention
+
+- **`ctid`** — the physical location `(page, offset)` of the tuple; changes when the row is updated (the new version lives elsewhere). Not a stable row identity.
+- **`cmin`/`cmax`** — command IDs distinguishing changes *within* a single transaction.
+- **`xmax` also doubles as a lock holder** for `SELECT ... FOR UPDATE`, with infomask bits marking it as a lock rather than a delete.
+
+<Callout kind="warn" title="xmin/xmax are 32-bit — and that matters">
+These XIDs are 32-bit counters. After ~2 billion transactions they would wrap around, making old committed rows appear to be from the *future* and thus invisible. PostgreSQL prevents this by **freezing** old tuples (giving them a special always-visible status) during `VACUUM` — the direct link from this question to txid wraparound.
+</Callout>
+
+<ProbeNote>Define `xmin`/`xmax` precisely (creator XID / expirer XID), show that an UPDATE expires the old and creates a new tuple, and connect visibility to commit status. Naming `ctid` and noting the 32-bit XID → freezing/wraparound link demonstrates you understand the storage layer, not just the concept.</ProbeNote>

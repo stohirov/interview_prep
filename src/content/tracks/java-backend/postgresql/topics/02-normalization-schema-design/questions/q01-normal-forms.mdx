@@ -1,0 +1,51 @@
+**Each normal form removes a specific class of redundancy, and the key phrase that ties them together is "the key, the whole key, and nothing but the key."** The cleanest way to answer is to take one ugly table and fix one problem per step.
+
+Start with a denormalized order table:
+
+```text
+order_id | customer | products            | cust_city | sales_rep | rep_phone
+1        | Acme     | "A-100, B-200"      | Boston    | Smith     | 555-1000
+2        | Globex   | "A-100"             | Reno      | Jones     | 555-2000
+```
+
+## 1NF — atomic values, no repeating groups
+
+Every column holds a single value; no comma-lists, no arrays standing in for rows. `products` violates this. Split the multi-valued column into multiple rows (or a child table) so each cell is atomic:
+
+```text
+order_id | product | customer | cust_city | sales_rep | rep_phone
+1        | A-100   | Acme     | Boston    | Smith     | 555-1000
+1        | B-200   | Acme     | Boston    | Smith     | 555-1000
+2        | A-100   | Globex   | Reno      | Jones     | 555-2000
+```
+
+The primary key is now the composite `(order_id, product)`.
+
+## 2NF — no partial dependencies on a composite key
+
+2NF only bites when the key is composite. A non-key column must depend on the *whole* key, not part of it. Here `customer`, `cust_city`, `sales_rep` depend on `order_id` alone — not on `product`. That's a partial dependency. Split it out:
+
+```text
+orders:       order_id | customer | cust_city | sales_rep | rep_phone
+order_items:  order_id | product
+```
+
+## 3NF — no transitive dependencies
+
+A non-key column must depend on the key *directly*, not via another non-key column. In `orders`, `rep_phone` depends on `sales_rep`, which depends on `order_id` — a transitive chain. And `cust_city` depends on `customer`. Pull each into its own table:
+
+```text
+orders:    order_id | customer_id | sales_rep_id
+customers: customer_id | name | city
+reps:      sales_rep_id | name | phone
+```
+
+Now every non-key column depends on its table's key, the whole key, and nothing but the key.
+
+## BCNF — every determinant is a candidate key
+
+BCNF is the stricter version of 3NF: for *every* functional dependency X → Y, X must be a candidate key. It catches the rare case where a non-key attribute determines part of a candidate key. Example: a `(student, course) → instructor` table where each instructor teaches exactly one course, so `instructor → course`. That dependency has a determinant (`instructor`) that isn't a candidate key, so it's 3NF but not BCNF. Decompose into `(student, instructor)` and `(instructor, course)`.
+
+In practice 3NF and BCNF coincide for the vast majority of schemas; BCNF only diverges with overlapping candidate keys.
+
+<ProbeNote>Interviewers want the *progression*, not memorized definitions. Nail the mnemonic ("key, whole key, nothing but the key" = 1NF/2NF/3NF), explain that 2NF only applies to composite keys, and know that BCNF tightens 3NF so every determinant is a candidate key — and that the two usually agree.</ProbeNote>

@@ -1,0 +1,27 @@
+**`@Transactional(readOnly = true)` is *not* a no-op and it does *not* make the database reject writes by itself — it's a hint that flows down to the JDBC driver and the persistence provider to skip work that only matters for writes.** The biggest win is on the Hibernate/JPA side.
+
+## What it actually does
+
+**1. Hibernate flush mode → `MANUAL` and no dirty checking.** This is the real payoff. In a read-only transaction Hibernate sets the flush mode so it won't auto-flush, and — more importantly — it doesn't take a **snapshot** of loaded entities for dirty checking. Normally Hibernate copies every loaded entity's state so it can detect changes at flush; in read-only mode it skips that, cutting memory and CPU for read-heavy queries.
+
+```java
+@Transactional(readOnly = true)
+public List<OrderView> recentOrders(long customerId) {
+    return orderRepo.findRecent(customerId);   // no dirty-check snapshots, no flush
+    // modifying a returned entity here will NOT be persisted
+}
+```
+
+**2. JDBC `Connection.setReadOnly(true)`.** Spring calls this on the connection. It's advisory — the driver/DB *may* optimize (skip some locking/WAL bookkeeping) but isn't required to. On PostgreSQL it can also matter for routing: a read-only connection can be safely sent to a **replica**.
+
+**3. Routing to read replicas.** Combined with an `AbstractRoutingDataSource`, the read-only flag is the natural signal to route the transaction to a standby/read replica, offloading the primary.
+
+## What it does *not* do
+
+It is **not a write guard**. Postgres will still execute an `UPDATE` on a normal connection even if `setReadOnly(true)` was called *unless* the server actually enforces it (e.g. the statement hits a hot-standby, which *does* reject writes). Don't rely on `readOnly = true` for security; treat it as a performance and routing hint.
+
+<Callout kind="info" title="Still a real transaction">
+`readOnly = true` still opens a transaction — propagation, isolation, and a consistent snapshot all apply. It's the right choice for multi-query reads that must be consistent (report building), where you get snapshot consistency *and* the dirty-checking savings.
+</Callout>
+
+<ProbeNote>The trap answer is "it just prevents writes." The senior answer: it's a hint — Hibernate skips dirty-check snapshots and auto-flush (the main win), `Connection.setReadOnly(true)` is advisory and enables replica routing, and it is *not* a hard write guard.</ProbeNote>

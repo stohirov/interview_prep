@@ -1,0 +1,48 @@
+**`to_tsquery` is powerful but unforgiving of raw user input; the `*to_tsquery` family exists to turn human-typed text into a valid `tsquery` safely.** Picking the right constructor is mostly about what the input looks like and how much boolean control you want.
+
+## @@ — the match operator
+
+`@@` returns boolean: does the `tsvector` satisfy the `tsquery`? Everything below produces the right-hand `tsquery`; `@@` does the comparison.
+
+```sql
+WHERE search_vec @@ websearch_to_tsquery('english', :userInput)
+```
+
+## to_tsquery — full operator syntax, throws on bad input
+
+You write the operators yourself: `&` `|` `!` `<->`. It's precise but **raises an error** on unbalanced or malformed input, so never feed it raw user text.
+
+```sql
+to_tsquery('english', 'fox & (quick | brown) & !slow')
+```
+
+## plainto_tsquery — plain words, all ANDed
+
+Takes arbitrary text, ignores punctuation/operators, and joins the resulting lexemes with **`&`**. Safe for user input, but you can't express OR or phrases.
+
+```sql
+plainto_tsquery('english', 'quick brown fox')   -- 'quick' & 'brown' & 'fox'
+```
+
+## phraseto_tsquery — words must be adjacent
+
+Like `plainto_tsquery` but joins lexemes with **`<->`** so they must appear *in order, adjacent*. This is how you do exact-phrase search.
+
+```sql
+phraseto_tsquery('english', 'quick brown fox')   -- 'quick' <-> 'brown' <-> 'fox'
+```
+
+## websearch_to_tsquery — Google-style syntax
+
+Accepts the syntax users already know: **unquoted words** are ANDed, **`"quoted phrases"`** become `<->`, **`or`** becomes `|`, and a **leading `-`** becomes `!`. Never errors on bad input. This is the right default for a search box.
+
+```sql
+websearch_to_tsquery('english', 'postgres "full text" or sql -mysql');
+-- 'postgr' & ('full' <-> 'text') & 'sql' & !'mysql'
+```
+
+<Callout kind="info" title="Which to use">
+Use **`websearch_to_tsquery`** for end-user search boxes (safe, familiar syntax). Use **`plainto_tsquery`** for simple keyword filters, **`phraseto_tsquery`** for exact phrases, and **`to_tsquery`** only for queries you construct yourself.
+</Callout>
+
+<ProbeNote>The interviewer wants you to know that `to_tsquery` errors on malformed input so it's unsafe for user text, and that `websearch_to_tsquery` is the modern, error-proof choice for a search box (quotes → phrase, `or`, `-` → NOT). Knowing `plainto_` ANDs words and `phraseto_` makes them adjacent shows you understand the operator each one generates.</ProbeNote>

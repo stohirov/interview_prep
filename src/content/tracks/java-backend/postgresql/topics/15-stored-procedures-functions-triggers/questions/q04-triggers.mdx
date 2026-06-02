@@ -1,0 +1,45 @@
+**A trigger is a function that fires automatically on a DML event, and three axes define its behavior: *timing* (`BEFORE`/`AFTER`/`INSTEAD OF`), *granularity* (row-level `FOR EACH ROW` vs statement-level `FOR EACH STATEMENT`), and the *event* (`INSERT`/`UPDATE`/`DELETE`/`TRUNCATE`).** The trigger function is written in PL/pgSQL (or another language), takes no SQL args, and returns the special type `trigger`.
+
+## Timing
+
+**`BEFORE`** — fires before the row is written. This is the only timing where you can **modify the row**: the function returns a (possibly altered) `NEW`, and that's what gets stored. Use it for normalization, defaulting, and validation. Returning `NULL` from a BEFORE row trigger silently *skips* the operation for that row.
+
+```sql
+CREATE FUNCTION set_updated_at() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  NEW.updated_at := now();
+  RETURN NEW;            -- the modified row is what gets written
+END $$;
+
+CREATE TRIGGER trg_updated
+BEFORE UPDATE ON accounts
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+```
+
+**`AFTER`** — fires after the row is written; you can't change `NEW` anymore (the write already happened). Use it for side effects that need the final committed-shape data: audit logging, enqueuing notifications, maintaining a denormalized aggregate. Its return value is ignored.
+
+**`INSTEAD OF`** — only valid on **views**, and only `FOR EACH ROW`. It *replaces* the operation, letting you make a non-updatable view writable by translating an `INSERT`/`UPDATE`/`DELETE` on the view into DML against the base tables.
+
+## Granularity
+
+**Row-level (`FOR EACH ROW`)** fires once per affected row and exposes `OLD`/`NEW`. An `UPDATE` hitting 10,000 rows runs it 10,000 times — beware the cost.
+
+**Statement-level (`FOR EACH STATEMENT`)** fires once per statement regardless of row count (even zero rows). Classic uses: a single audit entry per statement, or enforcing a check across the whole change set. Since PG10 you can access the affected rows via **transition tables**:
+
+```sql
+CREATE TRIGGER trg_audit
+AFTER UPDATE ON accounts
+REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows
+FOR EACH STATEMENT EXECUTE FUNCTION audit_changes();
+```
+
+## Ordering and special variables
+
+When multiple triggers match the same event, they fire in **alphabetical order by name** — a real gotcha worth naming deliberately. Inside the function, `TG_OP`, `TG_TABLE_NAME`, `TG_WHEN`, and the `OLD`/`NEW` records tell you the context.
+
+<Callout kind="info" title="The return-value rules">
+`BEFORE FOR EACH ROW`: return `NEW` (or a modified copy) to proceed, `NULL` to skip the row. `AFTER` and statement-level triggers: return value is ignored (return `NULL`). `INSTEAD OF`: return a non-null row to signal the operation was handled.
+</Callout>
+
+<ProbeNote>They're checking you know `BEFORE` is the only place you can mutate the row, `INSTEAD OF` is views-only, and the row-vs-statement firing-count difference (with transition tables for statement-level access to changed rows). Knowing triggers fire in alphabetical order is the detail that separates rote from real experience.</ProbeNote>

@@ -1,0 +1,38 @@
+**A GraalVM native image is your Spring app compiled ahead-of-time into a standalone native executable — no JVM at runtime.** The win is startup in tens of milliseconds and a fraction of the memory; the cost is a closed-world model that fights everything Spring traditionally does at runtime.
+
+## What AOT compilation means here
+
+Normally the JVM loads bytecode and JIT-compiles hot paths *while running*. GraalVM's `native-image` tool instead does **ahead-of-time** compilation: it statically analyzes the *entire* reachable program at build time and produces a native binary. This is a **closed-world assumption** — anything not provable as reachable at build time simply isn't included.
+
+Spring adds its own **AOT processing** step (`Spring AOT`, run by the Boot plugin) that executes *before* GraalVM. It starts your `ApplicationContext` at build time, evaluates conditions and auto-configuration, and emits generated `@Bean` factory code plus **`RuntimeHints`** describing the reflection, resources, and proxies the app needs.
+
+```java
+@Configuration
+@ImportRuntimeHints(MyApp.Hints.class)
+class MyApp {
+    static class Hints implements RuntimeHintsRegistrar {
+        public void registerHints(RuntimeHints hints, ClassLoader cl) {
+            hints.reflection().registerType(SomeDto.class,
+                MemberCategory.INVOKE_DECLARED_CONSTRUCTORS);
+        }
+    }
+}
+// Or, for serialization/binding targets:
+@RegisterReflectionForBinding(SomeDto.class)
+```
+
+## The limits — what breaks without hints
+
+GraalVM can't see code reached *only* via runtime mechanisms, so these need explicit hints:
+
+- **Reflection** — fields/methods/constructors looked up by name (JSON binding, JPA).
+- **Dynamic proxies** — JDK proxies (`@Transactional`, `@Cacheable`, repository interfaces, `@HttpExchange`).
+- **Runtime classpath scanning** and resource loading (`classpath*:` patterns, `.properties`).
+
+Spring's AOT generates most of these hints for you. Where it can't infer them — your own reflection, a non-Spring library — you supply them via `RuntimeHints` / `@RegisterReflectionForBinding`, or run the GraalVM **tracing agent** to record what's actually used.
+
+<Callout kind="warn" title="The real-world tradeoffs">
+Native image gives fast startup and low memory (great for serverless/scale-to-zero), but: the build is *slow* (minutes), peak throughput can trail a warmed-up JIT, and the closed-world model means *no* runtime classpath surprises — a dependency that reflects without hints fails at runtime, not compile time.
+</Callout>
+
+<ProbeNote>Two things prove depth: (1) name the AOT split — Spring AOT generates hints at build time, then GraalVM does the closed-world native compile; (2) list the three things needing hints — reflection, dynamic proxies, runtime scanning — and the escape hatches (`RuntimeHints`, `@RegisterReflectionForBinding`, the tracing agent). Don't oversell it: slower build, weaker peak throughput.</ProbeNote>

@@ -1,0 +1,30 @@
+Spring Boot's headline feature is **auto-configuration**: instead of you writing the boilerplate `@Bean` definitions for a `DataSource`, a `DispatcherServlet`, a Jackson `ObjectMapper`, Boot ships dozens of *conditional* configuration classes that configure those beans **only when it makes sense** — the right library is on the classpath, you haven't already defined the bean yourself, and the relevant properties are set. The whole mechanism is "convention over configuration" made mechanical: sensible defaults you can always override.
+
+The entry point is `@EnableAutoConfiguration` (folded into `@SpringBootApplication`). It triggers an import of every auto-configuration class Boot can find, each guarded by `@Conditional` annotations:
+
+```java
+@AutoConfiguration
+@ConditionalOnClass(DataSource.class)
+@ConditionalOnMissingBean(DataSource.class)
+@EnableConfigurationProperties(DataSourceProperties.class)
+public class DataSourceAutoConfiguration {
+    // contributes a DataSource bean only if all conditions pass
+}
+```
+
+Boot discovers these classes from a list inside each starter jar — in Boot 3 that file is `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` (the old `spring.factories` `EnableAutoConfiguration` key was **removed** in Boot 3). At startup, every listed class is evaluated; its `@Conditional` guards decide whether it actually contributes beans.
+
+The pieces that make this usable day to day:
+
+- **Starters** — dependency aggregators like `spring-boot-starter-web` that pull in a curated, version-aligned set of jars (and thus the auto-config classes that react to them).
+- **Properties** — `application.properties`/`application.yml` feed values into auto-config via `@ConfigurationProperties` (typed, bulk, relaxed binding) or `@Value` (single SpEL expression).
+- **Profiles** — `@Profile` and `spring.profiles.active` swap configuration per environment.
+- **Conditions** — `@ConditionalOnClass`, `@ConditionalOnMissingBean`, `@ConditionalOnProperty`, `@ConditionalOnWebApplication` and friends are how every decision is made — including yours, once you write your own `@AutoConfiguration`.
+
+When something is configured (or *isn't*) and you don't know why, run with `--debug` to print the **conditions evaluation report**: a list of which auto-configurations matched, which didn't, and the exact condition that decided it.
+
+<Callout kind="tip" title="The interview hook">
+Frame it as a decision engine: "Auto-configuration is a pile of `@Conditional`-guarded `@Configuration` classes that Boot finds via `AutoConfiguration.imports` and evaluates against the classpath, my existing beans, and my properties. Nothing is magic — `--debug` shows me the exact condition that fired or didn't, and my own `@Bean` always wins because of `@ConditionalOnMissingBean`."
+</Callout>
+
+The questions below decompose `@SpringBootApplication`, the property hierarchy, profiles, `@ConfigurationProperties` vs `@Value`, starters, the imports-file discovery mechanism, every `@Conditional` variant, writing your own auto-config, and debugging it all.

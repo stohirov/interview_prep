@@ -1,0 +1,24 @@
+**Spring Boot Actuator turns your application into something you can *interrogate at runtime* — health, metrics, configuration, threads, loggers — over HTTP or JMX, without writing the plumbing yourself.** It's the production-readiness half of Boot: auto-configuration gets the app running; Actuator tells you whether it's *healthy* once it is. Add `spring-boot-starter-actuator` and a set of endpoints appears under `/actuator`.
+
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+```
+
+The critical default to know: **only `/health` and `/info` are exposed over HTTP** out of the box. Everything else — `/metrics`, `/env`, `/loggers`, `/threaddump`, `/heapdump`, `/prometheus` — must be opted in via `management.endpoints.web.exposure.include`. That default is deliberate: `/env` and `/heapdump` leak secrets and memory, so you never expose them blindly.
+
+Observability rests on three pillars, and Actuator wires up all three. **Metrics** run through **Micrometer**, a vendor-neutral facade (think SLF4J, but for meters) that publishes to Prometheus, Datadog, CloudWatch, and others. **Health** is assembled from `HealthIndicator` beans — Boot ships ones for the datasource, disk, Redis, etc., and you add your own. **Tracing** uses **Micrometer Tracing** (which replaced Spring Cloud Sleuth in Boot 3), bridging to OpenTelemetry or Brave/Zipkin to propagate trace IDs across services.
+
+In Kubernetes, the health endpoint splits into **liveness** (`/actuator/health/liveness`) and **readiness** (`/actuator/health/readiness`) probes, driven by Spring's `AvailabilityState`. A failing liveness probe restarts the pod; a failing readiness probe pulls it from the load balancer — two very different remediations.
+
+<Callout kind="tip" title="The interview hook">
+Describe Actuator as "the runtime-introspection and observability layer," then immediately name the safety default: only `/health` and `/info` are HTTP-exposed; the rest is opt-in *because* endpoints like `/env` and `/heapdump` expose secrets. That one fact signals you've run Actuator in production, not just in a demo.
+</Callout>
+
+The questions below cover the endpoint catalogue, custom health indicators, Micrometer's meter types, distributed tracing, locking endpoints down for production, and the liveness-versus-readiness distinction that trips people up in Kubernetes.

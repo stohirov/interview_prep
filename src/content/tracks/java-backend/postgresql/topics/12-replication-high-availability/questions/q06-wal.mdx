@@ -1,0 +1,29 @@
+**The WAL (Write-Ahead Log) is the ordered, append-only record of every change made to the cluster, written *before* the change is applied to the data files — and it is the single foundation that durability, crash recovery, and all replication are built on.** If you understand WAL, replication stops being magic.
+
+## The write-ahead rule
+
+The core principle: a change is recorded in the WAL and that WAL record is **flushed to disk before** the corresponding data page is allowed to hit disk. This is the "write-ahead" guarantee. Because the durable WAL always describes intended changes ahead of the actual pages, the system can always reconstruct a consistent state.
+
+This is what makes commits both **durable and fast**. On `COMMIT`, PostgreSQL only needs to fsync the small, sequential WAL record — not the scattered, random data pages those changes touched. The dirty data pages are flushed lazily later by background writers and checkpoints. Sequential WAL writes are far cheaper than random data-file writes.
+
+## Crash recovery
+
+After a crash, the data files may be missing recently committed changes (those pages hadn't been flushed yet). On restart PostgreSQL **replays the WAL** forward from the last checkpoint, re-applying every committed change, until the cluster is consistent again. No committed transaction is lost.
+
+```text
+change happens → WAL record written & flushed → COMMIT returns
+                              ↓
+        data pages flushed later (checkpoint / bgwriter)
+        crash? → replay WAL from last checkpoint → consistent
+```
+
+## How this becomes replication
+
+Here's the connecting insight: **WAL replay is exactly what a standby does, continuously.** A standby is a server in perpetual recovery — instead of replaying WAL only after a crash, it streams the primary's WAL and replays it forever.
+
+- **Physical (streaming) replication** ships the WAL **byte-for-byte**; the standby applies the same block-level changes.
+- **Logical replication** runs the WAL through **logical decoding**, turning those byte-level records into row-level change events.
+
+So both replication families are just two ways of consuming the same WAL stream. A few related terms worth naming: **LSN** (Log Sequence Number — a position in the WAL byte stream, used to measure lag), **checkpoint** (the point up to which data files are known flushed, bounding recovery time), and **WAL segments** (the 16 MB files in `pg_wal/`).
+
+<ProbeNote>The winning framing is "WAL is the write-ahead change log that gives durability and crash recovery — and a standby is just a server permanently replaying the primary's WAL." Connecting physical (byte-level) and logical (decoded) replication as two consumers of the *same* WAL stream, and naming LSN as the position used to measure lag, shows real depth.</ProbeNote>

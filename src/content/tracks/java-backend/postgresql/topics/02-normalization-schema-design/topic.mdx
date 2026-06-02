@@ -1,0 +1,31 @@
+Schema design is the highest-leverage decision you make in a relational database: **a good schema makes correctness the default and bad data physically impossible to insert, while a bad one pushes integrity into application code where it rots.** Normalization is the formal discipline behind that — a sequence of rules (1NF through BCNF and beyond) whose single underlying goal is to eliminate *redundancy*, because every redundant copy of a fact is a chance for two copies to disagree.
+
+The core insight is that **anomalies come from storing the same fact in more than one place.** An update anomaly: you change a customer's address in one row but miss the other twelve. An insertion anomaly: you can't record a new product because you don't yet have an order to attach it to. A deletion anomaly: removing the last order for a customer also erases the customer. Normalization removes these by ensuring every non-key column depends on *the key, the whole key, and nothing but the key* — Codd's famous shorthand for 3NF.
+
+```sql
+-- Denormalized: customer name repeated on every order, address can drift
+CREATE TABLE orders (
+  id            bigserial PRIMARY KEY,
+  customer_name text,
+  customer_city text,
+  product_sku   text,
+  product_name  text,   -- repeated for every order of this product
+  qty           int
+);
+
+-- Normalized: each fact lives in exactly one place
+CREATE TABLE customers (id bigserial PRIMARY KEY, name text, city text);
+CREATE TABLE products  (sku text PRIMARY KEY, name text);
+CREATE TABLE orders (
+  id          bigserial PRIMARY KEY,
+  customer_id bigint REFERENCES customers,
+  product_sku text   REFERENCES products,
+  qty         int
+);
+```
+
+Normalization is the *default*, not a religion. You start normalized for correctness, then **denormalize deliberately** — with a measured read problem and a plan to keep the copies consistent. The questions below walk a table through each normal form, cover when denormalization pays, how to model every relationship cardinality (including the tricky polymorphic and many-to-many cases), and the key-design debates: surrogate vs natural keys, and why UUID v7 beats v4 for B-tree primary keys.
+
+<Callout kind="tip" title="The interview hook">
+Frame it as a trade-off, not a checklist: "I normalize to 3NF/BCNF by default because it makes anomalies impossible and integrity declarative. I denormalize only against a measured read problem, and only with a concrete strategy — trigger, materialized view, or app-side write — to keep the duplicated data in sync."
+</Callout>

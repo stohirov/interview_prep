@@ -1,0 +1,41 @@
+**`pg_stat_statements` is the extension that aggregates execution statistics per normalized query, and it is *the* answer to "how do you find slow queries in production?"** EXPLAIN tells you about one query you already suspect; `pg_stat_statements` tells you which queries to suspect.
+
+## What it does
+
+It's a contrib extension that records, for every statement, a **normalized** form (constants replaced by `$1`, `$2`, …) so that `WHERE id = 1` and `WHERE id = 2` collapse into one entry. For each entry it tracks total and mean execution time, call count, rows returned, and buffer/I/O stats.
+
+```sql
+CREATE EXTENSION pg_stat_statements;   -- and add it to shared_preload_libraries, then restart
+```
+
+## The query that finds your worst offenders
+
+```sql
+SELECT
+  substring(query, 1, 80) AS query,
+  calls,
+  round(total_exec_time::numeric, 1) AS total_ms,
+  round(mean_exec_time::numeric, 2)  AS mean_ms,
+  rows
+FROM pg_stat_statements
+ORDER BY total_exec_time DESC
+LIMIT 20;
+```
+
+## The key insight: sort by total, not mean
+
+The most important tuning win is usually **not** the slowest single query. Sort by **`total_exec_time`** (`mean × calls`) to find what consumes the most database time overall. A 5 ms query called 2 million times an hour hurts far more than a 2-second report run nightly. This "death by a thousand cuts" framing is exactly what interviewers want to hear.
+
+<Callout kind="tip" title="Reset to measure a window">
+`SELECT pg_stat_statements_reset();` zeroes the counters. Reset, wait through a representative period, then read — now the numbers describe *that window* instead of all-time-since-restart.
+</Callout>
+
+## How it fits the workflow
+
+1. **`pg_stat_statements`** → which normalized queries dominate total time.
+2. **`EXPLAIN (ANALYZE, BUFFERS)`** on a representative instance of the worst one → *why* it's slow.
+3. Fix (index, rewrite, fix the estimate), deploy, then re-check the rankings.
+
+Complementary tools worth naming: **`auto_explain`** (logs the actual plan of any statement exceeding a duration threshold — catches plans you can't reproduce), and `pg_stat_activity` for what's running *right now*.
+
+<ProbeNote>The signal is that you reach for `pg_stat_statements` first and sort by **total** time, not mean — showing you optimize for aggregate database load, not just the scariest-looking single query. Mentioning `auto_explain` for capturing real production plans is a senior tell.</ProbeNote>

@@ -1,0 +1,43 @@
+**GIN — Generalized Inverted Index — is the index for "does this value *contain* that?" queries over composite values: jsonb, arrays, and full-text.** Where a B-tree maps one key to one row, GIN maps each *element inside* a value (each array member, each jsonb key/value, each lexeme) to the list of rows containing it — an inverted index, exactly like a search engine.
+
+## What it indexes
+
+A single column value is decomposed into many keys, and each key points to the rows that hold it. So a query for "rows containing element X" becomes one lookup, not a scan.
+
+```sql
+-- arrays: "tag contains 'sql'?"
+CREATE INDEX ON posts USING gin (tags);
+SELECT * FROM posts WHERE tags @> ARRAY['sql'];
+
+-- jsonb: containment and key/path existence
+CREATE INDEX ON events USING gin (payload jsonb_path_ops);
+SELECT * FROM events WHERE payload @> '{"type":"signup"}';
+
+-- full-text search
+CREATE INDEX ON docs USING gin (to_tsvector('english', body));
+SELECT * FROM docs
+WHERE to_tsvector('english', body) @@ to_tsquery('english', 'postgres & index');
+```
+
+## The operators it accelerates
+
+GIN backs the *containment / membership* operators, not equality on the whole value:
+
+- arrays: `@>` (contains), `<@` (contained by), `&&` (overlaps).
+- jsonb: `@>`, `?`, `?|`, `?&` (key existence), and `@@`/`@?` jsonpath.
+- full-text: `@@` matching `tsvector` against `tsquery`.
+
+<Callout kind="tip" title="jsonb_path_ops">
+For jsonb that you only query with `@>` containment, the `jsonb_path_ops` operator class produces a **smaller, faster** index than the default `jsonb_ops` — it just doesn't support key-existence (`?`) operators. Pick it when you only do containment.
+</Callout>
+
+## The trade-off
+
+GIN is built for **read-heavy** containment workloads. Its weakness is write cost: inserting one row can touch many index keys.
+
+- Mitigated by the **`fastupdate`** mechanism, which buffers new entries in a pending list and flushes them in bulk (during `VACUUM` or when the list fills).
+- This makes individual writes cheap but means a query may have to scan that pending list too.
+
+If you need *nearest-neighbor* or *range* semantics rather than containment, that's GiST territory, not GIN.
+
+<ProbeNote>Interviewers want "inverted index → containment" and at least one concrete use: jsonb `@>`, array membership, or full-text `@@`. Mentioning `jsonb_path_ops` for smaller containment indexes, or GIN's slower-write / `fastupdate` trade-off, marks you as someone who's actually run it in production.</ProbeNote>

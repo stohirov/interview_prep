@@ -1,0 +1,47 @@
+**The core problem: a Testcontainer's connection details (URL, port, credentials) aren't known until the container *starts* at runtime, but Spring resolves `@Value`/properties when the context builds.** `@DynamicPropertySource` and `@ServiceConnection` are the two bridges that feed runtime container values into the Spring `Environment`.
+
+## @DynamicPropertySource — the general bridge
+
+A `static` method annotated `@DynamicPropertySource` receives a `DynamicPropertyRegistry`. It runs *after* the container starts but *before* the context's properties are finalized, so you can register property suppliers that pull live values from the container:
+
+```java
+@SpringBootTest
+@Testcontainers
+class OrderRepositoryIT {
+
+    @Container
+    static PostgreSQLContainer<?> postgres =
+        new PostgreSQLContainer<>("postgres:16");
+
+    @DynamicPropertySource
+    static void props(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", postgres::getJdbcUrl);
+        registry.add("spring.datasource.username", postgres::getUsername);
+        registry.add("spring.datasource.password", postgres::getPassword);
+    }
+}
+```
+
+Two details matter. The method **must be `static`** (it runs before any instance exists), and you register **suppliers** (method references / lambdas), not plain values — they're evaluated lazily, after the container is up. This works for *anything*: a Kafka container's bootstrap servers, a Redis host/port, a custom service's URL.
+
+## @ServiceConnection — the modern shortcut (Boot 3.1+)
+
+For supported container types, Spring Boot 3.1 added `@ServiceConnection`, which **eliminates the boilerplate entirely**. Annotate the container and Boot detects its type (Postgres, Kafka, Redis, MongoDB, RabbitMQ, …) and auto-registers the right connection properties via a `ConnectionDetails` bean — no manual property names to get wrong.
+
+```java
+@Container
+@ServiceConnection
+static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16");
+// No @DynamicPropertySource needed — URL/user/password wired automatically.
+```
+
+## Which to use
+
+- **`@ServiceConnection`** — first choice whenever the container type is supported. Less code, no chance of a typo'd property key, and it sets the *right* keys for that technology.
+- **`@DynamicPropertySource`** — the fallback for unsupported containers, custom services, or when you need to compute a non-standard property (e.g. a constructed URL with extra params).
+
+<Callout kind="tip" title="Pairing with a static container">
+Both work with a `static` container so it starts once per class. Keep the container static *and* the wiring static — a non-static container would restart per method and the property suppliers would point at a dead instance.
+</Callout>
+
+<ProbeNote>The probe is understanding *why* a supplier (not a literal) and *why* static: the container's port is random and assigned at startup, after the field initializes but the values must be lazy. Knowing `@ServiceConnection` superseded most manual `@DynamicPropertySource` usage in Boot 3.1+ shows current knowledge.</ProbeNote>

@@ -1,0 +1,34 @@
+**`@Query` lets you write the query explicitly when a derived method won't do — and it comes in two flavours: JPQL (the default) and native SQL.** The choice between them is about portability versus power.
+
+## JPQL — the default
+
+JPQL is an object query language: you query *entities and their fields*, not tables and columns. Hibernate translates it to the dialect's SQL at runtime.
+
+```java
+@Query("SELECT u FROM User u WHERE u.email = :email AND u.status = :status")
+List<User> find(@Param("email") String email, @Param("status") Status status);
+```
+
+Note `User` (the entity) and `u.email` (a field), not `users`/`email`. Because Hibernate generates the SQL, JPQL is **database-portable**, participates fully in the persistence context (results are managed entities), respects entity mappings, and you can `JOIN FETCH` to solve N+1. You can bind parameters by name (`:email` + `@Param`) or by position (`?1`).
+
+## Native query — `nativeQuery = true`
+
+When you need vendor SQL — window functions, CTEs, `ON CONFLICT`, full-text, hints — drop to native:
+
+```java
+@Query(value = "SELECT * FROM users WHERE status = :status "
+             + "ORDER BY created_at DESC LIMIT 10", nativeQuery = true)
+List<User> recent(@Param("status") String status);
+```
+
+Native runs raw SQL against the database. The trade-offs: you reference **tables and columns** (not entities), it is **not portable** across vendors, and JPQL-only features like `JOIN FETCH` don't apply. You can still map rows back to a managed entity if the columns line up with the mapping, use a `@SqlResultSetMapping`, or — most commonly — map to a DTO/interface projection.
+
+<Callout kind="info" title="Modifying and paging caveats">
+A `@Query` that writes (UPDATE/DELETE) needs `@Modifying` (next question). For **native** paged queries Spring can't always derive the `count` query automatically — supply `countQuery = "..."` on `@Query`, otherwise `Pageable` may fail or count wrong.
+</Callout>
+
+## When to use which
+
+Default to **JPQL**: portable, type-aware, returns managed entities, supports `JOIN FETCH` and `@EntityGraph`. Reach for **native** only when JPQL can't express what you need or you must use a database-specific feature for performance. If you're using native purely to return a flat shape, prefer a **DTO projection** over a native query so you keep portability.
+
+<ProbeNote>Key distinctions: JPQL queries *entities*, is portable, and yields managed entities; native is raw vendor SQL, not portable, references tables/columns. Mention `@Param` named binding, that writes need `@Modifying`, and the native-paging `countQuery` gotcha.</ProbeNote>

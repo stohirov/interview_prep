@@ -1,0 +1,47 @@
+**Spring 6 added `@HttpExchange` — declarative HTTP clients defined as a Java interface, the same way Spring Data defines repositories.** You write an annotated interface, Spring generates the implementation, and for simple cases it removes the need for OpenFeign entirely.
+
+## Defining the client
+
+You describe the remote API as an interface; method signatures map to requests:
+
+```java
+public interface OrderClient {
+    @GetExchange("/orders/{id}")
+    Order getOrder(@PathVariable Long id);
+
+    @PostExchange("/orders")
+    Order create(@RequestBody NewOrder body);
+
+    @GetExchange("/orders")
+    List<Order> search(@RequestParam String status);
+}
+```
+
+`@HttpExchange` is the type-level base; `@GetExchange`, `@PostExchange`, etc. are HTTP-method shortcuts, mirroring `@GetMapping`/`@PostMapping` on the server side. Parameters use the same `@PathVariable`, `@RequestParam`, `@RequestBody` annotations you already know.
+
+## Wiring it up
+
+The interface needs a backing client. You create a proxy with `HttpServiceProxyFactory` over either a **`RestClient`** (synchronous) or **`WebClient`** (reactive):
+
+```java
+@Bean
+OrderClient orderClient(RestClient.Builder builder) {
+    RestClient client = builder.baseUrl("https://orders.internal").build();
+    var factory = HttpServiceProxyFactory
+        .builderFor(RestClientAdapter.create(client))
+        .build();
+    return factory.createClient(OrderClient.class);
+}
+```
+
+That adapter choice is the key flexibility: same interface, swap the transport.
+
+## How it compares to Feign
+
+This is "Feign for simple cases" because it covers the common ground — declarative interface, path/query/body binding, pluggable underlying client — *inside Spring itself*, with no Spring Cloud OpenFeign dependency and no extra annotation processor. What it does **not** bundle is Feign/Spring Cloud's richer ecosystem: load balancing, circuit breakers, retries, and per-client configuration. You add those yourself — e.g. a `RestClient` with a load-balanced interceptor or Resilience4j around the calls.
+
+<Callout kind="tip" title="When to pick which">
+Reach for `@HttpExchange` when you want a clean typed client and already control resilience another way (service mesh, gateway, Resilience4j). Stay on Spring Cloud OpenFeign when you specifically want its built-in load balancing and named-client config without assembling the pieces.
+</Callout>
+
+<ProbeNote>The probe is whether you know declarative HTTP clients are now *core Spring*, not a Spring Cloud add-on. Strong answers: interface + `@GetExchange`/`@PostExchange`, proxy built via `HttpServiceProxyFactory` over a `RestClient` *or* `WebClient` adapter, and the honest caveat — it replaces Feign for *simple* cases but doesn't bundle load balancing/circuit breaking, which you wire in separately.</ProbeNote>

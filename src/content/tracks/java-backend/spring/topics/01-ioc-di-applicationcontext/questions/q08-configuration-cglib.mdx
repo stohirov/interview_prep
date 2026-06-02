@@ -1,0 +1,44 @@
+**At runtime Spring does not use your `@Configuration` class directly — it creates a CGLIB subclass proxy of it, and that proxy intercepts every `@Bean` method call so that calling one `@Bean` method from another returns the *same singleton* instead of a new object.** This "inter-bean reference" behavior is the whole reason `@Configuration` exists as a distinct annotation, and it's a favorite senior probe.
+
+## The problem it solves
+
+Look at this configuration and ask: how many `DataSource` instances get created?
+
+```java
+@Configuration
+public class AppConfig {
+
+    @Bean
+    public DataSource dataSource() {
+        return new HikariDataSource(/* ... */);
+    }
+
+    @Bean
+    public OrderRepository orderRepository() {
+        return new OrderRepository(dataSource());   // <-- direct method call!
+    }
+
+    @Bean
+    public ReportService reportService() {
+        return new ReportService(dataSource());      // <-- another direct call!
+    }
+}
+```
+
+`dataSource()` is called **three** times by ordinary Java semantics (once by Spring, twice from the other methods). Without intervention you'd get three separate Hikari pools — a disaster. Yet with `@Configuration`, all three see the **same** single `DataSource`.
+
+## How the CGLIB proxy delivers that
+
+When Spring processes a `@Configuration` class, a `ConfigurationClassPostProcessor` "enhances" it by generating a **CGLIB subclass** at runtime. The subclass overrides each `@Bean` method. When code calls `dataSource()` from inside `orderRepository()`, it actually hits the proxy's override, which checks the container: *"has the `dataSource` singleton already been created? If yes, return the cached one; if not, invoke the real method, register the result, and return it."*
+
+So the direct method call is transparently rerouted through the container's singleton cache. That's why inter-`@Bean` calls respect bean scope — it's not normal Java method dispatch, it's a proxied lookup.
+
+## Why a subclass (and the constraint it imposes)
+
+CGLIB works by subclassing and overriding, which is why a `@Configuration` class (and its `@Bean` methods) **must not be `final`** and must not be `private` — there'd be nothing to override. This is also why `@Configuration` classes shouldn't be declared `final`.
+
+## The contrast
+
+A `@Bean` method declared inside a plain `@Component` (or any non-`@Configuration` class) is in **"lite mode"** — no CGLIB proxy, so a direct call to another `@Bean` method is just a normal Java call that creates a *new* instance, bypassing the container. That difference is exactly what the `proxyBeanMethods` flag controls.
+
+<ProbeNote>This separates people who *use* Spring from people who *understand* it. The expected answer: `@Configuration` classes are CGLIB-subclassed so inter-`@Bean` method calls are intercepted and return the cached singleton (not a `new` object). Mentioning that this forbids `final`/`private` `@Bean` methods, and that `@Bean` in a plain `@Component` is un-proxied "lite mode", is the senior finish.</ProbeNote>

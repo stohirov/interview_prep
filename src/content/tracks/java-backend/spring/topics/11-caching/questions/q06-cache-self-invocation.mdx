@@ -1,0 +1,46 @@
+**`@Cacheable` works through an AOP proxy, so when one method of a bean calls another `@Cacheable` method on `this`, the call never leaves the object — it bypasses the proxy and the cache annotation does *nothing*.** It's the exact same failure mode as `@Transactional`, for the exact same reason.
+
+## Why it breaks
+
+Spring doesn't modify your class bytecode. It wraps your bean in a proxy (CGLIB subclass or JDK dynamic proxy) and *injects the proxy* wherever the bean is autowired. The caching logic — key computation, cache lookup, store — lives in the proxy's method interception, not in your method body.
+
+A call from outside goes `caller -> proxy -> your method`, so the proxy runs. But an internal call uses the implicit `this` reference, which points at the **raw, unwrapped instance**, not the proxy. So `caller -> proxy -> methodA -> this.methodB()` skips the proxy on the second hop, and `methodB`'s `@Cacheable` is silently ignored.
+
+```java
+@Service
+class BookService {
+  public Book report(long id) {
+    return findById(id);          // self-call: NOT cached
+  }
+  @Cacheable("books")
+  public Book findById(long id) { /* expensive */ }
+}
+```
+
+`report` runs the expensive lookup every time, even though `findById` is annotated.
+
+## Fixes
+
+**1. Split into two beans (preferred).** Move the cached method to a separate bean and inject it; now the call crosses a proxy boundary.
+
+```java
+@Service class BookFacade {
+  private final BookLookup lookup;   // injected proxy
+  public Book report(long id) { return lookup.findById(id); }
+}
+```
+
+**2. Self-injection.** Inject the bean into itself and call through the proxy reference:
+
+```java
+@Autowired private BookService self;
+public Book report(long id) { return self.findById(id); }
+```
+
+**3. `AopContext.currentProxy()`.** Requires `@EnableCaching(exposeProxy = true)`, then `((BookService) AopContext.currentProxy()).findById(id)`. Works but couples code to Spring AOP — least clean.
+
+<Callout kind="danger" title="It fails silently">
+There is no error, no warning — the method just runs uncached. The symptom is "my cache hit rate is zero / the DB is still being hammered." The first thing to check is whether the cached method is reached via an internal `this.` call.
+</Callout>
+
+<ProbeNote>This is a proxy-mechanics probe identical to the `@Transactional` self-invocation classic. Nail the cause — annotations live in the proxy, `this` skips it — and offer the fix hierarchy: extract to another bean (best), self-inject, or `AopContext.currentProxy()`. Noting that it fails *silently* shows you've debugged it for real.</ProbeNote>

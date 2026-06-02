@@ -1,0 +1,51 @@
+**`WebRequest` and `NativeWebRequest` are Spring's container-agnostic abstractions over a request, while `ServerWebExchange` is the equivalent in the *reactive* WebFlux world — different stacks, parallel roles.** They exist so framework code (and your handlers/advice) can read request data without binding directly to the servlet API.
+
+## `WebRequest` — generic request access
+
+`org.springframework.web.context.request.WebRequest` exposes parameters, headers, attributes (request/session scope), and locale without referencing `HttpServletRequest`. You can inject it straight into a handler or `@ExceptionHandler`:
+
+```java
+@ExceptionHandler(Exception.class)
+ProblemDetail handle(Exception ex, WebRequest request) {
+    String ua = request.getHeader("User-Agent");
+    request.setAttribute("errorAt", Instant.now(), WebRequest.SCOPE_REQUEST);
+    return ProblemDetail.forStatusAndDetail(HttpStatus.INTERNAL_SERVER_ERROR, ex.getMessage());
+}
+```
+
+Its value is portability: the same code works whether the underlying request is servlet-based or not, which is why Spring's own `ResponseEntityExceptionHandler` is written against it.
+
+## `NativeWebRequest` — escape hatch to the native API
+
+`NativeWebRequest` extends `WebRequest` with `getNativeRequest(Class)` for when you genuinely need the underlying object:
+
+```java
+HttpServletRequest native = webRequest.getNativeRequest(HttpServletRequest.class);
+```
+
+Use the abstraction by default; drop to native only for things it doesn't surface.
+
+## `ServerWebExchange` — the reactive equivalent (WebFlux)
+
+In **Spring WebFlux** (the reactive, non-blocking stack), there's no `HttpServletRequest`. Instead a single `ServerWebExchange` holds the `ServerHttpRequest`, `ServerHttpResponse`, attributes, and session — all built on Reactor types (`Mono`/`Flux`). Handlers, `WebFilter`s, and reactive controllers receive it:
+
+```java
+@GetMapping("/{id}")
+Mono<OrderDto> get(@PathVariable Long id, ServerWebExchange exchange) {
+    String trace = exchange.getRequest().getHeaders().getFirst("X-Trace-Id");
+    return service.find(id); // returns a reactive type, non-blocking
+}
+```
+
+## The mental map
+
+| Abstraction | Stack | Wraps |
+|---|---|---|
+| `WebRequest` / `NativeWebRequest` | Spring MVC (servlet) | request params, headers, attributes |
+| `ServerWebExchange` | Spring WebFlux (reactive) | reactive request + response + session |
+
+<Callout kind="info" title="Servlet vs reactive, not interchangeable">
+`WebRequest` belongs to the blocking servlet stack (`spring-webmvc`); `ServerWebExchange` belongs to the reactive stack (`spring-webflux`). They solve the same problem — abstracting the request — in two different runtimes, and you don't mix them in one application's handlers.
+</Callout>
+
+<ProbeNote>The probe is whether you recognize these as request abstractions that decouple code from the raw servlet API, and crucially that `ServerWebExchange` is the *WebFlux/reactive* analogue. Mentioning that `ResponseEntityExceptionHandler` uses `WebRequest` for portability shows you've seen where Spring itself relies on it.</ProbeNote>

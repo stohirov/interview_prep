@@ -1,0 +1,40 @@
+**`FOR UPDATE SKIP LOCKED` turns a plain table into a correct, concurrent job queue — each worker atomically claims rows no other worker is processing, instead of blocking behind them.** Combined with `NOWAIT`, these two modifiers are how you control what happens when the rows you want are already locked.
+
+## The three behaviors when a row is locked
+
+A `SELECT ... FOR UPDATE` can react three ways to an already-locked row:
+
+- **(default)** — *wait* until the lock is released, then proceed.
+- **`NOWAIT`** — *error out immediately* (`ERROR: could not obtain lock`). Use when waiting is pointless and you'd rather fail fast.
+- **`SKIP LOCKED`** — *silently omit* the locked rows from the result and return the rest. This is the queue primitive.
+
+## The job-queue dequeue
+
+```sql
+BEGIN;
+SELECT id, payload
+FROM jobs
+WHERE status = 'pending'
+ORDER BY created_at
+FOR UPDATE SKIP LOCKED
+LIMIT 1;
+-- ... process the job in the application ...
+UPDATE jobs SET status = 'done' WHERE id = :id;
+COMMIT;  -- lock released, status now visible
+```
+
+Run this from 50 workers simultaneously and **each gets a different row**. Worker A locks job 1; worker B's `SKIP LOCKED` steps over job 1 and grabs job 2; nobody waits, nobody double-processes. The `LIMIT 1` after `FOR UPDATE SKIP LOCKED` means each worker locks exactly one available row.
+
+## Why this beats the naive approaches
+
+Without `SKIP LOCKED`, a `SELECT ... FOR UPDATE LIMIT 1` makes every worker **queue on the same first row** — they serialize completely, giving you one effective worker. A `SELECT` then separate `UPDATE ... WHERE status='pending'` has a race: two workers read the same row before either updates it. `SKIP LOCKED` solves both: the lock *is* the claim, and it's invisible to others.
+
+## Caveats
+
+The work between dequeue and `COMMIT` happens inside an open transaction holding a row lock — keep it short, or the connection sits `idle in transaction`. For long-running jobs, instead claim-and-commit fast (set `status = 'processing'`, commit, release the lock), then process outside the transaction, with a reaper for crashed workers. `SKIP LOCKED` ignores rows it can't see but does **not** relax isolation — it just skips contended ones.
+
+<Callout kind="tip" title="NOWAIT vs SKIP LOCKED in one line">
+`NOWAIT` = "give me these exact rows or fail." `SKIP LOCKED` = "give me whatever's available right now." Queues want the second; a targeted update that must not wait wants the first.
+</Callout>
+
+<ProbeNote>The interviewer wants `FOR UPDATE SKIP LOCKED` named as *the* Postgres queue pattern, plus why it beats both a plain `FOR UPDATE` (workers serialize on row one) and a read-then-update (race condition). Mentioning the claim-fast-then-process pattern for long jobs shows production experience.</ProbeNote>

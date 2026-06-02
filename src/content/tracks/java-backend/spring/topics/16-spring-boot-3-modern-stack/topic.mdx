@@ -1,0 +1,24 @@
+**Spring Boot 3 (on Spring Framework 6) was the first release in years to break source compatibility on purpose** — and understanding *why* is the fastest way to show you've actually shipped on the modern stack rather than copied a tutorial. The headline change is the **`javax.*` → `jakarta.*` namespace migration**: Jakarta EE 9 renamed every enterprise package (servlet, persistence, validation, JMS…), so Boot 3 can't run on the old imports at all. The other baseline shift is **Java 17 minimum** — Boot 3 is built and compiled against it, so records, sealed types, and pattern matching are now table stakes.
+
+On top of that floor sit the features that define the "modern stack":
+
+```text
+Boot 3 / Framework 6 modern stack
+├── GraalVM native image    (Spring AOT: build-time reflection/proxy hints)
+├── Spring Modulith         (enforce module boundaries in a monolith)
+├── ProblemDetail           (RFC 7807/9457 error bodies, built in)
+├── @HttpExchange clients    (declarative HTTP, often replaces Feign)
+├── RestClient              (6.1+, fluent synchronous client)
+├── Micrometer Tracing      (replaces Spring Cloud Sleuth)
+└── spring.config.import    (config trees, Vault, Consul)
+```
+
+Two themes tie these together. **First, observability and clients moved into the core.** What used to be Spring Cloud add-ons (Sleuth tracing, Feign clients) now have first-class equivalents — Micrometer Tracing and `@HttpExchange` — so you depend on fewer separate libraries with their own release cadence. **Second, the framework leans toward ahead-of-time and closed-world thinking.** Spring AOT processes your context at *build* time, generating the reflection and proxy hints GraalVM needs, which is what makes sub-100ms startup and tiny memory footprints possible.
+
+You should also know what *left*: `WebSecurityConfigurerAdapter` is gone (Security 6 wants component-based `SecurityFilterChain` beans), `WebMvcConfigurerAdapter` was long replaced by the `WebMvcConfigurer` interface, and `RestTemplate` is in maintenance mode (not deprecated) with `RestClient` as the forward path.
+
+<Callout kind="tip" title="The interview hook">
+Frame Boot 3 as "a deliberate breaking release": the Jakarta namespace move and Java 17 floor cleared the deck, and on that floor the framework absorbed observability (Micrometer Tracing), declarative clients (`@HttpExchange`), standard error bodies (ProblemDetail), and a real native-image story (Spring AOT) — pulling capabilities *in* from Spring Cloud rather than bolting them on.
+</Callout>
+
+The questions below dig into each: the migration mechanics, AOT's limits, Modulith, ProblemDetail, the new clients, the observability rework, config import, and exactly what was removed.

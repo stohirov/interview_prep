@@ -1,0 +1,28 @@
+**`@Transactional(isolation = ...)` doesn't implement isolation itself — it sets the level on the JDBC connection, and the *database* enforces it.** So the right way to answer is to map each Spring constant onto what PostgreSQL actually does, because Postgres doesn't behave like the textbook SQL standard.
+
+## The levels and the anomalies they forbid
+
+The four standard anomalies, in increasing severity: **dirty read** (seeing another transaction's uncommitted data), **non-repeatable read** (re-reading a row and getting a different committed value), **phantom read** (re-running a query and getting different rows), and **serialization anomaly** (a set of transactions producing a result no serial order could).
+
+- **`READ_UNCOMMITTED`** — standard: allows dirty reads. **On Postgres it behaves exactly like `READ_COMMITTED`**; Postgres never shows uncommitted data, so the level is effectively unavailable.
+- **`READ_COMMITTED`** — **the Postgres default.** Each statement sees a snapshot taken at statement start, so no dirty reads, but non-repeatable and phantom reads are possible across statements.
+- **`REPEATABLE_READ`** — on Postgres this is **snapshot isolation**: the whole transaction sees one snapshot taken at its first statement. It prevents non-repeatable *and* phantom reads (stronger than the SQL standard requires). Concurrent conflicting writes fail with a serialization error you must retry.
+- **`SERIALIZABLE`** — Postgres uses **Serializable Snapshot Isolation (SSI)**, genuinely guaranteeing the transactions could have run one at a time. Also surfaces as `could not serialize access` errors that the application retries.
+
+```java
+@Transactional(isolation = Isolation.REPEATABLE_READ)
+public Report buildReport(long id) {
+    // every query in this method sees the same consistent snapshot
+    var header = repo.header(id);
+    var lines  = repo.lines(id);   // guaranteed consistent with header
+    return Report.of(header, lines);
+}
+```
+
+**`DEFAULT`** means "use the datasource's default," i.e. whatever Postgres is configured for — normally `READ_COMMITTED`.
+
+<Callout kind="warn" title="Serialization errors are the application's job">
+At `REPEATABLE_READ` and `SERIALIZABLE`, Postgres aborts conflicting transactions with SQLSTATE `40001`. There is no automatic retry — your code (or a retry interceptor) must catch it and re-run the transaction. Forgetting this turns a correctness feature into random production failures.
+</Callout>
+
+<ProbeNote>The senior answer is that Spring just delegates to the DB, that Postgres has no real `READ_UNCOMMITTED`, and that its `REPEATABLE_READ` is snapshot isolation (no phantoms) while `SERIALIZABLE` is SSI — both of which throw `40001` you must retry.</ProbeNote>

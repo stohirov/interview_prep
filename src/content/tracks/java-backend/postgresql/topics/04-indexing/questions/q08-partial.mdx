@@ -1,0 +1,51 @@
+**A partial index indexes only the rows matching a `WHERE` clause, so it's smaller, cheaper to maintain, and laser-focused on the queries that actually matter.** When the rows you query are a small slice of a big table, a partial index is one of the highest-leverage tools in PostgreSQL.
+
+```sql
+CREATE INDEX ON orders (created_at) WHERE status = 'pending';
+```
+
+That index contains *only* pending orders. If pending is 0.5% of a 100M-row table, the index is ~200× smaller than a full one — and every completed order's insert/update never touches it at all.
+
+## Why it's a huge win
+
+- **Tiny and cache-resident.** A fraction of the rows means a fraction of the index — it stays in memory and scans faster.
+- **Cheaper writes.** Rows that don't satisfy the predicate are never inserted into the index, so writes to the *excluded* majority skip the maintenance entirely.
+- **Sharper statistics.** The planner reasons about just the indexed subset.
+
+## The classic use cases
+
+**Hot subset of a huge table.** A job queue where you constantly query `WHERE status = 'pending'` but pending is a sliver of all-time rows. You index the sliver, not the millions of done rows.
+
+```sql
+SELECT * FROM jobs WHERE status = 'pending' ORDER BY created_at LIMIT 1;
+-- uses the partial index; finished jobs aren't in it
+```
+
+**Excluding NULLs / soft-deletes.** Skip the rows you never query:
+
+```sql
+CREATE INDEX ON users (email) WHERE deleted_at IS NULL;
+```
+
+**Partial *unique* indexes — enforce uniqueness on a subset.** This is something a plain constraint can't do: "only one active row per key."
+
+```sql
+-- at most one ACTIVE subscription per user, but any number of cancelled ones
+CREATE UNIQUE INDEX ON subscriptions (user_id) WHERE status = 'active';
+```
+
+## The catch: the query must match the predicate
+
+The planner uses a partial index only when it can *prove* the query's `WHERE` implies the index's predicate. So the query must filter on the same condition (or a provably stronger one).
+
+```sql
+-- index: WHERE status = 'pending'
+WHERE status = 'pending' AND created_at > now() - interval '1 day'  -- uses it
+WHERE created_at > now() - interval '1 day'                          -- does NOT
+```
+
+<Callout kind="tip" title="Pair it with a partial unique index">
+Partial unique indexes are the idiomatic way to express "unique among active rows," "one primary address per user," etc. — constraints you can't write with `UNIQUE (...)` alone.
+</Callout>
+
+<ProbeNote>Show you'd reach for partial indexes when queries hit a **small, stable subset** of a large table (job queues, `deleted_at IS NULL`), and note the requirement that the query predicate must imply the index predicate. The partial *unique* index ("one active row per key") is the answer that impresses.</ProbeNote>

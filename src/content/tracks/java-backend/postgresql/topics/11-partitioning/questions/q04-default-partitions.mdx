@@ -1,0 +1,41 @@
+**A `DEFAULT` partition is the catch-all that stores any row whose key matches no other partition — and without one, such an INSERT fails outright.** This question tests whether you know what happens at the boundary, because the answer is "the row is rejected," which surprises people who assume PostgreSQL silently creates space.
+
+## No default, no home → error
+
+```sql
+CREATE TABLE logs (ts timestamptz, msg text) PARTITION BY RANGE (ts);
+CREATE TABLE logs_2025_06 PARTITION OF logs
+    FOR VALUES FROM ('2025-06-01') TO ('2025-07-01');
+
+INSERT INTO logs VALUES ('2025-08-15', 'oops');
+-- ERROR: no partition of relation "logs" found for row
+-- DETAIL: Partition key of the failing row contains (ts) = (2025-08-15 ...).
+```
+
+The insert is rejected, the transaction errors. This is a real production hazard for time-series tables where someone forgot to pre-create next month's partition.
+
+## The default partition
+
+```sql
+CREATE TABLE logs_default PARTITION OF logs DEFAULT;
+```
+
+Now any row not covered by a declared partition lands in `logs_default` instead of erroring. It works for RANGE and LIST. (HASH partitioning cannot have a default — its partitions, by modulus, already cover the entire key space.)
+
+## The catch: defaults complicate ATTACH
+
+A default partition makes adding a new partition more expensive. When you `ATTACH` (or `CREATE ... PARTITION OF`) a partition whose range/list overlaps rows that might already sit in the default, PostgreSQL must **scan the default partition** to verify no row belongs in the new partition's range — and it takes a lock that blocks concurrent writes to the default during that check.
+
+```sql
+-- This scans logs_default to ensure none of its rows fall in August:
+CREATE TABLE logs_2025_08 PARTITION OF logs
+    FOR VALUES FROM ('2025-08-01') TO ('2025-09-01');
+```
+
+If the default is large, that scan is slow and disruptive.
+
+<Callout kind="warn" title="Treat the default as an alarm, not a destination">
+A growing default partition usually means your partition-creation automation is failing. Keep it empty in steady state: pre-create future partitions ahead of time (a scheduled job), and the default never accumulates rows — so attaches stay cheap and you never hit the no-partition error.
+</Callout>
+
+<ProbeNote>Two signals: knowing the bare insert *errors* (not silently dropped) without a default, and knowing the default's hidden cost — it gets scanned and locked when you attach an overlapping partition. Recommending an empty default plus pre-created future partitions shows operational maturity.</ProbeNote>

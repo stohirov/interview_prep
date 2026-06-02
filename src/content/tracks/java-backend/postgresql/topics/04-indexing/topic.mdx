@@ -1,0 +1,37 @@
+An index is a **separate, ordered data structure that trades write cost and storage for fast lookups** — it lets the planner find rows without scanning the whole table. PostgreSQL ships several index *access methods*, and the senior skill is matching the method to the query shape rather than reflexively reaching for B-tree on everything.
+
+The default is **B-tree**, and it's the right answer for the overwhelming majority of cases: equality (`=`), ranges (`<`, `>`, `BETWEEN`), `IN`, sorting, and `ORDER BY`/`LIMIT`. It's the only method that supports ordered retrieval, which is why it backs primary keys and unique constraints.
+
+The others exist because B-tree can't do their job:
+
+```text
+B-tree  → equality, ranges, sorting (the default; PK/unique)
+Hash    → equality only; crash-safe and WAL-logged since PG 10
+GIN     → "value contains" — jsonb, arrays, full-text (tsvector)
+GiST    → geometric, range types, nearest-neighbor (KNN), full-text
+BRIN    → huge, physically-ordered tables (append-only time-series)
+```
+
+Beyond *method*, the same B-tree can be shaped four ways, and these shapes are where real query tuning lives:
+
+```sql
+-- composite: order matters (left-prefix rule)
+CREATE INDEX ON orders (customer_id, created_at);
+
+-- covering: extra columns for index-only scans
+CREATE INDEX ON orders (customer_id) INCLUDE (status);
+
+-- partial: index only the rows you query
+CREATE INDEX ON orders (created_at) WHERE status = 'pending';
+
+-- expression: index a computed value
+CREATE INDEX ON users (lower(email));
+```
+
+Every index has a price. Each `INSERT`/`UPDATE`/`DELETE` must update every applicable index, indexes consume disk, and more indexes mean more plans for the planner to weigh. So the discipline is: add indexes for real query patterns, then watch them for bloat and unused entries.
+
+<Callout kind="tip" title="The interview hook">
+Say it crisply: "B-tree is the default because it serves equality, ranges, and ordering with one structure. I only reach for GIN, GiST, or BRIN when the *query shape* demands it — containment, geometry/ranges, or a massive naturally-ordered table. And I treat every index as a write tax I have to justify with a real read pattern."
+</Callout>
+
+The questions below cover each access method, the left-prefix rule, covering and partial and expression indexes, the true cost of an index, when the planner ignores one, and how to diagnose and fix index bloat.

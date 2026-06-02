@@ -1,0 +1,36 @@
+**Volatility is a *promise you make to the planner* about how a function's result can change, and it directly governs constant-folding, index usability, and snapshot behavior.** The three levels are `IMMUTABLE`, `STABLE`, and `VOLATILE` (the default). Labelling a function wrong gives you either a missed optimization or — worse — wrong results.
+
+## The three levels
+
+**`IMMUTABLE`** — same arguments always produce the same result, *forever*, with no database access. Pure math, string formatting, `lower()`. The planner can **constant-fold** it: `WHERE x = 2 + 3` becomes `WHERE x = 5` at plan time, and the function may be pre-evaluated once instead of per row.
+
+**`STABLE`** — result is constant *within a single statement* (one snapshot) but may differ across statements. Anything that reads tables, or depends on settings like the current time-zone or `current_user`. `now()` is stable. The planner won't fold it to a constant across statements, but it knows the value won't change mid-scan.
+
+**`VOLATILE`** — may return a different value on every call, even within one statement; may have side effects. `random()`, `nextval()`, `clock_timestamp()`, anything writing data. The planner must call it **once per row** and may not reorder or cache it. This is the safe default precisely because it forbids the dangerous optimizations.
+
+```sql
+CREATE FUNCTION norm(t text) RETURNS text
+LANGUAGE sql IMMUTABLE
+RETURN lower(btrim(t));
+```
+
+## Why it matters: index usage
+
+The killer practical consequence is **expression indexes**. To build `CREATE INDEX ON users (norm(email))` and have the planner *use* it, `norm` must be at least `IMMUTABLE` — the planner has to trust the indexed value can't silently change. A `VOLATILE` function can never back an index and won't be matched against one.
+
+```sql
+CREATE INDEX ON users (norm(email));     -- requires norm IMMUTABLE
+SELECT * FROM users WHERE norm(email) = 'a@b.com';  -- now index-eligible
+```
+
+`STABLE` functions get a related benefit: a `STABLE` function in a `WHERE` clause can be evaluated once and used for an index scan on the *underlying* column, whereas a `VOLATILE` one is re-run per row and blocks that.
+
+## The footgun
+
+Mislabelling for "performance" causes bugs. Mark a function `IMMUTABLE` when it actually reads a table, and the planner may constant-fold a stale value into a cached plan and return wrong rows. Volatility is a *correctness contract*, not a speed knob — only promise what's actually true.
+
+<Callout kind="danger" title="The classic mistake">
+Marking a table-reading function `IMMUTABLE` to get an expression index. It "works" until the data changes underneath a folded constant or a cached plan, silently returning wrong answers. If it touches the database, it's `STABLE` at best.
+</Callout>
+
+<ProbeNote>The interviewer wants the contract framing — *immutable = pure forever, stable = constant within one statement, volatile = anything goes* — and the payoff: only `IMMUTABLE` functions can back an expression index. Calling out that lying with `IMMUTABLE` corrupts results (not just performance) is the seniority marker.</ProbeNote>

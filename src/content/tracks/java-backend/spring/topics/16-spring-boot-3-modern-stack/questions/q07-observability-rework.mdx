@@ -1,0 +1,35 @@
+**Spring 6 / Boot 3 reworked observability around Micrometer: `Micrometer Tracing` replaces Spring Cloud Sleuth, and a new `Observation` API unifies metrics and traces behind one instrumentation point.** Sleuth is end-of-life and not ported to Boot 3 — this is a hard cutover, not a rename.
+
+## The Observation API
+
+The core idea: you instrument code *once* with an `Observation`, and registered handlers turn that single event into **both** a metric (timer/counter) and a **trace span**. No more instrumenting twice.
+
+```java
+Observation.createNotStarted("order.place", registry)
+    .lowCardinalityKeyValue("region", "eu")   // becomes a metric tag
+    .highCardinalityKeyValue("orderId", id)    // span attribute, not a metric tag
+    .observe(() -> placeOrder(id));
+```
+
+The low/high cardinality split matters: low-cardinality keys become metric dimensions (bounded, safe), high-cardinality ones become span attributes only (so you don't blow up your time-series database).
+
+## What replaced what
+
+- **Metrics:** Micrometer (as before) — `@Timed`, `MeterRegistry`, exported to Prometheus, etc.
+- **Tracing:** **Micrometer Tracing** is the new facade. It's a *bridge*, not a tracer — you choose a backend: **OpenTelemetry** or **OpenZipkin Brave** (`micrometer-tracing-bridge-otel` / `-brave`), and an exporter (OTLP, Zipkin).
+- **Sleuth → gone.** Its auto-propagation of trace/span IDs through MDC, async, and HTTP clients is now provided by Micrometer Tracing's instrumentation plus Boot auto-config.
+
+```text
+your code --> Observation API --> ObservationRegistry
+                                    ├── MeterRegistry      (metrics)
+                                    └── Micrometer Tracing (spans)
+                                          └── bridge: OTel / Brave --> exporter
+```
+
+Boot 3 auto-instruments web requests, `RestClient`/`WebClient`, and more, and propagates trace context across threads and HTTP boundaries — so logs still get correlation IDs, just via the new stack.
+
+<Callout kind="warn" title="Migration gotcha">
+There is no drop-in Sleuth replacement dependency. You must add `micrometer-tracing` plus a *bridge* (OTel or Brave) and an exporter, and re-check anywhere you relied on Sleuth's manual span APIs — the package names and types changed.
+</Callout>
+
+<ProbeNote>Interviewers want: Sleuth is dead, **Micrometer Tracing** replaces it, and the unifying piece is the **Observation API** — one instrumentation yielding both a metric and a span. Know that Micrometer Tracing is a *facade* needing a bridge (OpenTelemetry or Brave) plus an exporter, and the low- vs high-cardinality key distinction.</ProbeNote>

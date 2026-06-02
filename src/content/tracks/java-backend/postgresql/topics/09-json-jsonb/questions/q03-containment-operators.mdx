@@ -1,0 +1,42 @@
+**These are the `jsonb`-only operators that make JSON queryable *and* indexable.** Containment asks "is this document inside that one?"; existence asks "does this key exist?" Both are backed by GIN, which is why they matter for performance, not just expressiveness.
+
+## Containment: `@>` and `<@`
+
+`a @> b` is true when **`b` is contained in `a`** — every key/value in `b` appears somewhere in `a`. `<@` is the same relation reversed (`b @> a`).
+
+```sql
+SELECT '{"name":"Ann","roles":["admin","user"]}'::jsonb @> '{"name":"Ann"}';     -- t
+SELECT '{"roles":["admin","user"]}'::jsonb           @> '{"roles":["admin"]}';   -- t (array containment)
+SELECT '{"a":1}'::jsonb @> '{"a":1,"b":2}';                                       -- f (b missing)
+```
+
+Containment is **structural and value-aware**: matching an object means matching keys *and* their values; matching an array means the right array's elements are a subset of the left's. This is the workhorse for filtering:
+
+```sql
+SELECT * FROM users WHERE data @> '{"status":"active","plan":"pro"}';
+```
+
+That predicate can use a GIN index, unlike `data ->> 'status' = 'active'` (which needs an expression index per field).
+
+## Existence: `?`, `?&`, `?|`
+
+These test for **keys** (or, for arrays/scalars, string elements) — they ignore values entirely.
+
+```sql
+SELECT '{"a":1,"b":2}'::jsonb ? 'a';              -- t   key exists
+SELECT '{"a":1,"b":2}'::jsonb ?& array['a','b'];  -- t   ALL keys exist
+SELECT '{"a":1,"b":2}'::jsonb ?| array['x','b'];  -- t   ANY key exists
+SELECT '["x","y"]'::jsonb     ? 'x';              -- t   string element exists in array
+```
+
+- `?` — does this single key exist?
+- `?&` — do **all** keys in the array exist?
+- `?|` — does **any** key in the array exist?
+
+A subtle but exam-worthy point: `?` only matches **top-level** keys and only **string** values, not numbers or nested keys. To check a nested key you need a path or containment.
+
+## Why it matters
+
+All five are supported by the default GIN operator class (`jsonb_ops`). `jsonb_path_ops` indexes are smaller and faster but support **only** containment (`@>`) and the path-match operators — not the existence family.
+
+<ProbeNote>The interviewer wants the two categories cleanly separated: containment (`@>` / `<@`) matches structure and values; existence (`?` / `?&` / `?|`) tests for keys only. Strong answers note `@>` is the idiomatic, GIN-indexable filter, that `?` only sees top-level string keys, and that `jsonb_path_ops` drops the existence operators.</ProbeNote>

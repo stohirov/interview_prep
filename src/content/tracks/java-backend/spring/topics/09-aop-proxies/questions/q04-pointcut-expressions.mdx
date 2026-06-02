@@ -1,0 +1,65 @@
+**A pointcut is an expression that selects *which* joinpoints an advice applies to.** In Spring AOP a joinpoint is always a method execution, so a pointcut answers "on which method calls does this advice run?" Spring borrows AspectJ's pointcut grammar; the designators you must know are `execution`, `within`, `bean`, `args`, `@annotation`, and `@within`.
+
+## execution — the workhorse
+
+Matches method executions by signature. The pattern is `execution(modifiers? return-type declaring-type.method(params) throws?)`.
+
+```java
+// any public method in the service package and sub-packages, any args
+@Pointcut("execution(* com.example.service..*.*(..))")
+
+// methods named find* returning a List, exactly one arg
+execution(java.util.List com.example..*.find*(*))
+```
+
+`*` is a single wildcard, `..` means "zero or more" (packages or parameters). This is the most precise and most common designator.
+
+## within — by type/package
+
+Coarser: matches *any* joinpoint inside the given type or package, ignoring the signature.
+
+```java
+@Pointcut("within(com.example.repository..*)")   // all methods of all classes there
+```
+
+## bean — by bean name
+
+Spring-specific (not in plain AspectJ). Matches by the bean's id, with wildcards.
+
+```java
+@Pointcut("bean(*Service)")        // every bean whose name ends in "Service"
+```
+
+## args — by argument types
+
+Selects on the *runtime* argument types, and can bind them for the advice.
+
+```java
+@Before("execution(* *..*(..)) && args(id)")
+public void log(Long id) { ... }   // fires when the single arg is a Long, binds it
+```
+
+## @annotation and @within — by annotation
+
+`@annotation(X)` matches methods *annotated* with `X`; `@within(X)` matches methods of a *class* annotated with `X`.
+
+```java
+@Around("@annotation(com.example.Audited)")        // method carries @Audited
+@Around("@within(org.springframework.stereotype.Service)")  // class is @Service
+```
+
+`@annotation` is the idiom behind custom marker annotations — define `@Audited`, advise `@annotation(Audited)`, done.
+
+## Combining and reusing
+
+Combine with `&&`, `||`, `!`, and name reusable pointcuts with `@Pointcut`:
+
+```java
+@Pointcut("within(com.example.service..*)")
+public void inService() {}
+
+@Around("inService() && @annotation(Retryable)")
+public Object retry(ProceedingJoinPoint pjp) throws Throwable { ... }
+```
+
+<ProbeNote>Know `execution` cold — including `*` vs `..`. Then show range: `within` (coarse, by type), `bean` (Spring-only, by name), `args` (by/binding argument types), and `@annotation`/`@within` (annotation-driven). Mentioning that `@annotation` is how custom marker-annotation aspects are built signals real-world use.</ProbeNote>

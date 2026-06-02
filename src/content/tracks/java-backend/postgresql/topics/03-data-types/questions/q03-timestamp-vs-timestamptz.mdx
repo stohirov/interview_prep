@@ -1,0 +1,33 @@
+**`TIMESTAMPTZ` is almost always the right choice, and its name is a lie that trips up every candidate.** Despite "with time zone," it does **not** store a zone. It stores a single absolute instant — internally UTC — and converts to/from your session's `TimeZone` on the way in and out. Naive `TIMESTAMP` stores no offset at all, so the *same literal* means different instants on different servers.
+
+## What each type actually stores
+
+- **`TIMESTAMP` (without time zone)** — wall-clock digits with no offset. `'2026-06-02 14:00'` is just those numbers; Postgres has no idea which instant they refer to. Two servers in different zones will disagree about what it means.
+- **`TIMESTAMPTZ` (with time zone)** — an absolute instant. On input, the value is converted from the session zone to UTC and that UTC instant is stored. On output, it's rendered in the session zone.
+
+```sql
+SET TimeZone = 'America/New_York';
+SELECT '2026-06-02 12:00'::timestamptz;   -- 2026-06-02 12:00:00-04 (stored as 16:00 UTC)
+
+SET TimeZone = 'UTC';
+SELECT '2026-06-02 12:00'::timestamptz;   -- now displayed 2026-06-02 16:00:00+00
+```
+
+Same stored instant, displayed correctly for each session. With plain `TIMESTAMP` the digits would never change — and that's the bug.
+
+## Why TIMESTAMPTZ wins
+
+1. **It's an instant, which is what you almost always mean.** "When was this order placed?" is one moment in time, the same for everyone.
+2. **DST-safe.** Naive `TIMESTAMP` arithmetic across a DST boundary silently produces wrong durations; `TIMESTAMPTZ` is anchored to UTC so intervals are correct.
+3. **Server/zone independent.** Move the database or run app servers in multiple regions and the values still mean the same instant.
+4. **`now()` and `CURRENT_TIMESTAMP` return `TIMESTAMPTZ`** — using `TIMESTAMP` columns forces a lossy implicit cast.
+
+## When plain TIMESTAMP is correct
+
+Rarely: when you mean a **wall-clock value detached from any instant** — a recurring "store opens at 09:00 local" or a birthday where the zone is irrelevant. Even then, many designs store the local time plus a separate zone column. If you're unsure, you want `TIMESTAMPTZ`.
+
+<Callout kind="warn" title="TIMESTAMPTZ does not store the originating zone">
+If you need to remember *which* zone the user was in (e.g. for display or audit), add a separate `text` column for the IANA zone name. `TIMESTAMPTZ` only preserves the instant, not the offset it arrived with.
+</Callout>
+
+<ProbeNote>The interviewer wants the precise mental model: `TIMESTAMPTZ` stores a UTC instant and converts via the session zone; it does *not* store a zone. Default to it for any "moment in time," and reserve naive `TIMESTAMP` for true wall-clock values. Mentioning that `now()` returns `timestamptz` is a strong signal.</ProbeNote>

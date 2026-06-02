@@ -1,0 +1,41 @@
+**NULL is not a value — it's the absence of one, "unknown."** An empty string `''` and `0` are perfectly ordinary, *known* values; NULL is the database saying "I don't have this." Treating them as the same thing is the single most common SQL bug, because NULL drags three-valued logic into every comparison it touches.
+
+## NULL vs empty string vs zero
+
+```sql
+SELECT '' = '';          -- true  (empty string is a real value)
+SELECT 0 = 0;            -- true
+SELECT NULL = NULL;      -- NULL  (unknown, NOT true!)
+SELECT '' IS NULL;       -- false (empty string is not null)
+```
+
+`''` has length 0; `0` is a number; `NULL` has no value at all. In PostgreSQL, `''` and `NULL` are always distinct (unlike Oracle, which conflates them for `VARCHAR`). To test for NULL you must use `IS NULL` / `IS NOT NULL` — never `= NULL`, which is always `unknown` and therefore never matches.
+
+## NULL in WHERE — three-valued logic
+
+`WHERE` keeps a row only when the predicate is **true**, not when it's *unknown*. So any comparison against NULL filters the row out:
+
+```sql
+-- rows where bonus IS NULL are EXCLUDED by both of these:
+WHERE bonus > 100
+WHERE bonus <= 100
+```
+
+To catch them you need `WHERE bonus <= 100 OR bonus IS NULL`. Watch out for `NOT IN (subquery)`: if the subquery returns a single NULL, the whole `NOT IN` evaluates to unknown and the query returns **zero rows** — a notorious trap. Prefer `NOT EXISTS`.
+
+## NULL in GROUP BY, DISTINCT, ORDER BY
+
+Here NULLs are treated as **equal to each other**: `GROUP BY` collapses all NULLs into one group, and `DISTINCT` keeps one NULL. This contradicts `NULL <> NULL` from `WHERE` — a deliberate, standardized inconsistency. In `ORDER BY`, NULLs sort last by default in PostgreSQL (`ASC`); override with `NULLS FIRST` / `NULLS LAST`.
+
+## NULL in joins and aggregates
+
+- **Joins:** an equality join (`a.x = b.x`) never matches NULL to NULL, so NULL keys are dropped from inner joins and become unmatched in outer joins.
+- **Aggregates:** every aggregate except `COUNT(*)` **ignores NULLs**. `COUNT(col)` counts non-null values; `AVG(col)` divides by the non-null count (not the row count); `SUM` of all-NULL is `NULL`, not `0`.
+
+```sql
+SELECT COUNT(*), COUNT(bonus), AVG(bonus) FROM emp;  -- the three disagree when bonus has NULLs
+```
+
+Use `COALESCE(col, 0)` to substitute a default before aggregating, when that's the intent.
+
+<ProbeNote>The interviewer is probing whether you internalize three-valued logic: NULL means "unknown," `= NULL` never matches, `WHERE` drops unknowns, but `GROUP BY`/`DISTINCT` treat NULLs as equal. Seniors call out the `NOT IN`-with-NULL trap and that aggregates (except `COUNT(*)`) skip NULLs, distorting `AVG`.</ProbeNote>

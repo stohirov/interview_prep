@@ -1,0 +1,43 @@
+**The default rollback rule trips almost everyone: Spring rolls back only on `RuntimeException` (unchecked) and `Error` — a *checked* exception commits the transaction.** This is a deliberate inheritance from EJB semantics, and it's the source of the classic "my method threw but the data was still saved" bug.
+
+## The default rule
+
+When the proxied method throws, the `TransactionInterceptor` checks the exception type:
+
+- `RuntimeException` or `Error` → **roll back**.
+- any checked `Exception` (a `java.lang.Exception` that isn't a `RuntimeException`) → **commit**.
+
+```java
+@Transactional
+public void process(Order o) throws IOException {
+    repo.save(o);
+    sendFile(o);                 // throws IOException (checked)
+    // -> the save above is COMMITTED, because checked exceptions don't roll back
+}
+```
+
+That silent commit on a checked exception is the trap. If you want the save undone, you must override the rule.
+
+## Overriding it
+
+**`rollbackFor`** adds exception types that *should* roll back (typically a checked one):
+
+```java
+@Transactional(rollbackFor = IOException.class)
+public void process(Order o) throws IOException { ... }   // now rolls back
+```
+
+**`noRollbackFor`** does the opposite — names exceptions that should *not* roll back even though they normally would (e.g. a `RuntimeException` you treat as a benign, expected signal):
+
+```java
+@Transactional(noRollbackFor = OptimisticLockRetryHint.class)
+public void apply() { ... }   // this runtime exception commits anyway
+```
+
+Both accept arrays, and matching is by assignability (subclasses included). When multiple rules match, the **most specific** (closest in the type hierarchy) wins.
+
+<Callout kind="danger" title="Catch-and-swallow silently commits">
+A subtler failure than the checked-exception rule: if you `try/catch` an exception *inside* the transactional method and don't rethrow, the proxy never sees it — so it commits. Worse, if a rollback was already marked (e.g. an inner `REQUIRED` call failed), the transaction is now `rollback-only` and the outer commit throws `UnexpectedRollbackException`. Let exceptions propagate, or mark rollback explicitly with `TransactionAspectSupport.currentTransactionStatus().setRollbackOnly()`.
+</Callout>
+
+<ProbeNote>The non-negotiable fact is "unchecked rolls back, checked commits by default." Strong candidates immediately reach for `rollbackFor = Exception.class` (or a custom base) as the common fix and know that swallowing exceptions inside the method defeats rollback entirely.</ProbeNote>

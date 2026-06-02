@@ -1,0 +1,41 @@
+**Spring can resolve circular dependencies between singletons *only* when they use field or setter injection — via a three-level cache that exposes an early, not-yet-finished bean reference. Constructor-injected cycles cannot be resolved and throw `BeanCurrentlyInCreationException`.** And since Boot 2.6, circular references are prohibited by default regardless.
+
+## The three-level cache (field/setter case)
+
+A → B and B → A. Spring creates A:
+
+1. Instantiate A (constructor runs — no dependencies yet, since they're injected later via fields/setters).
+2. Place an **early reference** to the raw, half-built A into the *singleton factory cache* before populating its fields.
+3. Populate A's fields → it needs B → Spring creates B.
+4. B needs A → finds the early reference of A in the cache and injects *that*. B finishes.
+5. Back in A, inject the now-complete B. A finishes.
+
+The three levels are roughly: `singletonObjects` (fully ready beans), `earlySingletonObjects` (early refs handed out), and `singletonFactories` (factories that produce early refs, needed so AOP proxies wrap correctly). It works because field/setter injection happens *after* construction, so a partially-built object can be referenced.
+
+## Why constructor injection can't be resolved
+
+```java
+@Service class A { A(B b) {} }
+@Service class B { B(A a) {} }   // BeanCurrentlyInCreationException
+```
+
+To construct A you must already have B; to construct B you must already have A. Neither can be instantiated first — there's no "half-built" object to expose, because the constructor hasn't returned. Spring detects it's already creating A while trying to create A again and throws `BeanCurrentlyInCreationException`.
+
+## Boot 2.6+ prohibits cycles by default
+
+Even the resolvable field/setter case now fails at startup unless you opt back in:
+
+```text
+spring.main.allow-circular-references=true
+```
+
+The team made this the default because a circular dependency is almost always a *design smell*, not something to enable.
+
+## The right fix — break the cycle
+
+- **`@Lazy`** on one injection point injects a proxy, deferring real resolution until first use — a quick escape, not a cure.
+- **Extract a third bean** that both depend on, removing the loop.
+- **Use an event** or `ObjectProvider<T>` to fetch the collaborator on demand instead of at wiring time.
+- Best: **redesign** so the dependency only flows one way.
+
+<ProbeNote>The depth markers: name the *three-level cache* and the *early reference*, state clearly that only field/setter cycles resolve while constructor cycles throw `BeanCurrentlyInCreationException`, and that Boot 2.6+ bans cycles by default. Finish by calling a cycle a design smell and naming `@Lazy` / extract-a-bean as fixes.</ProbeNote>

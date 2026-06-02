@@ -1,0 +1,18 @@
+PostgreSQL lets many transactions run at once, and **locks are the mechanism that keeps their concurrent reads and writes from corrupting each other**. The good news for application developers: most of the time you never write `LOCK` explicitly — PostgreSQL acquires the right lock automatically for every statement. The skill being tested is understanding *which* lock a statement takes, *what it conflicts with*, and how to diagnose the inevitable day when two transactions wait on each other.
+
+Locks live at several granularities. **Table-level locks** come in eight modes, from `ACCESS SHARE` (taken by every `SELECT`) up to `ACCESS EXCLUSIVE` (taken by `DROP TABLE`, most `ALTER TABLE`, `TRUNCATE`). The mode names are deliberately confusing — what matters is the conflict matrix, not the names. **Row-level locks** (`FOR UPDATE`, `FOR NO KEY UPDATE`, `FOR SHARE`, `FOR KEY SHARE`) let writers touch different rows of the same table without blocking each other. **Advisory locks** are application-defined mutexes that PostgreSQL tracks but never enforces against data.
+
+```sql
+-- explicit row lock: claim these rows, block other writers
+SELECT * FROM accounts WHERE id = 42 FOR UPDATE;
+```
+
+The defining feature of PostgreSQL's MVCC design is that **readers never block writers and writers never block readers**. A plain `SELECT` takes only `ACCESS SHARE` and reads a consistent snapshot; it never waits for an `UPDATE`. Contention only appears when two statements want to *modify* the same data, or when DDL needs exclusive access.
+
+When two transactions wait on each other in a cycle, PostgreSQL's deadlock detector (triggered after `deadlock_timeout`, default 1s) finds the cycle in its wait-for graph and kills one victim with a clear error. Investigating live contention means joining `pg_locks` to `pg_stat_activity` to see who holds what and who waits.
+
+<Callout kind="tip" title="The interview hook">
+Lead with the invariant: "In Postgres, readers and writers don't block each other — that's MVCC. Locks only matter when two transactions modify the same rows, or when DDL takes `ACCESS EXCLUSIVE`. So when I see lock contention I ask *what conflicts with what*, then join `pg_locks` to `pg_stat_activity` to see the blocking chain." That framing shows you understand the model, not just the syntax.
+</Callout>
+
+The questions below cover the eight table lock modes, the four row-lock strengths, advisory locks, deadlock detection, live investigation, `SKIP LOCKED` job queues, and how predicate locking under serializable isolation differs from ordinary row locks.

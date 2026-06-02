@@ -1,0 +1,42 @@
+**`@SpringBootApplication` is a convenience meta-annotation that bundles three annotations you'd otherwise write separately.** Decomposing it cleanly is a fast way to show you understand what actually boots a Spring Boot app.
+
+```java
+@SpringBootConfiguration
+@EnableAutoConfiguration
+@ComponentScan
+public @interface SpringBootApplication { ... }
+```
+
+## The three parts
+
+**1. `@SpringBootConfiguration`** — a specialization of `@Configuration`. It marks the class as a source of bean definitions (`@Bean` methods are processed) and, being the Boot variant, it's the single annotation Boot's test utilities look for to find your primary configuration class. Functionally to you it *is* `@Configuration`.
+
+**2. `@EnableAutoConfiguration`** — switches on the whole auto-configuration machine. It imports `AutoConfigurationImportSelector`, which reads the candidate class names from `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` across all jars and evaluates each one's `@Conditional` guards. This is the line responsible for "I added a starter and beans appeared."
+
+**3. `@ComponentScan`** — scans for `@Component`, `@Service`, `@Repository`, `@Controller`, `@Configuration` etc., **starting from the package of the annotated class**. This is why your `App` class belongs in the *root* package: the scan covers it and everything below it.
+
+## Why the package placement matters
+
+```java
+package com.acme.shop;   // root package
+
+@SpringBootApplication    // scans com.acme.shop.** only
+public class ShopApplication { ... }
+```
+
+If you put the main class in `com.acme.shop.web`, components in `com.acme.shop.service` are *not* scanned. A surprising number of "my bean isn't found" bugs are exactly this.
+
+## Overriding the defaults
+
+`@SpringBootApplication` accepts attributes that flow into its members:
+
+```java
+@SpringBootApplication(
+    scanBasePackages = "com.acme",
+    exclude = DataSourceAutoConfiguration.class)   // opt out of one auto-config
+public class App { }
+```
+
+`exclude` / `excludeName` disable specific auto-configurations; `scanBasePackages` widens the scan. You can always replace the meta-annotation with the three real ones if you need fine-grained control.
+
+<ProbeNote>The interviewer wants the three components named without hesitation — `@SpringBootConfiguration` (≈`@Configuration`), `@EnableAutoConfiguration`, `@ComponentScan` — plus the insight that the scan is rooted at the main class's package. Mentioning `exclude` to disable an unwanted auto-config shows real-world usage.</ProbeNote>

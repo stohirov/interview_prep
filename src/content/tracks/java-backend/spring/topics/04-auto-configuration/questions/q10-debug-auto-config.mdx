@@ -1,0 +1,59 @@
+**When a bean is configured (or mysteriously isn't), run the app with `--debug` to print the conditions evaluation report — the authoritative list of which auto-configurations matched, which didn't, and the exact condition that decided each.** This is the single best debugging tool for "why is this bean here / missing?"
+
+## Turning on the report
+
+```text
+java -jar app.jar --debug
+```
+
+or in configuration:
+
+```properties
+debug=true
+```
+
+This does **not** raise your application log level to DEBUG globally (that's `--debug` on the logging side vs Boot's `debug` property — the Boot property specifically enables the conditions report). On startup you get a `CONDITIONS EVALUATION REPORT`.
+
+## Reading the report
+
+```text
+============================
+CONDITIONS EVALUATION REPORT
+============================
+
+Positive matches:        ← auto-config that fired, and why
+-----------------
+   DataSourceAutoConfiguration matched:
+      - @ConditionalOnClass found required class 'javax.sql.DataSource' (OnClassCondition)
+
+Negative matches:        ← auto-config that was skipped, and why
+-----------------
+   RabbitAutoConfiguration:
+      Did not match:
+      - @ConditionalOnClass did not find required class
+        'com.rabbitmq.client.Channel' (OnClassCondition)
+
+Exclusions:              ← explicitly excluded via spring.autoconfigure.exclude
+Unconditional classes:   ← always-on infrastructure config
+```
+
+- **Positive matches** — every condition passed; the config contributed beans. Use this to confirm *why* something you didn't expect got configured.
+- **Negative matches** — the precise condition that failed. "My `DataSource` isn't there" usually shows up here as `@ConditionalOnClass did not find ...` (missing dependency) or `@ConditionalOnProperty` not matching.
+
+## The most common findings
+
+- **Missing jar** → a `@ConditionalOnClass` negative match. Add the starter.
+- **Your bean overrode the default** → the default appears as a negative match: `@ConditionalOnMissingBean found bean of type ...`. That's expected, not a bug.
+- **Wrong property value** → `@ConditionalOnProperty` negative match. Fix the property name/value (watch relaxed binding).
+
+## Complementary tools
+
+- **Actuator `/actuator/conditions`** exposes the same report over HTTP at runtime — no restart-with-flag needed.
+- **Actuator `/actuator/beans`** lists every bean actually registered.
+- **`spring.autoconfigure.exclude`** (or `@SpringBootApplication(exclude=...)`) to deliberately drop an auto-config, after which it appears under *Exclusions*.
+
+<Callout kind="info" title="--debug vs DEBUG logging">
+`--debug` / `debug=true` enables Boot's **conditions report** (and DEBUG logging for a small set of core loggers). To debug your own packages, set `logging.level.com.acme=DEBUG` instead — that's a separate concern from the auto-config report.
+</Callout>
+
+<ProbeNote>The interviewer wants `--debug` (or `debug=true`) → conditions evaluation report, and that you read **negative matches** to find the failed condition. Knowing the `/actuator/conditions` endpoint gives the same data at runtime, and recognizing a `@ConditionalOnMissingBean` negative match as *expected* (your bean won) separates the confident from the confused.</ProbeNote>

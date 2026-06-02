@@ -1,0 +1,44 @@
+**`@Scheduled` is per-JVM: each instance has its own scheduler, so if you deploy three replicas, *all three* fire the same job at the same time — sending the email three times, running the same batch thrice.** Spring's scheduler has no idea other instances exist. To make a scheduled job run *once across the cluster*, you need a distributed lock so only one instance executes each trigger. **ShedLock** is the standard lightweight answer; **Quartz** in clustered mode is the heavier alternative.
+
+## The problem, concretely
+
+```java
+@Scheduled(cron = "0 0 * * * *")     // top of every hour
+public void chargeSubscriptions() { ... }   // 3 instances => charged 3x
+```
+
+This is a correctness bug at scale: duplicate charges, duplicate notifications, racing batch writes.
+
+## ShedLock — a lock, not a scheduler
+
+ShedLock doesn't schedule anything; it *guards* an existing `@Scheduled` method so only one node runs it per trigger. It stores a lock row in a shared store (JDBC, Redis, Mongo, etc.). Whichever instance grabs the lock runs; the others skip.
+
+```java
+@Configuration
+@EnableScheduling
+@EnableSchedulerLock(defaultLockAtMostFor = "10m")
+public class SchedulerConfig {
+    @Bean
+    LockProvider lockProvider(DataSource ds) {
+        return new JdbcTemplateLockProvider(ds);   // shared DB table
+    }
+}
+
+@Scheduled(cron = "0 0 * * * *")
+@SchedulerLock(name = "chargeSubscriptions",
+               lockAtLeastFor = "1m", lockAtMostFor = "10m")
+public void chargeSubscriptions() { ... }
+```
+
+- **`lockAtMostFor`** is the safety net: if the holder crashes without releasing, the lock auto-expires after this, so the job isn't stuck forever. Set it comfortably above the expected runtime.
+- **`lockAtLeastFor`** keeps the lock held a minimum time even if the job finishes fast — prevents a second node from also firing due to small clock skew.
+
+## Quartz alternative
+
+Quartz in **clustered mode** (backed by a shared JDBC JobStore) coordinates instances itself: it picks one node per trigger via the database. Choose it when you need richer features — persistent jobs, misfire handling, dynamic rescheduling — and accept the extra setup. For "just don't run twice," ShedLock is far simpler.
+
+<Callout kind="danger" title="Default behavior is every-instance-fires">
+Never assume `@Scheduled` is cluster-aware — it isn't. Out of the box, N replicas = N executions. Distributed locking (ShedLock) or a clustered scheduler (Quartz) is mandatory for any job with side effects.
+</Callout>
+
+<ProbeNote>The interviewer wants you to recognize the duplicate-execution bug immediately, then reach for ShedLock (a shared lock around `@Scheduled`) or clustered Quartz. Naming `lockAtMostFor` (crash safety) and `lockAtLeastFor` (clock-skew guard) shows you've actually run it in production.</ProbeNote>

@@ -1,0 +1,48 @@
+**Content negotiation is how Spring decides which `HttpMessageConverter` (JSON vs XML vs …) serializes your response, and by default it's driven by the request's `Accept` header.** The same `OrderDto` can come back as JSON or XML depending on what the client asks for — your controller code doesn't change.
+
+## The default: the `Accept` header
+
+A `ContentNegotiationManager` (configured by a `ContentNegotiationStrategy`) inspects the request. The default strategy, `HeaderContentNegotiationStrategy`, reads the `Accept` header:
+
+```text
+Accept: application/json   -> Jackson JSON converter
+Accept: application/xml    -> Jackson XML / JAXB converter (if on classpath)
+```
+
+Spring then finds a registered converter whose supported media type intersects the requested one, and whose `produces` (if you set it on the mapping) is compatible. With only `spring-boot-starter-web`, Jackson JSON is present, so JSON is what you get unless an XML converter is also on the classpath.
+
+## Other strategies (opt-in)
+
+You can broaden how the media type is determined via `WebMvcConfigurer`:
+
+```java
+@Override
+public void configureContentNegotiation(ContentNegotiationConfigurer c) {
+    c.favorParameter(true)          // ?format=xml
+     .parameterName("format")
+     .ignoreAcceptHeader(false)
+     .defaultContentType(MediaType.APPLICATION_JSON)
+     .mediaType("xml", MediaType.APPLICATION_XML)
+     .mediaType("json", MediaType.APPLICATION_JSON);
+}
+```
+
+- **Header strategy** (default) — `Accept`.
+- **Parameter strategy** — a query param like `?format=json` (handy for browsers that can't set `Accept`).
+- **Path extension** — `/orders.xml`; largely deprecated for security reasons in modern Spring.
+- **Fixed default** — fall back to `defaultContentType` when the client expresses no preference.
+
+## How it ties to the mapping
+
+`produces` on `@GetMapping(produces = …)` narrows which requests a handler even matches, and feeds negotiation. If the client's `Accept` can't be satisfied by any converter, Spring returns `406 Not Acceptable`.
+
+```java
+@GetMapping(value = "/{id}", produces = {APPLICATION_JSON_VALUE, APPLICATION_XML_VALUE})
+OrderDto get(@PathVariable Long id) { ... } // negotiated per Accept
+```
+
+<Callout kind="info" title="Converters do the actual writing">
+Negotiation only *chooses the media type*; the matching `HttpMessageConverter` does the serialization. So "support XML" means: add an XML converter (e.g. `jackson-dataformat-xml`) to the classpath — registration is automatic — and clients sending `Accept: application/xml` get XML.
+</Callout>
+
+<ProbeNote>The core answer is "the `Accept` header, resolved by `ContentNegotiationManager`, selects an `HttpMessageConverter`." Strong candidates mention the parameter/path-extension strategies, the `defaultContentType` fallback, and that 406 results when no converter satisfies the request.</ProbeNote>

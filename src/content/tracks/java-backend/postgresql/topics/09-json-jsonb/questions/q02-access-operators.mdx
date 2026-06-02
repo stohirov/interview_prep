@@ -1,0 +1,43 @@
+**The four access operators split along two axes: single-key vs path, and JSON-result vs text-result.** Getting `->` vs `->>` right is the single most common JSON mistake — the wrong one breaks comparisons and casts.
+
+## `->` returns json/jsonb; `->>` returns text
+
+Both take a single key (or array index). The arrow with two characters (`->>`) "exits" to `text`; the single arrow stays in JSON.
+
+```sql
+SELECT '{"city": "Paris"}'::jsonb -> 'city';    -- "Paris"   (jsonb, note the quotes)
+SELECT '{"city": "Paris"}'::jsonb ->> 'city';   -- Paris     (text, no quotes)
+
+SELECT '[10, 20, 30]'::jsonb -> 1;              -- 20        (jsonb)
+SELECT '[10, 20, 30]'::jsonb ->> 1;             -- 20        (text)
+```
+
+The distinction matters the moment you compare or cast:
+
+```sql
+WHERE data ->> 'age' = '30'                     -- text compare, works
+WHERE (data ->> 'age')::int > 30                -- cast text to int, works
+WHERE data -> 'age' = '30'                      -- comparing jsonb to text: error / mismatch
+```
+
+A `jsonb` value can be compared to another `jsonb` (`data -> 'age' = '30'::jsonb`), but to get a normal SQL value out — a string, a number — you almost always want `->>`.
+
+## `#>` and `#>>` follow a path
+
+These take a **`text[]` path array** and descend through nested levels in one step. `#>` returns `jsonb`; `#>>` returns `text` — same JSON-vs-text rule.
+
+```sql
+SELECT data #>  '{address,city}'    FROM users;   -- jsonb
+SELECT data #>> '{address,city}'    FROM users;   -- text
+
+-- arrays use numeric indices as path elements:
+SELECT data #>> '{tags,0}'          FROM posts;   -- first tag as text
+```
+
+`data #> '{address,city}'` is equivalent to `data -> 'address' -> 'city'`, and `data #>> '{address,city}'` equals `data -> 'address' ->> 'city'`. Chaining single arrows is fine for shallow access; the path form reads better when the path is deep or built dynamically.
+
+## Null behavior
+
+If any step doesn't exist, the operators return SQL `NULL` rather than erroring — so missing keys silently produce `NULL`, which then participates in `WHERE` like any other null.
+
+<ProbeNote>The interviewer is checking the JSON-vs-text axis: `->` / `#>` keep you in `jsonb`, `->>` / `#>>` give you `text`. The classic trap is comparing `data -> 'k'` to a string literal. A strong answer notes that `#>` takes a `text[]` path (with numeric strings for array indices) and that missing keys yield `NULL`.</ProbeNote>

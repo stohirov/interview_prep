@@ -1,0 +1,48 @@
+**The classic API was `ApplicationEvent` + `ApplicationListener`; the modern one is a plain object + `@EventListener`.** Both still work, but since Spring 4.2 you almost never need the old base classes.
+
+## The old way
+
+A publisher fires an event that extends `ApplicationEvent`, and a listener implements the typed `ApplicationListener` interface:
+
+```java
+class OrderPlacedEvent extends ApplicationEvent {
+    OrderPlacedEvent(Object source) { super(source); }
+}
+
+@Component
+class OldStyleListener implements ApplicationListener<OrderPlacedEvent> {
+    public void onApplicationEvent(OrderPlacedEvent e) { /* ... */ }
+}
+```
+
+This still drives the container's own lifecycle events — `ContextRefreshedEvent`, `ApplicationReadyEvent` (Boot), `ContextClosedEvent` — which you'll see implemented this way.
+
+## The modern way: @EventListener
+
+The event is **any POJO** (no superclass), and the listener is any method on a Spring bean annotated with `@EventListener`. Spring dispatches by the method's parameter type:
+
+```java
+record OrderPlacedEvent(long orderId) {}
+
+@Component
+class OrderListeners {
+    @EventListener
+    void sendEmail(OrderPlacedEvent e) { /* ... */ }
+
+    @EventListener
+    void updateMetrics(OrderPlacedEvent e) { /* a second, independent reaction */ }
+}
+```
+
+Several `@EventListener` features matter in interviews:
+
+- **`condition`** — a SpEL guard so the method only runs for matching events: `@EventListener(condition = "#e.orderId > 0")`.
+- **Multiple types** — `@EventListener({OrderPlacedEvent.class, OrderCancelledEvent.class})` with no method parameter.
+- **Return value becomes a new event** — if the method returns a non-null object, Spring publishes *that* as a follow-on event. Returning a collection publishes each element. Return `void` to opt out.
+- **Ordering** — listeners on the same event are unordered unless you add `@Order(n)` (lower runs first).
+
+## How publishing works
+
+You inject `ApplicationEventPublisher` and call `publishEvent`. Every matching listener runs **synchronously, on the calling thread**, before `publishEvent` returns. If a listener throws, the exception propagates back to the publisher and stops the remaining listeners — there's no built-in isolation. That single-thread, fail-fast behavior is the thing to remember, because it's the basis for every follow-up question about async and transactions.
+
+<ProbeNote>The interviewer wants to hear that `@EventListener` (Spring 4.2+) replaced the `ApplicationEvent`/`ApplicationListener` boilerplate, that events can be plain objects, and crucially that dispatch is **synchronous on the publisher's thread**. Mentioning `condition`, `@Order`, or return-value chaining marks you as someone who's actually used it.</ProbeNote>

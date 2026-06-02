@@ -1,0 +1,47 @@
+**`SECURITY INVOKER` (the default) runs a function with the privileges of the *user who calls it*; `SECURITY DEFINER` runs it with the privileges of the *user who owns it* — like Unix setuid.** Definer is how you grant a controlled, narrow capability to users who lack direct table access, and it's also a notorious privilege-escalation footgun if you don't harden `search_path`.
+
+## What each means
+
+With **`SECURITY INVOKER`**, every table the function touches is checked against the caller's own grants. If the caller can't `SELECT` the table directly, the function fails — privileges are exactly the caller's.
+
+With **`SECURITY DEFINER`**, permission checks use the function *owner's* rights. So a low-privilege user can call a definer function that reads or writes tables they have no direct access to — but *only* through the function's vetted logic.
+
+```sql
+-- low-priv users can't touch the table directly, but may withdraw via this gate
+CREATE FUNCTION withdraw(acct int, amt numeric) RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp   -- the critical hardening line
+AS $$
+BEGIN
+  IF amt <= 0 THEN RAISE EXCEPTION 'amount must be positive'; END IF;
+  UPDATE accounts SET balance = balance - amt WHERE id = acct;
+END $$;
+
+REVOKE ALL ON FUNCTION withdraw(int, numeric) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION withdraw(int, numeric) TO teller_role;
+```
+
+## The search_path attack — why hardening is mandatory
+
+A `SECURITY DEFINER` function inherits the *caller's* `search_path` unless you pin it. An attacker can create a malicious object (a function or operator) in their own schema that sits earlier on the path than the real one, so an *unqualified* reference inside your definer function resolves to **their** code — now executing with the owner's elevated rights.
+
+Defenses, in order:
+
+1. **`SET search_path`** on the function to a trusted, minimal value — `pg_catalog, pg_temp`, with `pg_temp` last so temp objects can't shadow real ones.
+2. **Schema-qualify** every object reference inside the body (`public.accounts`, not `accounts`).
+3. **`REVOKE EXECUTE FROM PUBLIC`** and grant only to the roles that should call it — definer functions are `EXECUTE`-able by `PUBLIC` by default.
+
+```sql
+ALTER FUNCTION withdraw(int, numeric) SET search_path = pg_catalog, pg_temp;
+```
+
+## When to use which
+
+Default to `SECURITY INVOKER` — least surprise, least privilege. Reach for `SECURITY DEFINER` only when you deliberately want to expose a *controlled gateway* to data the caller otherwise can't reach: a withdrawal function, a maintenance routine, an API surface for an application role. Keep the body small, validated, and fully schema-qualified.
+
+<Callout kind="danger" title="Never ship a definer function with a loose search_path">
+A `SECURITY DEFINER` function without a pinned `SET search_path` is a classic privilege-escalation vector: an unqualified table or function name can be hijacked by an object in a schema the attacker controls, running as the owner. Always `SET search_path` and schema-qualify.
+</Callout>
+
+<ProbeNote>They want the setuid analogy (definer = owner's rights, invoker = caller's), a concrete use case (controlled gateway to restricted data), and — the part that separates security-aware engineers — the `search_path` hardening: pin `SET search_path`, schema-qualify, and `REVOKE FROM PUBLIC`. Omitting the search_path caveat is the answer interviewers are listening for.</ProbeNote>

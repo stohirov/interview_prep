@@ -1,0 +1,51 @@
+**A starter is a curated, version-aligned dependency aggregator — a jar that mostly contains a `pom.xml` declaring transitive dependencies, not code.** Adding `spring-boot-starter-web` pulls in Spring MVC, an embedded Tomcat, Jackson, and validation in one line, all at versions guaranteed to work together.
+
+## What a starter actually contains
+
+A typical starter has almost no classes of its own. Its value is the dependency list:
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-web</artifactId>
+</dependency>
+```
+
+That single coordinate transitively brings in `spring-webmvc`, `spring-boot-starter-tomcat` (embedded server), `spring-boot-starter-json` (Jackson), and `spring-boot-starter-validation`. You don't manage their versions — the **Boot BOM** (imported via the `spring-boot-starter-parent` or `dependencyManagement`) pins every version so they're mutually compatible.
+
+## Why starters and auto-configuration are a pair
+
+A starter puts the libraries on the classpath; **auto-configuration reacts to them**. `spring-boot-starter-web` puts `DispatcherServlet` and Tomcat on the classpath, so `DispatcherServletAutoConfiguration` and `ServletWebServerFactoryAutoConfiguration` fire their `@ConditionalOnClass` guards and wire the web stack. The starter is the trigger; the auto-config is the reaction.
+
+## Naming convention
+
+- Official starters: `spring-boot-starter-*` (`-web`, `-data-jpa`, `-security`, `-actuator`, `-test`).
+- Third-party starters must **not** use that prefix; convention is `<name>-spring-boot-starter` (e.g. `mybatis-spring-boot-starter`).
+
+## Anatomy of a custom starter
+
+A well-structured custom starter is usually **two modules**:
+
+```text
+acme-spring-boot-autoconfigure   ← the @AutoConfiguration classes + AutoConfiguration.imports
+acme-spring-boot-starter         ← empty jar that depends on the autoconfigure module
+                                    + the third-party libraries it configures
+```
+
+```xml
+<!-- acme-spring-boot-starter/pom.xml -->
+<dependencies>
+    <dependency>
+        <groupId>com.acme</groupId>
+        <artifactId>acme-spring-boot-autoconfigure</artifactId>
+    </dependency>
+    <dependency>  <!-- the library this starter configures -->
+        <groupId>com.acme</groupId>
+        <artifactId>acme-client</artifactId>
+    </dependency>
+</dependencies>
+```
+
+Splitting them lets a user depend on the autoconfigure module alone if they want to manage the underlying library versions themselves.
+
+<ProbeNote>The interviewer wants "dependency aggregator, no code, version-aligned via the BOM" and the link to auto-configuration: the starter puts jars on the classpath so `@ConditionalOnClass` guards fire. Knowing the `*-spring-boot-starter` naming convention and the autoconfigure/starter two-module split marks a senior answer.</ProbeNote>

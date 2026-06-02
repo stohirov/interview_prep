@@ -1,0 +1,47 @@
+**`@TransactionalEventListener` binds a listener to the publisher's transaction lifecycle, so it fires at a specific *phase* — most usefully *after* the transaction commits.** A plain `@EventListener` runs immediately, mid-transaction; that's wrong when the side effect must only happen if the data actually persisted.
+
+## The problem it solves
+
+```java
+@Transactional
+void place(Order o) {
+    repo.save(o);
+    events.publishEvent(new OrderPlacedEvent(o.id()));
+    // a plain @EventListener already ran HERE — before commit.
+    // If a later line throws, the tx rolls back but the email was already sent.
+}
+```
+
+The email listener fired while the transaction was still open. If anything after `publishEvent` fails, the order is gone but the customer got a confirmation. `@TransactionalEventListener` fixes the ordering.
+
+## The phases
+
+```java
+@Component
+class OrderEmailListener {
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    void onCommit(OrderPlacedEvent e) { /* safe: data is durable */ }
+}
+```
+
+- **`BEFORE_COMMIT`** — after the listener-relevant work but just before commit; still inside the transaction, so it can still cause a rollback by throwing.
+- **`AFTER_COMMIT`** — the **default**; runs only once the commit succeeded. The right place for "notify the world the thing happened."
+- **`AFTER_ROLLBACK`** — runs only if the transaction rolled back.
+- **`AFTER_COMPLETION`** — runs after the transaction ends either way (commit or rollback).
+
+## The gotcha: it needs a transaction
+
+A `@TransactionalEventListener` only fires if the event was published **inside an active transaction**. Publish with no transaction running and the listener is silently skipped by default. To make it run anyway, set `fallbackExecution = true`:
+
+```java
+@TransactionalEventListener(fallbackExecution = true)
+void on(OrderPlacedEvent e) { ... }
+```
+
+This silent no-op trips people up constantly — a listener "isn't firing" simply because the call path had no transaction.
+
+## AFTER_COMMIT runs on the publisher's thread, synchronously
+
+By default the `AFTER_COMMIT` callback runs on the **same thread**, after commit but before the transaction-management code fully unwinds. New writes from inside an `AFTER_COMMIT` listener won't join the just-committed transaction — they need their own (`@Transactional(propagation = REQUIRES_NEW)`). If you want it off the request thread, combine `@Async` with `@TransactionalEventListener`; the listener then runs on a `TaskExecutor` after the commit, decoupling latency from the request.
+
+<ProbeNote>Name all four phases and that `AFTER_COMMIT` is the default. The two senior tells: it **silently skips** when there's no transaction (unless `fallbackExecution = true`), and an `AFTER_COMMIT` listener that writes needs `REQUIRES_NEW` because the original transaction is already closed. Bonus: combine with `@Async` to move it off the request thread.</ProbeNote>

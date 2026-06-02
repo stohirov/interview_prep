@@ -1,0 +1,38 @@
+**There are five table-access nodes you'll see constantly, and each exists because it wins in a specific regime of selectivity.** Being able to name them and say *why the planner picked this one* is core senior material.
+
+## Seq Scan
+
+Reads the whole table, row by row, applying the filter. Cost is proportional to table size and **independent of selectivity** — reading 1 matching row out of a million still scans the million. It wins when a large fraction of rows match (so an index would just add random I/O on top of reading most pages anyway) or when the table is tiny.
+
+## Index Scan
+
+Walks the index to find matching entries, then for each one does a **random heap fetch** to get the full row. Great when few rows match. The hidden cost is those random fetches: each matched index entry can mean one random page read, which is why high-selectivity (many matches) flips the planner back to Seq Scan.
+
+## Index Only Scan
+
+Same index walk, but the query's columns are **all available in the index** (or `INCLUDE`d), so PostgreSQL skips the heap entirely — *if* the page is marked all-visible in the visibility map. This is the fastest scan; it's why covering indexes matter.
+
+```sql
+CREATE INDEX ON orders (customer_id) INCLUDE (status);
+-- SELECT status FROM orders WHERE customer_id = 42;  -> Index Only Scan
+```
+
+## Bitmap Index Scan + Bitmap Heap Scan
+
+The planner's middle ground for "more rows than an Index Scan likes, fewer than a Seq Scan needs." It runs in two phases:
+
+1. **Bitmap Index Scan** builds an in-memory bitmap of matching heap *pages* (optionally combining several indexes with AND/OR).
+2. **Bitmap Heap Scan** then visits those pages **in physical order**, turning scattered random I/O into mostly sequential I/O.
+
+```
+Bitmap Heap Scan on orders  (recheck cond: ...)
+  ->  Bitmap Index Scan on orders_status_idx
+```
+
+The `Recheck Cond` appears because a bitmap can become "lossy" (track whole pages, not exact rows) when it grows past `work_mem`, so each row is re-tested.
+
+<Callout kind="info" title="One-line mental model">
+Few rows → Index Scan. Many rows → Seq Scan. In between, or combining multiple indexes → Bitmap. All columns in the index + visible → Index Only Scan.
+</Callout>
+
+<ProbeNote>The probe is whether you understand that the choice is about **random vs sequential I/O and selectivity**, not "indexes are always faster." Mentioning the visibility map (for Index Only Scans) and lossy bitmaps / `Recheck Cond` signals real EXPLAIN-reading experience.</ProbeNote>

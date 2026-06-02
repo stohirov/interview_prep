@@ -1,0 +1,37 @@
+**Each annotation maps to a distinct cache *operation*, and the key to a strong answer is naming what runs the method versus what only touches the cache.** Spring weaves one proxy that interprets all of them.
+
+## The four annotations
+
+**`@Cacheable("books")`** — lookup-or-store. The proxy computes the key, checks the cache: on a **hit** it returns the cached value and the method body *never runs*; on a **miss** it invokes the method and stores the result. Use it for read-heavy, idempotent lookups.
+
+**`@CachePut("books")`** — always invoke, then store. The method *always* runs and its return value overwrites the cached entry. This is the update tool — never use `@Cacheable` for a method with side effects, because on a hit those side effects are skipped.
+
+**`@CacheEvict("books")`** — remove. By default evicts one key; `allEntries = true` clears the whole region; `beforeInvocation = true` evicts *before* the method runs (so an exception still clears the entry).
+
+**`@Caching`** — composition. When one method needs several operations that can't be expressed by a single annotation, you nest lists of the others.
+
+## Composition in practice
+
+```java
+@CachePut(value = "books", key = "#book.id")
+@CacheEvict(value = "booksByAuthor", key = "#book.authorId")
+public Book save(Book book) { return repo.save(book); }
+```
+
+Spring lets you stack different cache annotations directly when each appears once. But if you need, say, **two evicts** on the same method, the annotations aren't repeatable individually — you must wrap them in `@Caching`:
+
+```java
+@Caching(evict = {
+  @CacheEvict(value = "books",        key = "#id"),
+  @CacheEvict(value = "booksByAuthor", allEntries = true)
+})
+public void delete(long id) { repo.deleteById(id); }
+```
+
+`@Caching` exposes `cacheable`, `put`, and `evict` arrays, so you can also combine a `@CachePut` with multiple evicts in one declaration.
+
+## Ordering gotcha
+
+When `@Cacheable` and `@CachePut` target the *same* key on the same method, behaviour is undefined — they contradict each other (one wants to skip, one wants to run). Don't do it. Keep one operation per cache/key per method.
+
+<ProbeNote>Interviewers want crisp role separation: `@Cacheable` *may skip* the method, `@CachePut` *always runs* it, `@CacheEvict` removes. The senior signal is knowing `@Caching` exists specifically to compose multiple operations (e.g. two evicts) that can't otherwise stack, plus `beforeInvocation` and `allEntries` on evict.</ProbeNote>

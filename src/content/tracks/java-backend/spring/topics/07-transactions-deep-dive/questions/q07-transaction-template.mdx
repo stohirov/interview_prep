@@ -1,0 +1,45 @@
+**`TransactionTemplate` is the *programmatic* alternative to `@Transactional`: instead of an annotation and a proxy, you wrap a block of code in a callback and the template runs it inside a transaction.** Same `PlatformTransactionManager` underneath — you're just driving it by hand.
+
+## How it looks
+
+```java
+@Service
+class ImportService {
+
+    private final TransactionTemplate tx;
+    private final ImportRepository repo;
+
+    ImportService(PlatformTransactionManager txManager, ImportRepository repo) {
+        this.tx = new TransactionTemplate(txManager);
+        this.repo = repo;
+    }
+
+    public ImportResult run(Batch batch) {
+        return tx.execute(status -> {          // begins a transaction
+            repo.save(batch.header());
+            if (batch.isEmpty()) {
+                status.setRollbackOnly();      // explicit rollback, no exception needed
+                return ImportResult.empty();
+            }
+            repo.saveAll(batch.lines());
+            return ImportResult.ok();          // returning commits
+        });
+    }
+}
+```
+
+`execute` returns your value; `executeWithoutResult` takes a `Consumer<TransactionStatus>` for void work. You set propagation, isolation, timeout, and read-only on the template instance. Crucially, **any exception that escapes the callback triggers a rollback** — including *checked* exceptions (wrap them or use `execute`'s lambda which only allows unchecked), unlike the annotation's checked-commits default.
+
+## When to reach for it
+
+- **Self-invocation.** Because there's no proxy, calling it from within the same bean just works — a clean escape from that trap.
+- **Fine-grained boundaries.** You want a transaction around only *part* of a method, or multiple short transactions in a loop, rather than one annotation spanning the whole method.
+- **Conditional rollback** without throwing — `status.setRollbackOnly()` reads more naturally than manufacturing an exception.
+- **Dynamic settings** chosen at runtime (propagation/timeout computed from inputs), which annotations can't express.
+- **Programmatic / non-bean contexts** where there's no proxied method to annotate.
+
+<Callout kind="tip" title="Template vs annotation">
+Default to `@Transactional` — it's declarative and keeps the transaction concern out of business logic. Reach for `TransactionTemplate` only when you need *control the annotation can't give you*: a partial-method boundary, runtime-chosen settings, or escaping self-invocation. `TransactionTemplate` is thread-safe; create one and reuse it.
+</Callout>
+
+<ProbeNote>They want to hear that it's the same transaction manager driven imperatively, that exceptions roll back and `setRollbackOnly()` rolls back without throwing, and a real reason to prefer it — typically dodging self-invocation or needing a sub-method boundary.</ProbeNote>

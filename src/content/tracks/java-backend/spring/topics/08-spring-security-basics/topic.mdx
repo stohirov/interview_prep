@@ -1,0 +1,39 @@
+Spring Security is a **chain of servlet filters** that runs *before* your controllers, deciding two separate things on every request: *who is calling* (authentication) and *what they're allowed to do* (authorization). Everything else — login forms, JWT validation, CSRF tokens, method guards — is built on top of that filter chain and a small set of core abstractions.
+
+The single most important modern fact: in Spring Security 6 (Boot 3.x) `WebSecurityConfigurerAdapter` is **removed**. You configure security by declaring a `SecurityFilterChain` `@Bean` using the **lambda DSL**:
+
+```java
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+    @Bean
+    SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/public/**").permitAll()
+                .requestMatchers("/admin/**").hasRole("ADMIN")
+                .anyRequest().authenticated())
+            .formLogin(Customizer.withDefaults())
+            .csrf(Customizer.withDefaults());
+        return http.build();
+    }
+
+    @Bean
+    PasswordEncoder passwordEncoder() {
+        return PasswordEncoderFactories.createDelegatingPasswordEncoder();
+    }
+}
+```
+
+The authentication machinery is a few collaborating pieces: a `UserDetailsService` loads a `UserDetails` by username; an `AuthenticationProvider` (often `DaoAuthenticationProvider`) verifies the credentials with a `PasswordEncoder`; the resulting `Authentication` (principal + authorities) is stored in a `SecurityContext`, held by the `SecurityContextHolder` (a thread-local by default). Authorization then reads those authorities — at the URL level in the filter chain, or at the method level with `@EnableMethodSecurity` plus `@PreAuthorize`.
+
+Passwords are **never** stored in plain text or hashed with MD5/SHA-1; the default `DelegatingPasswordEncoder` prefixes each hash with its algorithm (`{bcrypt}`, `{argon2}`) so you can upgrade encoders over time.
+
+For APIs you typically go **stateless**: disable CSRF, configure CORS, and validate a bearer token via `oauth2ResourceServer(o -> o.jwt(...))` instead of a session.
+
+<Callout kind="tip" title="The interview hook">
+Lead with the shape: "Security is a filter chain in front of my controllers; it answers *authentication* — who — then *authorization* — what. In Boot 3 I wire it as a `SecurityFilterChain` bean with the lambda DSL, since `WebSecurityConfigurerAdapter` is gone." Everything below — encoders, method security, CSRF, CORS, JWT, OAuth2 — hangs off that one sentence.
+</Callout>
+
+The questions below walk the filter chain, the core abstractions, password encoders, method security, CSRF and CORS, JWT and the three OAuth2 roles, custom providers, and the `SecurityContextHolder` strategies that trip people up with virtual threads and reactive code.

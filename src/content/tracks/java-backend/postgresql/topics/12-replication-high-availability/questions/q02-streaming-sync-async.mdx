@@ -1,0 +1,33 @@
+**The sync/async axis is a durability-versus-latency trade-off: does the primary wait for a standby to confirm before reporting `COMMIT` as successful?** Both modes stream the same WAL; they differ only in *when* the committing transaction is released.
+
+## Asynchronous (the default)
+
+The primary writes the commit to its own WAL, fsyncs locally, and returns success **immediately** — it does not wait for any standby. WAL flows to the standby continuously, but a few transactions may still be in flight when the primary crashes.
+
+- **Pro:** commit latency is unaffected by network round-trips or standby health. A slow or dead standby never stalls the primary.
+- **Con:** a primary failure can lose the last few committed transactions (a small but non-zero RPO).
+
+## Synchronous
+
+The committing transaction **blocks** until a designated standby acknowledges the WAL. You enable it by naming standbys in `synchronous_standby_names` and choosing how much durability you require via `synchronous_commit`:
+
+```ini
+# postgresql.conf on the primary
+synchronous_standby_names = 'ANY 1 (standby1, standby2)'
+synchronous_commit = on
+```
+
+`synchronous_commit` controls the acknowledgment point on the standby — `remote_write` (WAL written to the standby OS), `on` (WAL flushed to standby disk; the common choice), or `remote_apply` (WAL actually **replayed** so the change is visible on the replica, useful when you read-after-write on the standby). `ANY 1 (...)` means any one of the listed standbys is enough — quorum commit.
+
+- **Pro:** zero data loss for confirmed commits — the transaction is durable on at least one other machine before the client is told it succeeded.
+- **Con:** every commit pays a network round-trip, so throughput and latency suffer.
+
+<Callout kind="danger" title="The single-synchronous-standby trap">
+If you configure exactly one synchronous standby and it goes down, **commits on the primary hang** waiting for an acknowledgment that will never come — sync replication chose consistency over availability. The fix is quorum (`ANY 1 (s1, s2)`) so the loss of one standby doesn't freeze writes.
+</Callout>
+
+## How to choose
+
+Default to **async** for read-scaling and most HA setups where a tiny RPO is acceptable. Use **sync** when losing a committed transaction is unacceptable (payments, ledgers) — and always pair it with quorum or a second sync candidate so a single standby outage can't stall the primary.
+
+<ProbeNote>Frame it as durability vs latency, and name `synchronous_standby_names` plus `synchronous_commit`. The standout point is the **availability trap**: a lone synchronous standby failing will block all writes, so production sync setups use quorum (`ANY 1 (...)`).</ProbeNote>

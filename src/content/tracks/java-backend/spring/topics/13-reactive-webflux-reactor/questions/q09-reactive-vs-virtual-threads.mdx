@@ -1,0 +1,35 @@
+**Virtual threads (Project Loom, stable in Java 21) make blocking cheap, which removes the *primary* reason most teams adopted reactive — scaling I/O-bound workloads. For those apps, virtual threads give you most of the throughput with imperative code. But reactive still wins where it was always strongest: streaming, backpressure, and declarative composition.** The mature answer is "it depends, and the default has shifted toward virtual threads."
+
+## What virtual threads change
+
+The original case for WebFlux was: thread-per-request doesn't scale because OS threads are expensive and blocking parks them. Virtual threads demolish that premise. A virtual thread is cheap (kilobytes, millions of them), and when it blocks on I/O the JVM *unmounts* it from its carrier thread — so the carrier stays busy and you get event-loop-like efficiency while writing ordinary blocking code.
+
+```java
+// Spring Boot: one property, JDBC/blocking code now scales
+spring.threads.virtual.enabled=true
+
+@GetMapping("/u/{id}")
+User get(@PathVariable Long id) {
+    return repo.findById(id);   // blocking JDBC, but on a virtual thread
+}
+```
+
+You keep readable stack traces, debuggers that work, JDBC/JPA, `ThreadLocal`-based security, and the entire imperative ecosystem — and still serve high concurrency.
+
+## What virtual threads do *not* give you
+
+Loom is about cheap blocking, not about data-flow semantics. Reactive remains the better tool when you need:
+
+- **Backpressure** — a consumer-driven `request(n)` flow-control protocol. Virtual threads have no equivalent; a fast producer still needs manual queue management.
+- **Streaming** — server-sent events, infinite streams, processing rows as they arrive with bounded memory. `Flux` models this natively.
+- **Declarative composition** — fan-out/fan-in across many calls with `zip`, `flatMap`, timeouts, retries, and cancellation (`switchMap`) expressed as a pipeline. Doing this imperatively across virtual threads is possible but clumsier.
+
+## The pin caveat
+
+Virtual threads aren't free of footguns: blocking inside a `synchronized` block (or certain native calls) can **pin** the virtual thread to its carrier, defeating the benefit. Pre-21u fixes and library updates address most of this, but it's worth knowing.
+
+<Callout kind="tip" title="How to answer">
+"For a typical I/O-bound CRUD service, virtual threads now give me the concurrency I wanted from WebFlux without the reactive learning curve, the all-the-way-down constraint, or the debugging pain. I'd still choose reactive for streaming, backpressure, and complex async composition — where `Flux` is genuinely the better abstraction, not just a scalability hack."
+</Callout>
+
+<ProbeNote>They're testing judgment, not dogma. Show that Loom removes the scalability motivation (cheap blocking) but not the data-flow motivation (backpressure, streaming, composition). Naming pinning, and saying virtual threads are now your *default* for I/O-bound apps, signals you're current and pragmatic.</ProbeNote>

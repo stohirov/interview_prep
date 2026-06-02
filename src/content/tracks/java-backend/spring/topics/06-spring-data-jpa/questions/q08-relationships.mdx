@@ -1,0 +1,65 @@
+**The four relationship annotations map foreign keys and join tables onto object references — and the two things interviewers actually test are *who owns the foreign key* and *what the default fetch type is*.** Get those two right and the rest follows.
+
+## @ManyToOne — the owning side
+
+The most common and the simplest: the child holds the FK.
+
+```java
+@Entity
+class Order {
+    @ManyToOne(fetch = FetchType.LAZY)   // override the EAGER default!
+    @JoinColumn(name = "customer_id")
+    Customer customer;
+}
+```
+
+`@ManyToOne` is the **owning** side — `@JoinColumn` names the FK column on `orders`. Its default fetch is **EAGER**, which is almost always wrong (see the fetch-types question) — override it to LAZY.
+
+## @OneToMany — the inverse side
+
+```java
+@Entity
+class Customer {
+    @OneToMany(mappedBy = "customer", cascade = ALL, orphanRemoval = true)
+    List<Order> orders = new ArrayList<>();
+}
+```
+
+`mappedBy = "customer"` says "the `Order.customer` field owns this relationship; I'm just the inverse view." Without `mappedBy`, JPA assumes a join table. `@OneToMany` defaults to **LAZY** (good). Use `cascade` to propagate persist/remove, and `orphanRemoval` to delete children removed from the collection.
+
+## @OneToOne
+
+```java
+@OneToOne(fetch = FetchType.LAZY)
+@JoinColumn(name = "profile_id")
+Profile profile;
+```
+
+Also defaults to **EAGER** — override to LAZY. Note a nullable lazy `@OneToOne` on the *inverse* (`mappedBy`) side can't be proxied and stays eager unless you use bytecode enhancement; the owning side with the FK lazies cleanly.
+
+## @ManyToMany
+
+```java
+@ManyToMany
+@JoinTable(name = "user_roles",
+    joinColumns = @JoinColumn(name = "user_id"),
+    inverseJoinColumns = @JoinColumn(name = "role_id"))
+Set<Role> roles = new HashSet<>();
+```
+
+Uses a **join table**. Defaults to **LAZY**.
+
+## Fetch defaults — memorise this
+
+```text
+@ManyToOne   → EAGER  (override to LAZY)
+@OneToOne    → EAGER  (override to LAZY)
+@OneToMany   → LAZY
+@ManyToMany  → LAZY
+```
+
+<Callout kind="tip" title="Always set both sides">
+For bidirectional relations, maintain both ends in a helper (`addOrder(o){ orders.add(o); o.setCustomer(this); }`). Setting only one side leaves the in-memory graph inconsistent with what gets persisted, and the FK is driven by the **owning** side only.
+</Callout>
+
+<ProbeNote>They're checking you know the *owning* side holds the FK (and drives persistence), `mappedBy` marks the inverse, join tables back `@ManyToMany`, and — the memorisable bit — **`*ToOne` defaults to EAGER (bad), `*ToMany` to LAZY**. Bonus: `orphanRemoval` vs `cascade`, and keeping bidirectional links in sync.</ProbeNote>

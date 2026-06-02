@@ -1,0 +1,34 @@
+**These are the four row-level lock modes you request explicitly in a `SELECT`, ordered from strongest to weakest, and the difference comes down to which *other* lockers they conflict with — especially around foreign keys.** PostgreSQL added the two weaker modes specifically to reduce foreign-key contention.
+
+## The four modes, strongest to weakest
+
+- **`FOR UPDATE`** — the strongest. Locks the row exclusively; blocks any other `FOR UPDATE`, `FOR NO KEY UPDATE`, `FOR SHARE`, `FOR KEY SHARE`, and any actual `UPDATE`/`DELETE`. Use when you intend to update or delete the row.
+- **`FOR NO KEY UPDATE`** — like `FOR UPDATE` but slightly weaker: it does *not* conflict with `FOR KEY SHARE`. This is the lock a normal `UPDATE` that doesn't touch key columns takes internally.
+- **`FOR SHARE`** — shared lock. Multiple transactions can hold it simultaneously (concurrent readers protecting the row from change), but it blocks anyone trying to `UPDATE`/`DELETE` the row. Use to ensure a row stays unchanged while you read it, without serializing other readers.
+- **`FOR KEY SHARE`** — the weakest. Blocks only `FOR UPDATE` (and key changes), not `FOR NO KEY UPDATE`. This is the lock a **foreign-key check** takes on the parent row.
+
+```sql
+SELECT * FROM accounts WHERE id = 1 FOR UPDATE;          -- I will modify it
+SELECT * FROM accounts WHERE id = 1 FOR NO KEY UPDATE;   -- modify, not keys
+SELECT * FROM accounts WHERE id = 1 FOR SHARE;           -- must stay stable
+SELECT * FROM accounts WHERE id = 1 FOR KEY SHARE;       -- keep key referencable
+```
+
+## Why the "NO KEY" / "KEY SHARE" pair exists
+
+The headline use case is **foreign keys**. When you insert a child row, PostgreSQL must verify the parent exists and takes `FOR KEY SHARE` on it. Before these modes existed, that check took `FOR SHARE`, which blocked any concurrent `UPDATE` of the parent — so updating a customer's name was blocked merely because someone inserted an order referencing it. With the split, `FOR KEY SHARE` (the FK check) and `FOR NO KEY UPDATE` (a non-key update) **don't conflict**, so the two operations proceed concurrently. This is the concrete win to cite.
+
+## Conflict summary
+
+| Mode | Conflicts with |
+|---|---|
+| `FOR KEY SHARE` | `FOR UPDATE` |
+| `FOR SHARE` | `FOR UPDATE`, `FOR NO KEY UPDATE` |
+| `FOR NO KEY UPDATE` | the above + `FOR NO KEY UPDATE` |
+| `FOR UPDATE` | all of the above |
+
+<Callout kind="tip" title="Pair with NOWAIT or SKIP LOCKED">
+`FOR UPDATE NOWAIT` errors immediately instead of blocking; `FOR UPDATE SKIP LOCKED` silently ignores already-locked rows. The latter is the standard way to build a **work-queue** in PostgreSQL — each worker grabs the next unlocked job without contending.
+</Callout>
+
+<ProbeNote>Order them by strength and explain the conflict matrix, but the answer that lands is *why* the NO-KEY/KEY-SHARE pair exists: so foreign-key checks (`FOR KEY SHARE`) stop blocking non-key updates (`FOR NO KEY UPDATE`). Bonus: `SKIP LOCKED` for queue patterns.</ProbeNote>

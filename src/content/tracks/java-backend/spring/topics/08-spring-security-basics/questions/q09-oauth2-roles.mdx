@@ -1,0 +1,45 @@
+**OAuth2 defines three distinct roles, and Spring Security has a separate module for each — confusing them is the most common OAuth2 interview stumble.** A given application usually plays *one* role; pick the wrong starter and nothing lines up.
+
+## Authorization server — *issues* tokens
+
+The identity provider. It authenticates the user, runs the OAuth2 flows (authorization code, client credentials), and **mints and signs** the access/refresh tokens and (with OIDC) ID tokens. It owns the login page, the consent screen, and the signing keys (exposed via a JWKS endpoint).
+
+In Spring this is **Spring Authorization Server** — a *separate project* (`spring-security-oauth2-authorization-server`), not part of core Security. Most teams instead run an off-the-shelf one: Keycloak, Auth0, Okta, Entra ID. You rarely build your own.
+
+## Resource server — *validates* tokens, serves data
+
+Your protected API. It receives `Authorization: Bearer <token>`, **validates** it (signature via the issuer's JWKS, expiry, audience), maps claims to authorities, and returns data. It never handles passwords or login.
+
+```java
+http.oauth2ResourceServer(o -> o.jwt(Customizer.withDefaults()));
+```
+
+`spring-boot-starter-oauth2-resource-server`. This is what most backend services you write are.
+
+## Client — *obtains and uses* tokens on a user's behalf
+
+An app that wants to call protected resources *as the user*. It redirects the user to the authorization server, receives an authorization code, exchanges it for tokens, and then either logs the user in (OIDC) or calls downstream APIs with the access token. Think "Login with Google" in a web app.
+
+```java
+http.oauth2Login(Customizer.withDefaults());   // OIDC login
+// or oauth2Client(...) to call APIs with the user's token
+```
+
+`spring-boot-starter-oauth2-client`.
+
+## How they fit together
+
+```text
+Client  --(login redirect)-->  Authorization Server
+Client  <--(tokens)----------  Authorization Server
+Client  --(Bearer token)---->  Resource Server (your API)
+                               Resource Server validates via Auth Server's JWKS
+```
+
+The client *gets* a token, the authorization server *issues* it, the resource server *trusts* it.
+
+<Callout kind="tip" title="One project, usually one role">
+Map your app before configuring: "Am I issuing tokens, validating them, or consuming an external login?" A backend API is almost always a **resource server**; a user-facing web app doing SSO is a **client**; you only run an **authorization server** if you're the IdP.
+</Callout>
+
+<ProbeNote>Nail the three verbs: authorization server **issues**, resource server **validates**, client **obtains and uses**. The Spring-specific signal: the three matching starters (authorization-server / resource-server / client), and that Spring Authorization Server is a separate project most teams replace with Keycloak/Auth0/Okta.</ProbeNote>

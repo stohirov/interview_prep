@@ -1,0 +1,29 @@
+**Aspect-Oriented Programming (AOP) is how Spring modularizes *cross-cutting concerns* — logic that cuts across many classes and doesn't belong to any one of them: transaction management, security, caching, logging, metrics, retry.** Without AOP that code gets copy-pasted into every method; with it, you write the concern once as an *aspect* and declare *where* it applies. Almost every "magic" annotation in Spring — `@Transactional`, `@Async`, `@Cacheable`, `@PreAuthorize` — is AOP underneath.
+
+The mechanism is **proxies**. Spring AOP is *proxy-based and runtime*: when a bean matches a pointcut, the container hands you not the raw object but a proxy that wraps it. The proxy intercepts each method call, runs the advice, then delegates to the real target.
+
+```java
+@Aspect
+@Component
+public class TimingAspect {
+    @Around("execution(* com.example.service..*(..))")
+    public Object time(ProceedingJoinPoint pjp) throws Throwable {
+        long t = System.nanoTime();
+        try {
+            return pjp.proceed();          // call the real method
+        } finally {
+            log.info("{} took {}ns", pjp.getSignature(), System.nanoTime() - t);
+        }
+    }
+}
+```
+
+Enable it with `@EnableAspectJAutoProxy` (Spring Boot does this automatically). Spring AOP borrows AspectJ's *annotation syntax* but is **not** AspectJ — it only intercepts **public method executions on Spring beans**, using JDK dynamic proxies (interface-based) or CGLIB (subclassing). The full AspectJ compiler does true bytecode weaving and can hit any joinpoint, including field access and constructors.
+
+The vocabulary you must own: an **aspect** bundles advice + pointcut; a **joinpoint** is a point where advice can run (in Spring AOP, always a method execution); a **pointcut** is an expression selecting joinpoints; **advice** is the code that runs (`@Before`, `@Around`, …); a **target** is the wrapped bean.
+
+<Callout kind="tip" title="The interview hook">
+Lead with: "Spring AOP is *proxy-based*. The container replaces the bean with a proxy that intercepts method calls. That single fact explains everything that confuses people — why `@Transactional` needs a public method, why self-invocation silently skips the advice, and why `this.foo()` behaves differently from an injected reference." Then connect it to the real features built on it.
+</Callout>
+
+The questions below cover Spring AOP vs AspectJ, JDK vs CGLIB proxies, pointcut designators, the five advice types, the self-invocation trap, and the features that ride on all of it.

@@ -1,0 +1,43 @@
+**Denormalization is a performance optimization, not a starting point: you normalize first for correctness, then introduce controlled redundancy *only* against a measured read cost you can't fix any other way.** The senior framing is that denormalization trades write complexity and consistency risk for read speed — and you should be able to name what you give up.
+
+## When it's the right call
+
+**1. Read-heavy aggregates that are expensive to compute live.** A `posts.comment_count` cached on the row beats `COUNT(*)` over a million-row comments table on every page load. Dashboards, feeds, and leaderboards are the canonical cases.
+
+**2. Joins across a hot path that won't change.** If every request joins five tables to render one screen, collapsing a stable lookup (storing `country_name` alongside `country_code`) removes joins from the critical path.
+
+**3. Reporting / analytics tables.** Star schemas in a warehouse are *intentionally* denormalized; OLAP favors wide, redundant fact tables over normalized OLTP shapes.
+
+**4. Immutable historical snapshots.** An invoice should store the price *at time of sale*, not join to a `products` table whose price changes later. This isn't really redundancy — it's capturing a fact that was true at a moment in time, and is correct design.
+
+## The trade-offs you must name
+
+- **Update anomalies return.** Every duplicated value now has N copies to keep in sync. Miss one and your data silently diverges.
+- **Writes get heavier and more complex.** A single logical update fans out to multiple rows/tables.
+- **Storage grows**, and bloated rows mean fewer per page and worse cache locality.
+
+## Keeping the copies consistent — the actual hard part
+
+Denormalization without a sync strategy is just a bug. The options, roughly in order of robustness:
+
+```sql
+-- Trigger keeps the cached count correct transactionally
+CREATE FUNCTION bump_comment_count() RETURNS trigger AS $$
+BEGIN
+  UPDATE posts SET comment_count = comment_count + 1
+  WHERE id = NEW.post_id;
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_comment_count
+AFTER INSERT ON comments
+FOR EACH ROW EXECUTE FUNCTION bump_comment_count();
+```
+
+A **materialized view** is the cleaner choice when the derived data can tolerate staleness — `REFRESH MATERIALIZED VIEW CONCURRENTLY` rebuilds it without blocking reads. **Generated columns** (`GENERATED ALWAYS AS (...) STORED`) handle derivations computable from the same row with zero sync risk. App-side dual writes are the least safe because they're not transactional with the source change.
+
+<Callout kind="warn" title="Denormalize last, measure first">
+"Premature denormalization" is a real failure mode. Prove the normalized query is too slow with `EXPLAIN (ANALYZE, BUFFERS)`, try indexes and query rewrites first, and only then duplicate data — with a trigger or materialized view as the sync mechanism.
+</Callout>
+
+<ProbeNote>The interviewer is testing judgment, not knowledge that redundancy is bad. Strong answers lead with "normalize first, denormalize against a measured read problem," then immediately address the sync mechanism (trigger / materialized view / generated column) — because the cost of denormalization is keeping the copies honest.</ProbeNote>

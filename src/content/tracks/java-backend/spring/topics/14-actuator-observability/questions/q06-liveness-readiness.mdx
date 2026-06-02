@@ -1,0 +1,51 @@
+**Liveness and readiness answer two different questions, and conflating them causes the worst Kubernetes outages.** *Liveness*: "is this process broken beyond recovery — should it be restarted?" *Readiness*: "can this instance handle traffic *right now*?" Spring Boot exposes both as dedicated health groups backed by its `AvailabilityState`.
+
+## The endpoints and what failure means
+
+- **`/actuator/health/liveness`** — failing means the app is in an unrecoverable state. Kubernetes **restarts the pod**.
+- **`/actuator/health/readiness`** — failing means the app is temporarily unable to serve. Kubernetes **removes it from the Service/load balancer** but leaves it running.
+
+The remediation is the opposite in each case, which is why mixing them is dangerous: if a readiness check (say, a downstream dependency being slow) is wired to *liveness*, Kubernetes restarts a perfectly healthy pod — and if the dependency is shared, it restarts your whole fleet in a crash loop.
+
+## Enabling them in Spring Boot
+
+These groups auto-activate when Boot detects Kubernetes, or enable explicitly:
+
+```yaml
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+```
+
+Wire them into the pod spec:
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /actuator/health/liveness
+    port: 8080
+readinessProbe:
+  httpGet:
+    path: /actuator/health/readiness
+    port: 8080
+```
+
+## Driving state from code
+
+Spring tracks `LivenessState` (CORRECT / BROKEN) and `ReadinessState` (ACCEPTING_TRAFFIC / REFUSING_TRAFFIC). Publish transitions with an `ApplicationEventPublisher`:
+
+```java
+AvailabilityChangeEvent.publish(publisher, this,
+    ReadinessState.REFUSING_TRAFFIC);   // e.g. before a long internal task
+```
+
+During startup, readiness is `REFUSING_TRAFFIC` until the context is fully ready, and during graceful shutdown Boot flips it to refusing so the load balancer drains the pod before it stops — a clean rollout with no dropped requests.
+
+<ProbeNote>The core distinction is the remediation: liveness failure **restarts**, readiness failure **deroutes**. The classic mistake — putting dependency checks in liveness, causing restart storms — is exactly what interviewers probe for. Bonus points for graceful shutdown flipping readiness to drain traffic before stopping.</ProbeNote>

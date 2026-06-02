@@ -1,0 +1,54 @@
+**The three cardinalities differ in *where the foreign key lives* and *what constraint enforces uniqueness* — get those two things right and the relationship is correctly modeled.** The mental model: a foreign key on a column makes "many" rows able to point at "one" parent; adding a `UNIQUE` on that FK collapses many to one; a separate table is the only way to get many on both sides.
+
+## One-to-many — FK on the "many" side
+
+The default and most common relationship. A customer has many orders; each order belongs to one customer. The FK lives on the child:
+
+```sql
+CREATE TABLE customers (id bigserial PRIMARY KEY, name text);
+CREATE TABLE orders (
+  id          bigserial PRIMARY KEY,
+  customer_id bigint NOT NULL REFERENCES customers(id),  -- the "many" side holds the FK
+  total       numeric(12,2)
+);
+CREATE INDEX ON orders (customer_id);  -- FKs are not auto-indexed in Postgres
+```
+
+`NOT NULL` makes the relationship mandatory (every order *must* have a customer); drop it for optional. Crucially, **PostgreSQL does not auto-create an index on the referencing column** — always add it yourself, or every parent delete and join scans the child table.
+
+## One-to-one — FK plus a UNIQUE constraint
+
+A one-to-one is a one-to-many with uniqueness forced on the FK, so each parent matches at most one child. Use it to split rarely-accessed or sensitive columns off a hot table:
+
+```sql
+CREATE TABLE users (id bigserial PRIMARY KEY, email text);
+CREATE TABLE user_profiles (
+  user_id bigint PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,  -- PK = UNIQUE + NOT NULL
+  bio     text,
+  avatar  bytea
+);
+```
+
+Making `user_id` the *primary key* of the child is the elegant trick: PK implies `UNIQUE NOT NULL`, so it enforces "exactly one profile per user" in a single declaration. Reasons to actually split 1:1 rather than just add columns: isolating large/blob columns, separating data with different access frequency, or different security/encryption needs.
+
+## Many-to-many — junction table
+
+Neither table can hold the FK, so the relationship becomes its own table with FKs to both parents and a composite PK enforcing pair-uniqueness (covered in depth in the dedicated question):
+
+```sql
+CREATE TABLE student_courses (
+  student_id bigint REFERENCES students(id) ON DELETE CASCADE,
+  course_id  bigint REFERENCES courses(id)  ON DELETE CASCADE,
+  PRIMARY KEY (student_id, course_id)
+);
+```
+
+## The unifying rule
+
+| Cardinality | FK location | Uniqueness enforcer |
+|-------------|-------------|---------------------|
+| One-to-many | child ("many") side | none |
+| One-to-one  | either side | `UNIQUE` / PK on the FK column |
+| Many-to-many | junction table | composite PK on `(a_id, b_id)` |
+
+<ProbeNote>The discriminating signal is articulating that 1:1 is just 1:N plus a UNIQUE on the FK, and 1:N differs from M:N only by which side can hold the FK. Bonus points for "Postgres doesn't auto-index foreign keys" and using a child PK to enforce 1:1 in one stroke.</ProbeNote>

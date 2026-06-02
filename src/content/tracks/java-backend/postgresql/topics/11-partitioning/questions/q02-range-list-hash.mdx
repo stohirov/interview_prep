@@ -1,0 +1,45 @@
+**There are three strategies, and each maps to a different shape of data: `RANGE` for ordered/continuous keys, `LIST` for discrete categories, `HASH` for even spreading when no natural boundary exists.** Picking the right one is mostly about how the data is queried and retired.
+
+## RANGE — the workhorse
+
+Partition by an ordered key into contiguous, non-overlapping intervals. Bounds are `FROM` (inclusive) `TO` (exclusive).
+
+```sql
+CREATE TABLE logs (ts timestamptz, msg text) PARTITION BY RANGE (ts);
+CREATE TABLE logs_2025_06 PARTITION OF logs
+    FOR VALUES FROM ('2025-06-01') TO ('2025-07-01');
+```
+
+Use it for **time-series, dates, sequential IDs, numeric ranges** — anything where queries filter by `>=`/`<`/`BETWEEN` and where you retire old data by dropping the oldest partition. This is the most common case by far.
+
+## LIST — discrete categories
+
+Each partition holds an explicit set of key values.
+
+```sql
+CREATE TABLE customers (id int, region text) PARTITION BY LIST (region);
+CREATE TABLE customers_eu PARTITION OF customers
+    FOR VALUES IN ('DE', 'FR', 'ES', 'IT');
+CREATE TABLE customers_us PARTITION OF customers FOR VALUES IN ('US');
+```
+
+Use it when the key is a **bounded enumeration** — region, tenant tier, country, status — and you often query or manage one category at a time (e.g. data-residency: keep EU rows on a separate tablespace).
+
+## HASH — even distribution
+
+PostgreSQL hashes the key and assigns rows by modulus. You define `MODULUS n` partitions and a `REMAINDER`.
+
+```sql
+CREATE TABLE sessions (uid bigint, data jsonb) PARTITION BY HASH (uid);
+CREATE TABLE sessions_p0 PARTITION OF sessions
+    FOR VALUES WITH (MODULUS 4, REMAINDER 0);
+-- ... remainders 1, 2, 3
+```
+
+Use it when there's **no meaningful range or category** but you still want to cap any single partition's size and spread write load — e.g. partitioning by user ID. The trade-off: HASH gives you **no range pruning and no cheap retention** (`uid > 1000` prunes nothing, and you can't "drop the oldest"). Its only pruning is equality on the key.
+
+<Callout kind="warn" title="HASH is not a magic balancer">
+HASH only buys even sizing and equality pruning. If your real goal is dropping old data or range queries, HASH is the wrong tool — reach for RANGE.
+</Callout>
+
+<ProbeNote>The strong signal is matching strategy to access pattern and **retention**: RANGE because you drop old partitions and do range scans; LIST for discrete buckets; HASH only when there's no natural key but you want even spread. Mentioning that HASH gives up range pruning shows you understand the cost.</ProbeNote>

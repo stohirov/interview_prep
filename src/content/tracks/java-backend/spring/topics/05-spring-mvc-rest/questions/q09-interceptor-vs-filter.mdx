@@ -1,0 +1,57 @@
+**A `Filter` is a servlet-level concept that wraps the entire dispatch; a `HandlerInterceptor` is a Spring MVC concept that wraps the handler; and `@ControllerAdvice` only enters the picture when the handler throws.** Picturing them as nested boxes — filter outside, interceptor inside, controller innermost — gets the ordering right every time.
+
+## The nesting
+
+```text
+Filter.doFilter (before)
+  -> DispatcherServlet
+       -> Interceptor.preHandle
+            -> controller method  ── may throw ──> @ControllerAdvice/@ExceptionHandler
+       <- Interceptor.postHandle      (skipped if handler threw)
+       <- view rendered
+       <- Interceptor.afterCompletion (always runs)
+  <- ...
+Filter.doFilter (after)
+```
+
+## `Filter` — servlet container, outermost
+
+A `jakarta.servlet.Filter` runs before the request even reaches `DispatcherServlet` and after the response leaves it. It sees the raw `ServletRequest`/`ServletResponse`, has **no knowledge of which controller** will handle the request, and is where you do cross-cutting concerns that must wrap everything: security, CORS, request logging, response compression, wrapping the request to cache the body.
+
+```java
+@Component
+class TimingFilter implements Filter {
+    public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain)
+            throws IOException, ServletException {
+        long t = System.nanoTime();
+        chain.doFilter(req, res);          // everything inside runs here
+        log.info("took {}ms", (System.nanoTime() - t) / 1_000_000);
+    }
+}
+```
+
+## `HandlerInterceptor` — Spring MVC, around the handler
+
+A `HandlerInterceptor` runs *inside* `DispatcherServlet`, so it knows the resolved handler. Three hooks:
+
+- `preHandle` — before the controller; return `false` to short-circuit.
+- `postHandle` — after the controller, before the view renders (skipped on exception).
+- `afterCompletion` — after the response, always (even on exception) — good for cleanup.
+
+```java
+class AuthInterceptor implements HandlerInterceptor {
+    public boolean preHandle(HttpServletRequest req, HttpServletResponse res, Object handler) {
+        return req.getHeader("Authorization") != null; // false -> stop
+    }
+}
+```
+
+## `@ControllerAdvice` — exception translation
+
+Not part of the wrapping chain — it's invoked by a `HandlerExceptionResolver` only when the **handler throws**. Because it sits inside the dispatch, it cannot catch exceptions thrown by a `Filter` outside `DispatcherServlet`.
+
+<Callout kind="warn" title="Where to catch what">
+An exception from a `Filter` will *not* reach `@ControllerAdvice` — it has already left the dispatcher's scope. Filter-level failures need their own handling (or an error-page mapping). Only handler-thrown exceptions reach advice.
+</Callout>
+
+<ProbeNote>The answer they want is the nesting order: Filter wraps Interceptor wraps controller, with `afterCompletion` always running and `@ControllerAdvice` catching only handler-thrown exceptions. Knowing a filter sees no handler and that advice can't catch filter errors is the differentiator.</ProbeNote>

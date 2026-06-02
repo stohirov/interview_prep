@@ -1,0 +1,39 @@
+**PostgreSQL's default isolation level is Read Committed, and its key guarantee is per-statement: every statement sees a snapshot taken when *that statement* begins.** The subtlety candidates miss is that the snapshot is refreshed for each statement, not held for the whole transaction.
+
+## What Read Committed guarantees
+
+- You **never** see uncommitted data (no dirty reads).
+- Each statement sees a consistent snapshot of all data committed **before that statement started**.
+- A statement does *not* see changes committed by other transactions *after the statement began* — but the *next* statement in your transaction will.
+
+```sql
+BEGIN;                                  -- Read Committed (default)
+SELECT balance FROM accounts WHERE id = 1;   -- snapshot at this statement
+-- another transaction commits an update here
+SELECT balance FROM accounts WHERE id = 1;   -- NEW snapshot: may differ
+COMMIT;
+```
+
+That second `SELECT` can return a different value — that's a **non-repeatable read**, permitted at this level.
+
+## The write-conflict wrinkle
+
+Reads use the statement-start snapshot, but **writes see the latest committed row**. When an `UPDATE`/`DELETE` targets a row another transaction has just modified and committed, PostgreSQL doesn't fail — it **re-evaluates** the row against the *updated* version (`EvalPlanQual`) and, if it still matches the `WHERE`, applies your change on top.
+
+```sql
+-- T2 sets balance = 50 and commits while T1 waits
+UPDATE accounts SET balance = balance - 100 WHERE id = 1;
+-- T1 resumes and applies -100 to the NEW value 50, giving -50
+```
+
+This is why a naive `SET balance = balance - 100` is safe under concurrency at Read Committed: the arithmetic re-runs against the freshly committed value rather than the stale snapshot.
+
+## Why it's the default
+
+It maximizes concurrency (no transaction-long snapshot held, fewer serialization failures) while still forbidding the worst anomaly (dirty reads). For typical OLTP — short transactions, single-statement updates with relative arithmetic — it's both correct and fast, and it **never raises `40001`**, so no retry loop is needed.
+
+<Callout kind="warn" title="The read-modify-write trap">
+Read Committed's per-statement snapshot makes *read-then-write in separate statements* unsafe. `SELECT balance` into the app, compute, then `UPDATE ... SET balance = :computed` can lose a concurrent update (lost update). Fix with `SELECT ... FOR UPDATE`, atomic SQL (`balance = balance - 100`), or Repeatable Read with retry.
+</Callout>
+
+<ProbeNote>The crisp point: Read Committed's snapshot is **per-statement**, not per-transaction — that's why non-repeatable reads occur. Mentioning the `EvalPlanQual` re-check for writes (so relative `UPDATE`s stay correct) and the multi-statement lost-update trap signals real depth.</ProbeNote>

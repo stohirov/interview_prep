@@ -1,0 +1,46 @@
+**The payoff of understanding AOP is realizing that Spring's most-used annotations *are* aspects.** `@Transactional`, `@Async`, `@Cacheable`, and method security (`@PreAuthorize`) are not compiler magic or special-cased in the JVM — each is an interceptor wired by the same proxy machinery you'd build by hand. Once you see this, every proxy quirk (self-invocation, `public`-only, ordering) explains all of them at once.
+
+## @Transactional
+
+A `TransactionInterceptor` wraps the method: open/join a transaction before, commit on normal return, roll back on a `RuntimeException`.
+
+```java
+// conceptually, around the method:
+TransactionStatus tx = txManager.getTransaction(def);
+try { Object r = pjp.proceed(); txManager.commit(tx); return r; }
+catch (RuntimeException e) { txManager.rollback(tx); throw e; }
+```
+
+It's an `@Around`-style advice — which is why a missing `@Transactional` on a self-invoked method silently commits nothing extra.
+
+## @Cacheable / @CacheEvict
+
+A `CacheInterceptor` checks the cache *before* calling the method; on a hit it **skips `proceed()`** entirely and returns the cached value; on a miss it proceeds and stores the result. This *only* works because `@Around` advice can short-circuit the target.
+
+## @Async
+
+`AsyncExecutionInterceptor` doesn't run the body inline — it submits it to a `TaskExecutor` and returns immediately (a `Future`/`CompletableFuture` or void). The proxy hands the work to another thread.
+
+## Method security — @PreAuthorize / @Secured
+
+Spring Security registers an authorization interceptor (`AuthorizationManagerBeforeMethodInterceptor`) that evaluates the SpEL/role expression *before* the method and throws `AccessDeniedException` if it fails — `@Before`-style advice.
+
+## Why this unifies everything
+
+Because all four are proxy-based interceptors, they **share the same constraints**:
+
+- **Self-invocation bypasses them** — an internal `this.cachedMethod()` hits no cache; `this.txMethod()` runs in no transaction.
+- **Public methods only** (CGLIB can't advise `private`/`final`).
+- **Ordering matters** — when several apply to one method, `@Order` decides whether, say, security runs before the transaction. Spring assigns sensible default orders (security outermost, then tx, then caching) but you can tune it.
+
+```java
+@Service
+class ReportService {
+    @Cacheable("reports")
+    @Transactional(readOnly = true)
+    @PreAuthorize("hasRole('ANALYST')")
+    public Report build(long id) { ... }   // three aspects stacked on one method
+}
+```
+
+<ProbeNote>The interviewer wants you to connect the dots: these "framework features" are ordinary AOP interceptors. Name the four and their advice style (`@Around` for tx/cache/async, `@Before` for security). The unifying punchline — *they all inherit the proxy limitations*, so self-invocation breaks every one of them — proves you understand the mechanism, not just the annotations.</ProbeNote>

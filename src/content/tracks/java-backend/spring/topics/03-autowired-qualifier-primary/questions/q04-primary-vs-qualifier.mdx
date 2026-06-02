@@ -1,0 +1,54 @@
+**`@Primary` answers "which bean is the default?"; `@Qualifier` answers "which bean does *this* injection point want?"** They operate at opposite ends — one on the bean *definition*, one on the *injection point* — and `@Qualifier` always wins when both are present.
+
+## `@Primary` — one default for a type
+
+Put it on a bean definition to make it the chosen candidate whenever an unqualified injection point matches that type:
+
+```java
+@Bean @Primary
+PaymentGateway stripe() { return new StripeGateway(); }
+
+@Bean
+PaymentGateway paypal() { return new PayPalGateway(); }
+
+@Service
+class CheckoutService {
+    CheckoutService(PaymentGateway gateway) { ... }  // gets stripe (the @Primary)
+}
+```
+
+Exactly *one* bean per type may be primary; two `@Primary` beans re-introduce `NoUniqueBeanDefinitionException`. Use it when there's a clear "90% of the time you want this one" default and only a few callers need the alternative.
+
+## `@Qualifier` — explicit pick per injection point
+
+Put it where you inject to select a named candidate, overriding any `@Primary`:
+
+```java
+@Service
+class RefundService {
+    RefundService(@Qualifier("paypal") PaymentGateway gateway) { ... }  // forces paypal
+}
+```
+
+Use it when there's *no* sensible default and every caller must consciously choose, or when a specific caller needs the non-default bean.
+
+## How they combine
+
+The resolution order is **type → qualifier → primary → name**. So:
+
+- Unqualified injection point → `@Primary` bean.
+- `@Qualifier("paypal")` injection point → paypal, *even if* stripe is `@Primary`.
+
+That's the whole interaction: `@Primary` sets the fallback default; `@Qualifier` is an explicit override at the point of use.
+
+## Choosing between them
+
+| Situation | Reach for |
+|---|---|
+| One obvious default, rare exceptions | `@Primary` (+ `@Qualifier` on the exceptions) |
+| No natural default, all callers choose | `@Qualifier` everywhere |
+| Same type, genuinely different roles | consider distinct interfaces instead |
+
+A common pattern combines both: mark the common implementation `@Primary` so most code stays clean, and sprinkle `@Qualifier` only on the handful of injection points that need the other one.
+
+<ProbeNote>The crisp distinction the interviewer wants: `@Primary` is a *default on the definition*; `@Qualifier` is an *explicit choice at the injection point*, and qualifier overrides primary. Bonus: only one `@Primary` per type, and combining the two is the idiomatic real-world pattern.</ProbeNote>

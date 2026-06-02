@@ -1,0 +1,35 @@
+**Partitioning has hard structural limits that bite in production, and the headline one is: there are no global indexes, so every `UNIQUE`/`PRIMARY KEY` constraint must include the partition key.** Knowing these up front is what separates someone who's run partitioned tables from someone who's only read the manual.
+
+## Unique constraints must contain the partition key
+
+A unique or primary-key index on a partitioned table is enforced **per partition**, not globally. Since PostgreSQL has no cross-partition uniqueness, it requires the partition key to be part of the constraint so each row's uniqueness can be checked within a single partition.
+
+```sql
+-- events PARTITION BY RANGE (ts)
+ALTER TABLE events ADD PRIMARY KEY (id);          -- ERROR
+ALTER TABLE events ADD PRIMARY KEY (id, ts);      -- OK: includes the key
+```
+
+The practical pain: you **cannot enforce a globally-unique `id` alone** if `id` isn't the partition key. Workarounds are to put the key in the PK (weakening the "globally unique" guarantee to "unique per partition") or rely on a sequence/UUID you trust to be unique without a DB-enforced cross-partition constraint.
+
+## No global indexes at all
+
+Every index is physically per-partition. There's no single index spanning all partitions, so a non-key lookup (`WHERE id = 5` with no `ts`) probes **every** partition's index — pruning can't help, and performance degrades as partition count grows.
+
+## Foreign keys
+
+- A FK **from** a partitioned table referencing a normal table: supported.
+- A FK **referencing** a partitioned table (the partitioned table is the parent of the relationship): supported in modern versions (PG 12+), but it leans on the same per-partition uniqueness, so the referenced columns must form a constraint that includes the partition key.
+
+## Other gotchas
+
+- **`ON CONFLICT`**: works, but inference targets a unique constraint that must include the partition key — same limitation.
+- **Moving a row across partitions**: an `UPDATE` that changes the partition key triggers a delete-and-reinsert into the new partition (supported since PG 11), which can surprise triggers and `RETURNING`.
+- **Too many partitions** inflate planning time and per-table catalog/VACUUM/ANALYZE overhead; thousands is workable on modern PG but isn't free.
+- **You can't add a partition that overlaps an existing one**; bounds must be disjoint.
+
+<Callout kind="danger" title="The constraint people forget">
+If your app assumes a single auto-increment PK is globally unique, partitioning breaks that assumption unless the PK includes the partition key. Design the key model *before* you partition, not after.
+</Callout>
+
+<ProbeNote>The must-hit points: **no global indexes**, **unique/PK must include the partition key**, and the downstream consequences (non-key lookups hit every partition; FKs referencing a partitioned table lean on key-inclusive uniqueness). Naming the cross-partition `UPDATE` move and partition-count overhead is bonus senior signal.</ProbeNote>

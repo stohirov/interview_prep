@@ -1,0 +1,26 @@
+The PostgreSQL planner is a **cost-based optimizer**: for any non-trivial query there are many ways to produce the same rows — scan the table sequentially or via an index, join in this order or that one, hash or sort — and the planner estimates a cost for each candidate and picks the cheapest. Costs are in an abstract unit anchored to "read one sequential page" (`seq_page_cost = 1.0`); everything else (`random_page_cost`, `cpu_tuple_cost`, …) is expressed relative to it. The crucial consequence: the planner doesn't know your data, it *estimates* it from statistics gathered by `ANALYZE`. Bad plans almost always trace back to bad estimates, not a "dumb" planner.
+
+`EXPLAIN` is how you see the plan it chose. The output is a **tree of nodes**, read inside-out and bottom-up: each node pulls rows from its children, and the top node's output is the query result.
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT * FROM orders WHERE customer_id = 42 ORDER BY created_at DESC LIMIT 10;
+```
+
+```
+Limit  (cost=0.43..8.21 rows=10 width=64) (actual time=0.03..0.05 rows=10 loops=1)
+  ->  Index Scan Backward using orders_customer_created_idx on orders
+        (cost=0.43..420.6 rows=540 width=64) (actual time=0.02..0.04 rows=10 loops=1)
+        Index Cond: (customer_id = 42)
+        Buffers: shared hit=6
+Planning Time: 0.18 ms
+Execution Time: 0.07 ms
+```
+
+Three numbers matter on every node. **`cost`** is the planner's estimate (startup..total). **`rows`** is its estimated row count — compare it against **`actual ... rows`** to spot mis-estimation. **`loops`** tells you the node ran more than once (multiply `actual` by `loops` for the true total). A 100×+ gap between estimated and actual `rows` is the single most common root cause of a slow query.
+
+<Callout kind="tip" title="The interview hook">
+Say plainly: "Plans are chosen by *estimated cost*, and estimates come from statistics. So when I debug a slow query I run `EXPLAIN (ANALYZE, BUFFERS)`, look for the node where estimated rows and actual rows diverge, and ask *why the estimate is wrong* — stale stats, a correlated predicate, a function the planner can't see through."
+</Callout>
+
+The questions below cover the EXPLAIN variants, every scan and join node you'll see, when the planner prefers a Seq Scan, how to find slow queries in production, and the famous "why no planner hints" trick.

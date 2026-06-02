@@ -1,0 +1,54 @@
+**When proxy-based Spring AOP isn't enough, AspectJ *weaves* the advice directly into bytecode — and it does so at one of two times: compile-time (CTW) or load-time (LTW).** Weaving means the aspect's code is physically inserted into the target's `.class` bytes, so there's no proxy, no self-invocation blind spot, and any joinpoint — fields, constructors, `final`/`private` methods, non-Spring objects — becomes advisable.
+
+## Compile-time weaving (CTW)
+
+The AspectJ compiler (`ajc`) replaces or supplements `javac`. It compiles your sources *and* your aspects together, emitting already-woven `.class` files.
+
+```text
+sources + aspects  --ajc-->  woven .class files
+```
+
+- **When**: at build time, once.
+- **Pros**: zero runtime overhead (work is done); fastest execution; weaves your own code thoroughly.
+- **Cons**: you must adopt the AspectJ compiler in your build; it weaves only code *you compile*, so third-party jars aren't touched unless you use **binary weaving** (post-process existing jars with `ajc`).
+
+Use CTW when you control the build and want maximum runtime performance, or need to weave aspects into your own compiled artifacts.
+
+## Load-time weaving (LTW)
+
+Weaving is deferred to **class-load time**: a Java agent intercepts each class as the classloader loads it and weaves aspects in then.
+
+```text
+java -javaagent:aspectjweaver.jar -jar app.jar
+```
+
+Spring configures it declaratively:
+
+```java
+@Configuration
+@EnableLoadTimeWeaving
+class WeavingConfig {}
+```
+
+plus a `META-INF/aop.xml` listing aspects and which packages to weave.
+
+- **When**: as classes load into the JVM.
+- **Pros**: standard `javac` build; can weave third-party / already-compiled classes; aspects are swappable via `aop.xml` without recompiling.
+- **Cons**: needs a weaving agent on startup; small per-class load-time cost; classloader setup can be fiddly in some containers.
+
+Use LTW when you can't change the compiler, need to weave classes you didn't compile, or want to toggle aspects via config.
+
+## When to reach for AspectJ at all
+
+Stay on Spring AOP for normal tx/security/caching. Move to AspectJ weaving only when proxies can't deliver:
+
+- intercept **field access** or **constructors**,
+- advise **`final`**, **`private`**, or **`static`** methods,
+- catch **self-invocation** (`this.method()`),
+- advise objects **not** managed by Spring (entities created with `new`).
+
+<Callout kind="tip" title="Rule of thumb">
+CTW = "weave at build, fastest runtime, my code." LTW = "weave at class-load via an agent, works on code I didn't compile, configured in aop.xml." Both eliminate the proxy and its limitations — at the cost of extra build/runtime setup.
+</Callout>
+
+<ProbeNote>Define weaving as *bytecode instrumentation* (vs proxying). Contrast CTW (`ajc` at build, zero runtime cost) with LTW (`aspectjweaver` agent at class-load, weaves third-party classes, `aop.xml` config). The payoff line: only weaving catches self-invocation, field access, and `final`/`private` methods — that's *why* you'd leave Spring AOP.</ProbeNote>

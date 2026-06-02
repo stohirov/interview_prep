@@ -1,0 +1,30 @@
+**Propagation answers one question: when an annotated method is called, what does it do about an *already-running* transaction on the current thread — join it, suspend it and start a new one, or insist on a particular state?** There are seven values; `REQUIRED` is the default and covers most code.
+
+## The seven values
+
+**`REQUIRED`** (default) — join the existing transaction if there is one, otherwise create a new one. The common case: nested service calls share one transaction, so a failure anywhere rolls the whole thing back.
+
+**`REQUIRES_NEW`** — always suspend any existing transaction and start a brand-new, independent one. It commits or rolls back on its own; the outer transaction resumes afterward. Use it for work that must persist regardless of the caller's fate — an **audit log** or **outbox** row you want kept even if the business transaction rolls back.
+
+```java
+@Transactional(propagation = Propagation.REQUIRES_NEW)
+public void writeAuditEntry(AuditEvent e) {
+    auditRepo.save(e);   // commits independently of the calling transaction
+}
+```
+
+**`NESTED`** — runs in a **savepoint** inside the current transaction (JDBC only; needs savepoint support). The inner work can roll back to the savepoint without killing the outer transaction, but it commits only when the outer one commits. Different from `REQUIRES_NEW`, which is a fully separate transaction.
+
+**`SUPPORTS`** — run inside a transaction if one exists, otherwise run non-transactionally. For read methods that don't strictly need a transaction but should join one if present.
+
+**`NOT_SUPPORTED`** — suspend any existing transaction and run non-transactionally. Useful for long, non-transactional work you don't want holding a connection.
+
+**`MANDATORY`** — there *must* already be a transaction, otherwise throw `IllegalTransactionStateException`. Enforces "this method may only be called inside an existing transaction."
+
+**`NEVER`** — there must be *no* transaction; throw if one exists.
+
+<Callout kind="warn" title="REQUIRES_NEW costs a second connection">
+A suspended outer transaction still holds its connection while the new one grabs another from the pool. Nest `REQUIRES_NEW` carelessly under load and you can deadlock the pool — the outer waits for the inner, but the inner can't get a connection.
+</Callout>
+
+<ProbeNote>They want `REQUIRED` as the default and a crisp contrast between `REQUIRES_NEW` (suspend + independent transaction) and `NESTED` (savepoint within the same one). A concrete "audit log survives rollback" example for `REQUIRES_NEW` lands the point.</ProbeNote>

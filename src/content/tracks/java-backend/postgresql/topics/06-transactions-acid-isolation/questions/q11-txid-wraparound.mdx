@@ -1,0 +1,37 @@
+**Transaction ID wraparound is the failure mode where PostgreSQL's 32-bit transaction counter rolls over, causing old committed rows to suddenly appear to come from the *future* — and therefore become invisible.** It's catastrophic because it can silently make committed data disappear; the fix is **freezing**, which `VACUUM` performs continuously.
+
+## Why a 32-bit counter is a problem
+
+Every transaction gets a monotonically increasing **XID**, and each tuple's `xmin` records the XID that created it. The XID is only **32 bits** — about 4 billion values. PostgreSQL treats XID space as a *circle*: for any current XID, half the space (~2 billion) is considered "in the past" and half "in the future." Visibility depends on a tuple's `xmin` being in the snapshot's *past*.
+
+When the counter advances past ~2 billion transactions beyond a tuple's `xmin`, that old tuple flips from "past" to "future" relative to the current XID — and a tuple from the future is **not yet visible**. The committed row effectively **vanishes**. That is data loss, not corruption you can shrug off.
+
+## The fix: freezing
+
+To prevent this, `VACUUM` **freezes** old tuples: it marks a sufficiently-old, still-live tuple as **frozen**, a special state meaning "always visible, regardless of the XID counter." A frozen tuple is exempt from the wraparound comparison entirely.
+
+```sql
+-- inspect how close a table is to forced action
+SELECT relname, age(relfrozenxid) AS xid_age
+FROM pg_class
+WHERE relkind = 'r'
+ORDER BY xid_age DESC LIMIT 10;
+```
+
+`age(relfrozenxid)` is how many transactions have elapsed since the table's oldest unfrozen XID. Watch it.
+
+## The thresholds that protect you
+
+- **`autovacuum_freeze_max_age`** (default 200 million) — when a table's XID age exceeds this, autovacuum launches an **anti-wraparound vacuum** *even if autovacuum is "disabled"* and even with no dead tuples. This is the safety net.
+- **`vacuum_freeze_min_age`** — how old a tuple must be before a normal vacuum freezes it.
+- At ~2 billion, if freezing still hasn't happened, PostgreSQL refuses new writes and demands a single-user-mode vacuum — a full outage.
+
+## What goes wrong in practice
+
+Wraparound emergencies almost always trace to autovacuum being **disabled, starved, or unable to keep up** (long-running transactions hold back the "oldest XID," blocking freezing). The warning signs are `WARNING: database must be vacuumed within N transactions` messages in the log.
+
+<Callout kind="danger" title="The classic outage">
+A long-lived idle-in-transaction connection pins the oldest XID, freezing can't advance, age climbs toward 2 billion, and the database stops accepting writes to protect itself. The cure is mundane — let autovacuum run, kill runaway transactions, monitor `age(relfrozenxid)` — but ignored, it's one of PostgreSQL's few true "database down" scenarios.
+</Callout>
+
+<ProbeNote>The chain to articulate: 32-bit XIDs → half-past/half-future visibility → old rows can flip to "future" and disappear → `VACUUM` freezes old tuples to prevent it → anti-wraparound autovacuum is the backstop. Mention `age(relfrozenxid)` monitoring and that long-running transactions are the usual culprit.</ProbeNote>

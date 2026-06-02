@@ -1,0 +1,24 @@
+**Partitioning splits one logically-single table into many physical child tables, so the planner can touch only the slice a query needs and you can drop old data by dropping a table instead of running a giant `DELETE`.** The big table — the *partitioned table* — holds no rows itself; it's a routing layer. Every row lives in exactly one *partition*, chosen by the value of the **partition key** under a declared strategy: `RANGE`, `LIST`, or `HASH`.
+
+```sql
+CREATE TABLE events (
+    id      bigint,
+    ts      timestamptz NOT NULL,
+    payload jsonb
+) PARTITION BY RANGE (ts);
+
+CREATE TABLE events_2025_06 PARTITION OF events
+    FOR VALUES FROM ('2025-06-01') TO ('2025-07-01');
+```
+
+Inserts into `events` are routed to the matching partition automatically; a `SELECT ... WHERE ts >= '2025-06-10'` reads only `events_2025_06` thanks to **partition pruning**.
+
+The win is operational as much as performance. Time-series and log tables grow without bound; with monthly RANGE partitions you `DROP TABLE events_2025_01` (instant, reclaims space, no bloat) instead of `DELETE FROM events WHERE ts < ...` (slow, leaves dead tuples for VACUUM). Bulk-loading a new month and then `ATTACH PARTITION` lets you stage data offline. Smaller per-partition indexes also stay in cache better and ANALYZE faster.
+
+The catch is that partitioning is a **structural commitment**, not a free index. You choose the key once; querying or joining on other columns gets no pruning benefit. A `PRIMARY KEY` or `UNIQUE` constraint **must include the partition key** — there are no cross-partition global indexes in PostgreSQL. Pick the wrong key and you inherit all the management overhead with none of the pruning.
+
+<Callout kind="tip" title="The interview hook">
+Lead with *why*, not *how*: "Partitioning isn't a performance silver bullet — it's mainly about manageability of very large, naturally-segmented tables. The classic win is time-series: cheap data retention via `DROP TABLE` plus partition pruning. The price is that the partition key is baked into the schema and every unique constraint must contain it." That framing — operational benefit first, structural cost acknowledged — separates seniors from people who reach for partitions to fix a missing index.
+</Callout>
+
+The questions below cover declarative partitioning and its history, the three strategies, how pruning works at plan-time and run-time, default partitions, live ATTACH/DETACH, subpartitioning, and the limits that bite in production.

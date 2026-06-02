@@ -1,0 +1,35 @@
+**PostgreSQL has exactly eight table-level lock modes, and the only thing that matters is the conflict matrix — the names are misleading on purpose.** "SHARE" and "EXCLUSIVE" appear in several mode names with no consistent meaning; memorize what conflicts, not the English.
+
+## The eight modes, weakest to strongest
+
+| Mode | Taken by |
+|---|---|
+| `ACCESS SHARE` | `SELECT` |
+| `ROW SHARE` | `SELECT ... FOR UPDATE / FOR SHARE` |
+| `ROW EXCLUSIVE` | `INSERT`, `UPDATE`, `DELETE`, `MERGE` |
+| `SHARE UPDATE EXCLUSIVE` | `VACUUM` (non-full), `ANALYZE`, `CREATE INDEX CONCURRENTLY`, many `ALTER TABLE` subforms |
+| `SHARE` | `CREATE INDEX` (non-concurrent) |
+| `SHARE ROW EXCLUSIVE` | `CREATE TRIGGER`, some `ALTER TABLE` forms |
+| `EXCLUSIVE` | `REFRESH MATERIALIZED VIEW CONCURRENTLY` |
+| `ACCESS EXCLUSIVE` | `DROP TABLE`, `TRUNCATE`, most `ALTER TABLE`, `VACUUM FULL`, `REINDEX` |
+
+## The two facts that answer 90% of follow-ups
+
+**1. `ACCESS SHARE` (every SELECT) conflicts only with `ACCESS EXCLUSIVE`.** This is why ordinary reads never block ordinary writes — `SELECT` and `INSERT/UPDATE/DELETE` (which take `ROW EXCLUSIVE`) are mutually compatible. The whole MVCC promise lives in this row of the matrix.
+
+**2. `ACCESS EXCLUSIVE` conflicts with *everything*, including a plain SELECT.** That's why a careless `ALTER TABLE` in production can stall the entire application: it can't even start until every reader finishes, and once it's queued waiting, it blocks every new reader behind it.
+
+```sql
+-- This queues behind running txns AND blocks new SELECTs while waiting:
+ALTER TABLE orders ADD COLUMN note text;
+```
+
+## The practical implications
+
+Many `INSERT/UPDATE/DELETE` statements run concurrently because `ROW EXCLUSIVE` does not conflict with itself — table-level locks don't serialize writers; row-level locks handle that. `SHARE UPDATE EXCLUSIVE` is the "online maintenance" tier: `VACUUM`, `ANALYZE`, and `CREATE INDEX CONCURRENTLY` take it precisely so they don't block reads or writes.
+
+<Callout kind="warn" title="Lock queues are FIFO-ish — one DDL stalls everyone">
+A blocked `ACCESS EXCLUSIVE` request sits *ahead* of subsequent lock requests. So a long-running transaction holding a read lock can make your quick `ALTER` wait, and that waiting `ALTER` then blocks every new `SELECT`. Always run migrations with a short `lock_timeout`.
+</Callout>
+
+<ProbeNote>Strong candidates don't recite all eight names — they state the two load-bearing facts: SELECT takes `ACCESS SHARE` which only conflicts with `ACCESS EXCLUSIVE`, and DDL's `ACCESS EXCLUSIVE` conflicts with everything. Mentioning `lock_timeout` for safe migrations is the senior tell.</ProbeNote>

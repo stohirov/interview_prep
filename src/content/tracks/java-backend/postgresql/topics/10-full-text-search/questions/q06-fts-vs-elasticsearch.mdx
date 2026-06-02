@@ -1,0 +1,25 @@
+**The right answer is "default to PostgreSQL FTS, graduate to a dedicated engine when you provably outgrow it" — and being specific about *what* you outgrow.** Reaching for Elasticsearch reflexively means running, securing, and *synchronizing* a second datastore before you've earned the complexity.
+
+## Why PostgreSQL FTS is the better default
+
+- **No extra infrastructure.** One database to run, back up, monitor, and secure. No cluster, no ingest pipeline.
+- **Transactional and always consistent.** The `tsvector` lives in the row (a generated column updates in the same transaction), so search results never lag the source data. An external engine is *eventually* consistent — there's always a sync window where search shows stale results.
+- **Free joins.** Search results are just rows; you `JOIN` to users, permissions, inventory, and filter with normal `WHERE` clauses in one query. With an external engine you either denormalize everything into the index or do a two-step fetch-then-join dance.
+- **No sync job.** The biggest hidden cost of Elasticsearch is the CDC/indexing pipeline that keeps it current — that's a whole system that can break.
+
+## Where a dedicated engine wins
+
+- **Distributed scale.** Elasticsearch/OpenSearch shard and replicate across a cluster for very large corpora and high query throughput. PostgreSQL FTS runs on one primary (read replicas help reads, but it doesn't shard the index itself).
+- **Relevance tuning.** BM25 scoring, learning-to-rank, configurable analyzers, per-field boosting — far richer than `ts_rank`/`ts_rank_cd`.
+- **Fuzzy / typo tolerance.** Edit-distance "did you mean", autocomplete, and suggesters are first-class. PostgreSQL needs `pg_trgm` bolted on and it's cruder.
+- **Search-side analytics.** Aggregations, faceting, and highlighting at scale are what these engines are built for.
+
+## A pragmatic middle ground
+
+`pg_trgm` (trigram) indexes give you fuzzy `LIKE`/`ILIKE` and similarity ranking *inside PostgreSQL*, and pair well with FTS for typo tolerance — often enough to defer Elasticsearch by a long way.
+
+<Callout kind="tip" title="How to phrase the decision">
+"If search is a *feature of* my app, PostgreSQL FTS keeps it transactional with zero extra infra. If search *is* the product — huge corpus, sophisticated relevance, fuzzy matching, faceted analytics at scale — I'll pay for a dedicated engine and own the sync pipeline. I don't take on that complexity speculatively."
+</Callout>
+
+<ProbeNote>The interviewer is probing judgement, not trivia. Strong answers default to PostgreSQL FTS for its transactional consistency and zero extra infrastructure, name the concrete limits (no index sharding, weaker relevance tuning, no native fuzzy/typo handling), and call out that an external engine's real cost is the eventually-consistent sync pipeline. Mentioning `pg_trgm` as a middle ground is a senior tell.</ProbeNote>

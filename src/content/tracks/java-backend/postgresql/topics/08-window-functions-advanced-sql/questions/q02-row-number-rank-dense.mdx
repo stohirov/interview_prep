@@ -1,0 +1,53 @@
+**All three number rows within an ordered window; they differ only in how they treat ties.** `ROW_NUMBER` never ties, `RANK` leaves gaps after a tie, `DENSE_RANK` does not. Get this distinction crisp and you've answered the most common window-function interview question.
+
+## The three side by side
+
+Consider scores ordered descending, with two rows tied at 90:
+
+```text
+score | ROW_NUMBER | RANK | DENSE_RANK
+------+------------+------+-----------
+  95  |     1      |  1   |     1
+  90  |     2      |  2   |     2
+  90  |     3      |  2   |     2     <- tie
+  80  |     4      |  4   |     3
+                            ^gap   ^no gap
+```
+
+- **`ROW_NUMBER()`** — a strict 1,2,3,… counter. Tied rows get *different* numbers, with the order among ties effectively arbitrary unless your `ORDER BY` breaks it.
+- **`RANK()`** — ties share a rank, then the next rank **skips** (here 2,2,4). Equivalent to "1 + number of rows strictly before me."
+- **`DENSE_RANK()`** — ties share a rank, and the next rank is the **next integer**, no gap (2,2,3).
+
+```sql
+SELECT
+  player,
+  score,
+  ROW_NUMBER() OVER w AS rn,
+  RANK()       OVER w AS rnk,
+  DENSE_RANK() OVER w AS dense
+FROM results
+WINDOW w AS (ORDER BY score DESC);
+```
+
+## Which to use when
+
+- **"Top N per group" / deduplication** → `ROW_NUMBER`. You want exactly one row per group, so a unique counter is essential:
+
+```sql
+SELECT * FROM (
+  SELECT *,
+    ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY created_at DESC) AS rn
+  FROM orders
+) t
+WHERE rn = 1;   -- latest order per customer
+```
+
+- **Leaderboards / "what place did they finish"** → `RANK` (Olympic-style: two golds, no silver) or `DENSE_RANK` (no gap) depending on whether you want gaps.
+
+<Callout kind="tip" title="Determinism">
+`ROW_NUMBER` is only deterministic if your `ORDER BY` is unique. With ties, which tied row gets 1 vs 2 is undefined and can change between runs. Add a tiebreaker (e.g., `ORDER BY created_at DESC, id DESC`) when it matters.
+</Callout>
+
+A related fourth function, `NTILE(n)`, splits the ordered window into `n` roughly equal buckets — handy for quartiles/percentiles.
+
+<ProbeNote>They want the tie behavior nailed: ROW_NUMBER always distinct, RANK gaps, DENSE_RANK no gaps. The killer follow-up is the "top-1-per-group" pattern with ROW_NUMBER in a subquery filtered on `rn = 1` — mention it unprompted, plus the determinism caveat about needing a unique ORDER BY.</ProbeNote>

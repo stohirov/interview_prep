@@ -1,0 +1,39 @@
+**`@Scheduled` tells Spring to call a method on a clock, in one of three modes — `fixedRate`, `fixedDelay`, or `cron` — and the difference between `fixedRate` and `fixedDelay` (start-to-start vs end-to-start) is the part interviewers test.** Enable it with `@EnableScheduling` (Boot auto-enables when it finds a `@Scheduled` method). The method must take no arguments and typically returns `void`.
+
+## The three triggers
+
+```java
+@Scheduled(fixedRate = 5000)          // every 5s, measured start-to-start
+public void poll() { ... }
+
+@Scheduled(fixedDelay = 5000)         // 5s gap AFTER each run finishes
+public void cleanup() { ... }
+
+@Scheduled(cron = "0 0 2 * * *", zone = "UTC")   // 02:00 every day
+public void nightlyReport() { ... }
+```
+
+## fixedRate vs fixedDelay — the core distinction
+
+- **`fixedRate`** schedules the *next start* a fixed interval after the *previous start*. If a run takes longer than the interval, the next one is due immediately (and, on a multi-thread scheduler, could even overlap). It targets a steady *frequency*.
+- **`fixedDelay`** waits a fixed interval *after the previous run finishes* before starting the next. Runs never overlap; the effective period is `delay + execution time`. It targets a steady *gap between runs*.
+
+Example: a task that takes 8s with a 5s interval. `fixedRate` tries to fire every 5s (so the next is overdue and runs back-to-back); `fixedDelay` runs at roughly 13s spacing (8s work + 5s rest).
+
+Use `fixedDelay` for cleanup/polling where you want breathing room and no overlap; `fixedRate` when you genuinely need a fixed cadence and the task is shorter than the interval. Add `initialDelay` to defer the first run.
+
+## The default scheduler is single-threaded
+
+This bites people. By default Spring uses a **one-thread** `ThreadPoolTaskScheduler`, so all `@Scheduled` methods share it — a slow task **blocks every other scheduled task**, including unrelated ones. Fix by enlarging the pool:
+
+```properties
+spring.task.scheduling.pool.size=5
+```
+
+(or define a `TaskScheduler` bean / implement `SchedulingConfigurer`).
+
+<Callout kind="warn" title="One slow job stalls them all">
+With the default single-threaded scheduler, a job that hangs delays every other `@Scheduled` method. Size the scheduling pool, or isolate long jobs onto their own executor.
+</Callout>
+
+<ProbeNote>The must-have answer: `fixedRate` is start-to-start (fixed frequency, can overlap/queue), `fixedDelay` is end-to-start (fixed gap, never overlaps), `cron` is calendar-based. The senior add-on: the default scheduler is single-threaded, so one slow task blocks the rest — raise `spring.task.scheduling.pool.size`.</ProbeNote>

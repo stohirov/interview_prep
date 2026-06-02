@@ -1,0 +1,63 @@
+**A join combines tuples from two relations; the join *type* decides what happens to rows that have no match on the other side.** That single distinction — "what about unmatched rows?" — is the whole answer.
+
+Assume `customers` and `orders` (each order has a `customer_id`).
+
+## INNER JOIN — only matching pairs
+
+Returns rows where the predicate is satisfied on *both* sides. Unmatched rows from either table are dropped.
+
+```sql
+SELECT c.name, o.total
+FROM customers c
+JOIN orders o ON o.customer_id = c.id;   -- "JOIN" alone means INNER
+```
+
+**Use case:** "every order with its customer." Customers with no orders disappear, which is exactly what you want here.
+
+## LEFT (OUTER) JOIN — keep all left rows
+
+Returns every row from the left table; where there's no right-side match, the right columns are `NULL`.
+
+```sql
+SELECT c.name, o.total
+FROM customers c
+LEFT JOIN orders o ON o.customer_id = c.id;
+```
+
+**Use case:** "all customers, with their orders if any" — including customers who never ordered. Add `WHERE o.id IS NULL` to find *only* customers with zero orders (the anti-join pattern).
+
+## RIGHT (OUTER) JOIN — keep all right rows
+
+The mirror of LEFT: every right row survives, unmatched left columns become NULL. In practice it's rarely written — you just swap the tables and use LEFT — but it's identical in power.
+
+**Use case:** functionally the same as flipping a LEFT JOIN; useful when you don't want to reorder the `FROM` clause.
+
+## FULL OUTER JOIN — keep everything
+
+Returns matched pairs plus unmatched rows from *both* sides, padding the missing side with NULLs.
+
+```sql
+SELECT c.name, o.total
+FROM customers c
+FULL OUTER JOIN orders o ON o.customer_id = c.id;
+```
+
+**Use case:** reconciliation — "show me customers with no orders *and* orphaned orders whose customer is missing," typically when diffing two data sources.
+
+## CROSS JOIN — Cartesian product, no predicate
+
+Every row of the left paired with every row of the right; result size is `n × m`. No `ON` clause.
+
+```sql
+SELECT s.size, c.color
+FROM sizes s
+CROSS JOIN colors c;   -- all size/color combinations
+```
+
+**Use case:** generating combinations (size × color variants), or pairing one row against a generated series (`CROSS JOIN generate_series(...)`). An accidental cross join — forgetting the join condition — is a common cause of runaway result sets.
+
+<Callout kind="tip" title="Put join filters in ON, not WHERE">
+For outer joins, a condition on the *nullable* side belongs in `ON`. Moving it to `WHERE` filters out the NULL-padded rows and silently turns your LEFT JOIN back into an INNER JOIN.
+</Callout>
+
+<ProbeNote>The interviewer wants the "what happens to unmatched rows" framing, a correct concrete use case per type, and at least one trap: WHERE-vs-ON demoting an outer join to inner, the anti-join `WHERE right.id IS NULL` pattern, or an accidental Cartesian product from a missing `ON`.</ProbeNote>

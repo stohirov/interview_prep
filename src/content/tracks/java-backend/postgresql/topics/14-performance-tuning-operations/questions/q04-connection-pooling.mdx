@@ -1,0 +1,32 @@
+**Every PostgreSQL connection is a full OS process, not a lightweight thread — so connections are expensive, and pooling is how you survive real concurrency.** This is one of the highest-leverage operational facts about Postgres, and "just raise `max_connections`" is the wrong answer interviewers are listening for.
+
+## Why connections are costly
+
+Each connection forks a **backend process** with its own memory (work_mem allocations, catalog caches, ~several MB baseline). Hundreds of mostly-idle connections waste RAM, and the **context-switching and lock contention** of thousands of backends degrades throughput even when most are doing nothing. Postgres performs best with a relatively small number of *active* backends — often roughly `(cores × 2) + effective spindles` as a starting heuristic.
+
+App servers, meanwhile, open far more connections than they keep busy: 50 app instances × a 20-connection local pool = 1000 connections, almost all idle at any instant.
+
+## What a pooler fixes
+
+A pooler like **PgBouncer** sits between the app and Postgres, keeping a small set of real backend connections and multiplexing many client connections onto them. The app thinks it has 1000 connections; Postgres only ever sees, say, 40 busy ones.
+
+## PgBouncer pooling modes
+
+**`session`** — a server connection is assigned to a client for the **entire client session** (until disconnect). Safest and fully compatible, but barely better than no pooling for idle-heavy apps.
+
+**`transaction`** — a server connection is held only for the **duration of a transaction**, then returned to the pool. This is the **sweet spot** for most web apps and gives the biggest concurrency win. Caveat: features tied to a *session* break — `SET`/session GUCs, advisory session locks, prepared statements (without care), `LISTEN/NOTIFY`, and `WITH HOLD` cursors.
+
+**`statement`** — connection returned after **every single statement**; forbids multi-statement transactions entirely. Rare, for specialized read workloads.
+
+```ini
+[pgbouncer]
+pool_mode = transaction
+max_client_conn = 5000
+default_pool_size = 40
+```
+
+<Callout kind="info" title="App-side pools still matter">
+Even with PgBouncer, your JDBC/HikariCP pool should be sized small and sane — pooling at both tiers is normal. The pooler protects the database; the app pool protects connection setup latency.
+</Callout>
+
+<ProbeNote>The discriminator is "connection = process, so don't scale by raising `max_connections`," plus correctly describing **transaction mode** as the practical default and naming what it breaks (session `SET`, prepared statements, advisory session locks). Bonus for mentioning app-side pools (Hikari) coexist with PgBouncer.</ProbeNote>

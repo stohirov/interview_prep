@@ -1,0 +1,42 @@
+**Default to `JSONB`. `JSON` stores the raw text; `JSONB` stores a parsed binary form — and the binary form is what makes querying and indexing fast.** The "B" is for binary, and it changes almost everything about how the value behaves.
+
+## JSON — verbatim text
+
+`JSON` keeps an exact textual copy of what you inserted: original whitespace, key order, and **duplicate keys** are all preserved. Every operation that reaches into it (`->`, `->>`, `jsonb_path_query`, etc.) must **re-parse the text each time**. It cannot be indexed with a GIN index. About the only reason to choose `JSON` is if you must round-trip a document byte-for-byte and never query into it — a rare need.
+
+## JSONB — decomposed binary
+
+`JSONB` parses the document once on insert into an efficient binary structure. The trade-offs flip:
+
+- **Whitespace and key order are not preserved** (keys are reordered, roughly by length then bytes).
+- **Duplicate keys are collapsed** — the last value wins.
+- Insert is marginally slower (it parses up front); **reads and queries are much faster** (no re-parse).
+- It supports rich operators and, crucially, **GIN indexing**.
+
+```sql
+SELECT '{"b":1, "a":2, "a":3}'::json;   -- {"b":1, "a":2, "a":3}  (verbatim, dup kept)
+SELECT '{"b":1, "a":2, "a":3}'::jsonb;  -- {"a": 3, "b": 1}       (reordered, dedup)
+```
+
+## Querying and indexing JSONB
+
+```sql
+SELECT data->>'email' FROM users WHERE data @> '{"active": true}';
+
+-- GIN index for containment / key-existence queries:
+CREATE INDEX ON users USING gin (data);
+-- jsonb_path_ops: smaller/faster, supports @> but not key-exists (?):
+CREATE INDEX ON users USING gin (data jsonb_path_ops);
+```
+
+The `@>` containment operator and `?`/`?|`/`?&` key-existence operators are GIN-accelerated. For a single hot field, a plain **expression index** is often better:
+
+```sql
+CREATE INDEX ON users ((data->>'email'));
+```
+
+<Callout kind="warn" title="JSONB is not a substitute for columns">
+Reach for `JSONB` for genuinely schema-less or sparse data (per-tenant settings, webhook payloads, flexible metadata). Data you filter, join, or constrain on regularly belongs in real typed columns — you get types, NOT NULL, foreign keys, and cheaper indexes. A table that's one giant `JSONB` blob is throwing away the relational database you're paying for.
+</Callout>
+
+<ProbeNote>The interviewer wants "`JSONB` by default — binary, indexable with GIN, faster to query; `JSON` is verbatim text that re-parses on every access and only suits byte-exact round-tripping." Strong candidates note `JSONB` drops whitespace/key-order and dedups keys, mention the `@>` operator + GIN index, and warn against modeling everything as JSON instead of columns.</ProbeNote>

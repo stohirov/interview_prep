@@ -1,0 +1,48 @@
+**An `@Async` method may return `void`, `Future<T>`, `CompletableFuture<T>` (or `ListenableFuture<T>`, now deprecated) — and the choice decides whether and how the caller can get the result or observe failures.** The proxy inspects the declared return type and behaves accordingly.
+
+## `void` — fire and forget
+
+The caller gets nothing back; the proxy returns immediately.
+
+```java
+@Async
+public void notifyUser(long id) { ... }
+```
+
+The trap: **exceptions are swallowed**. There's no `Future` to carry them, so a thrown exception just logs (or vanishes). To catch them, register an `AsyncUncaughtExceptionHandler` via `AsyncConfigurer`. Use `void` only for truly fire-and-forget work where failure is non-critical or handled internally.
+
+## `Future<T>` — basic handle
+
+```java
+@Async
+public Future<Report> build(long id) {
+    return new AsyncResult<>(compute(id));   // Spring's helper
+}
+```
+
+You can `future.get()` (blocking) and exceptions surface as `ExecutionException`. But `Future` is **anemic**: no chaining, no non-blocking composition, no combining. Largely legacy now.
+
+## `CompletableFuture<T>` — the modern default
+
+Return a completed future and the caller can compose without blocking:
+
+```java
+@Async
+public CompletableFuture<Report> build(long id) {
+    return CompletableFuture.completedFuture(compute(id));
+}
+
+// caller — non-blocking composition
+service.build(1).thenCombine(service.build(2), Report::merge)
+                .thenAccept(this::publish);
+```
+
+This is the recommended type: `thenApply`, `thenCompose`, `thenCombine`, `exceptionally`, `allOf` give you real async composition, and failures propagate through the chain instead of being lost.
+
+<Callout kind="info" title="Return the future, don't unwrap it">
+Inside the method, wrap your result in `CompletableFuture.completedFuture(...)` and return it — Spring's proxy already runs the body on a pool thread, so you are *not* meant to spawn another async stage. The framework hands the caller a future that completes when your method returns.
+</Callout>
+
+`ListenableFuture<T>` was Spring's pre-Java-8 callback type; it's **deprecated** in Spring 6 in favor of `CompletableFuture`. Don't introduce it in new code.
+
+<ProbeNote>The probe is whether you know the *trade-offs*: `void` loses exceptions (need an `AsyncUncaughtExceptionHandler`), `Future` can't compose, `CompletableFuture` is the right default for chaining and error propagation, and `ListenableFuture` is deprecated. Mentioning the swallowed-exception gap on `void` is the senior signal.</ProbeNote>

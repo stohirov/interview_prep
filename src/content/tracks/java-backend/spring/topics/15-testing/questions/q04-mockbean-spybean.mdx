@@ -1,0 +1,46 @@
+**The dividing line is the `ApplicationContext`: `@MockBean`/`@SpyBean` swap a bean *inside* a running Spring context, while Mockito's `@Mock`/`@Spy` are plain test doubles with no Spring involved.** Use the Spring variants only when you actually need the context; otherwise plain Mockito is faster and simpler.
+
+## @Mock / @Spy — plain Mockito, no Spring
+
+These create test doubles in an ordinary unit test (with `@ExtendWith(MockitoExtension.class)`). `@Mock` is a stub whose methods return defaults until you `when(...).thenReturn(...)`. `@Spy` wraps a *real* object, calling real methods unless stubbed. There's no context — you wire dependencies manually with `@InjectMocks`.
+
+```java
+@ExtendWith(MockitoExtension.class)
+class OrderServiceTest {
+    @Mock PaymentGateway gateway;
+    @InjectMocks OrderService service;   // gateway injected by Mockito
+}
+```
+
+Fast (no Spring startup) and the right default for unit-testing a class in isolation.
+
+## @MockBean / @SpyBean — Mockito inside the context
+
+These replace (or wrap) a bean **in the Spring `ApplicationContext`** that the test loads. Spring removes the real bean definition and registers your mock, so *every* collaborator that `@Autowired`s that type gets the double. Essential in slice/integration tests: in `@WebMvcTest` you `@MockBean` the service the controller depends on.
+
+```java
+@WebMvcTest(OrderController.class)
+class OrderControllerTest {
+    @Autowired MockMvc mvc;
+    @MockBean OrderService service;  // the controller's dependency, faked in-context
+}
+```
+
+`@SpyBean` is the same idea but wraps the *real* bean — useful when you want real behaviour but need to verify a call or override one method.
+
+## The Boot 3.4 change — @MockitoBean
+
+There's a naming catch worth flagging: **as of Spring Boot 3.4, `@MockBean` and `@SpyBean` are deprecated** in favour of Spring Framework 6.2's `@MockitoBean` and `@MockitoSpyBean`. Same behaviour (Mockito double in the context), now part of core Spring Framework rather than Boot, with cleaner semantics for where they can be declared. New code should use `@MockitoBean`/`@MockitoSpyBean`.
+
+```java
+@WebMvcTest(OrderController.class)
+class OrderControllerTest {
+    @MockitoBean OrderService service;   // Boot 3.4+ replacement for @MockBean
+}
+```
+
+## The cost trap
+
+`@MockBean`/`@MockitoBean` change the context's bean definitions, which produces a **new cached context configuration** — so overusing them across classes fragments the context cache and slows the suite. Prefer plain `@Mock` when you don't need Spring at all, and keep the set of mocked beans consistent to maximize cache reuse.
+
+<ProbeNote>The probe: do you know `@MockBean` touches the Spring context (and thus context caching) while `@Mock` doesn't? Naming the Boot 3.4 deprecation toward `@MockitoBean`/`@MockitoSpyBean` shows you track current Spring, not 2-year-old habits.</ProbeNote>

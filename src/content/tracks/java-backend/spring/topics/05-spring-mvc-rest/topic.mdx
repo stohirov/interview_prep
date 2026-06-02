@@ -1,0 +1,35 @@
+**Spring MVC is a request-processing pipeline built around one front controller: the `DispatcherServlet`.** Every HTTP request that reaches your application lands on this servlet, and from there a fixed, well-defined sequence of collaborators turns it into a response. Understanding that sequence — who maps the URL to a method, who invokes the method, who serializes the return value — is what separates "I annotate controllers" from "I know what Spring is doing on my behalf."
+
+The flow, at altitude: the servlet container hands the request to `DispatcherServlet`, which asks a **`HandlerMapping`** (in practice `RequestMappingHandlerMapping`) which handler matches the URL + method. It then picks a **`HandlerAdapter`** that knows how to invoke that handler, resolves the method's arguments (`@PathVariable`, `@RequestParam`, `@RequestBody`, …), and calls your controller method. What happens next depends on the controller type: a REST handler's return value goes through an **`HttpMessageConverter`** (e.g. Jackson → JSON), while a classic MVC handler returns a view name that a **`ViewResolver`** renders to HTML.
+
+```java
+@RestController
+@RequestMapping("/api/orders")
+class OrderController {
+
+    private final OrderService service;
+
+    OrderController(OrderService service) { this.service = service; }
+
+    @GetMapping("/{id}")
+    ResponseEntity<OrderDto> get(@PathVariable Long id) {
+        return ResponseEntity.ok(service.find(id));
+    }
+
+    @PostMapping
+    ResponseEntity<OrderDto> create(@Valid @RequestBody CreateOrder cmd) {
+        OrderDto dto = service.create(cmd);
+        return ResponseEntity.created(URI.create("/api/orders/" + dto.id())).body(dto);
+    }
+}
+```
+
+`@RestController` is `@Controller` + `@ResponseBody`, so return values skip view resolution and go straight to a message converter. `ResponseEntity` gives you explicit control over status, headers, and body. Validation runs via `@Valid` against jakarta Bean Validation constraints, and anything thrown bubbles up to `@ExceptionHandler` / `@ControllerAdvice`, where Spring 6 can render an RFC 7807 `ProblemDetail`.
+
+Around all of this sits a layered chain: servlet **`Filter`**s wrap the dispatch, **`HandlerInterceptor`**s wrap the handler, and content negotiation decides JSON vs XML from the `Accept` header.
+
+<Callout kind="tip" title="The interview hook">
+Anchor everything to one sentence: "`DispatcherServlet` is a front controller that delegates to `HandlerMapping` → `HandlerAdapter` → my method, then to a `HttpMessageConverter` for REST or a `ViewResolver` for MVC." Once you can narrate that pipeline, every annotation below is just a knob on a stage of it.
+</Callout>
+
+The questions below walk the full request flow, contrast `@RestController` with `@Controller`, dissect the mapping and binding annotations, cover `ResponseEntity`, validation, exception handling with `ProblemDetail`, content negotiation, the filter/interceptor/advice ordering, `WebMvcConfigurer`, message converters, and the `WebRequest`/`ServerWebExchange` abstractions.

@@ -1,0 +1,47 @@
+**Spring Modulith solves the "big ball of mud" problem of monoliths without forcing you into microservices.** It lets you build a *modular monolith*: one deployable unit, but with enforced internal boundaries — so you keep operational simplicity while getting the architectural discipline people usually go distributed to obtain.
+
+## The problem in the middle
+
+A plain monolith has no real boundaries: any class can call any other, so over time modules grow tangled dependencies and you can't reason about or extract any piece. Microservices give you boundaries — but at the price of network calls, distributed transactions, separate deployments, and operational overhead you may not need yet. Modulith targets the gap: **logical modularity, physical monolith.**
+
+## How it enforces boundaries
+
+A module is, by convention, a top-level package under your application package. Code in a module's *root* package is public API; code in sub-packages is internal and other modules must not touch it.
+
+```java
+// com.shop.order      <- module "order", public API
+// com.shop.order.internal  <- internal, off-limits to other modules
+// com.shop.inventory  <- separate module
+```
+
+You verify this with a test — it fails the build if a module reaches into another's internals:
+
+```java
+@Test
+void verifiesModularStructure() {
+    ApplicationModules.of(ShopApplication.class).verify();
+}
+```
+
+## Communicating without coupling
+
+Instead of one module directly calling another's beans, Modulith encourages **application events** for cross-module interaction, decoupling them at the API level. It adds an **event publication registry**: published events are persisted, so if a listener fails the event isn't lost and can be retried — giving you reliable, transactional-outbox-style messaging *inside* the monolith.
+
+```java
+@Component
+class OrderService {
+    OrderService(ApplicationEventPublisher events) { /* ... */ }
+    void place(Order o) { events.publishEvent(new OrderPlaced(o.id())); }
+}
+// In inventory module:
+@ApplicationModuleListener   // async + transactional + persisted
+void on(OrderPlaced e) { reserveStock(e.orderId()); }
+```
+
+It also **documents** itself — generating C4/PlantUML component diagrams and module canvases from the verified structure.
+
+<Callout kind="tip" title="The strategic angle">
+A modular monolith is also the *cleanest migration path*: enforce boundaries and event-based communication now, and any module that genuinely needs independent scaling can later be extracted into a service with minimal rework — the seams are already there.
+</Callout>
+
+<ProbeNote>The key insight interviewers probe: Modulith is the deliberate *middle ground*. Strong answers name the three pillars — package-convention boundaries verified by a test, event-based cross-module communication with a persistent publication registry, and auto-generated documentation — and frame it as both a discipline tool and a low-risk on-ramp to extracting microservices later.</ProbeNote>

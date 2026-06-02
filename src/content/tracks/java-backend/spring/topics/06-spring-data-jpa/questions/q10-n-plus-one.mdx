@@ -1,0 +1,49 @@
+**N+1 is the single most common JPA performance bug: you run 1 query to fetch a list of N parents, then N more queries — one per parent — to lazily load an association.** 1 + N round trips where 1 or 2 would do. Knowing the four fixes is table stakes for a backend interview.
+
+## How it happens
+
+```java
+List<Order> orders = repo.findAll();          // 1 query: SELECT * FROM orders  → 100 rows
+for (Order o : orders)
+    System.out.println(o.getCustomer().getName());  // 100 more queries, one per order
+```
+
+Each `getCustomer()` is a lazy proxy hitting the DB. 1 + 100 = 101 queries. It hides in loops, in serialization (Jackson walking lazy fields), and — insidiously — behind an **EAGER** mapping where you never wrote the loop at all.
+
+## Detection
+
+- Turn on SQL logging (`spring.jpa.show-sql=true` or the Hibernate statistics / `org.hibernate.SQL` logger) and watch for a burst of near-identical SELECTs differing only in the bound id.
+- Use **datasource-proxy** or Hibernate's `Statistics.getQueryExecutionCount()` in a test to assert the query count.
+
+## The four fixes
+
+**1. `JOIN FETCH` (JPQL).** Pull the association in the same query:
+
+```java
+@Query("SELECT o FROM Order o JOIN FETCH o.customer")
+List<Order> findAllWithCustomer();
+```
+
+One SQL join, one round trip. Caveat: fetching *two* collections at once causes a cartesian product (`MultipleBagFetchException` for two `List`s — use `Set` or paginate separately).
+
+**2. `@EntityGraph`.** Declarative fetch plan on a derived/repository method, no JPQL:
+
+```java
+@EntityGraph(attributePaths = {"customer", "items"})
+List<Order> findByStatus(Status status);
+```
+
+**3. Batch fetching.** Don't eliminate the extra queries, *batch* them. With `@BatchSize(size = 50)` on the association or `hibernate.default_batch_fetch_size=50` globally, Hibernate loads the lazy associations for up to 50 parents in **one** `WHERE id IN (...)` query — turning 1+N into ~1+(N/50). Great when a join would explode rows.
+
+**4. DTO projection.** Skip entities entirely; select exactly the columns you need into a flat shape in one query:
+
+```java
+@Query("SELECT new com.app.OrderView(o.id, c.name) FROM Order o JOIN o.customer c")
+List<OrderView> views();
+```
+
+<Callout kind="info" title="Which fix when">
+Single association, need the entity → **`JOIN FETCH`/`@EntityGraph`**. Multiple/collection associations where a join would blow up rows → **batch fetching**. Read-only, returning a view → **DTO projection** (also dodges `LazyInitializationException`).
+</Callout>
+
+<ProbeNote>Define it as 1 + N queries from lazy access in a loop (or hidden EAGER). Name all four fixes — `JOIN FETCH`, `@EntityGraph`, `@BatchSize`/`default_batch_fetch_size`, DTO projections — and when each fits. Bonus: the two-collection cartesian-product / `MultipleBagFetchException` trap and asserting query counts in tests.</ProbeNote>

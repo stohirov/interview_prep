@@ -1,0 +1,50 @@
+**Since Spring 4.3, if a class has exactly *one* constructor, you can omit `@Autowired` entirely — Spring uses that sole constructor for injection automatically.** This is why modern Spring code is so clean: constructor injection with no annotations at all.
+
+## The single-constructor rule
+
+```java
+@Service
+public class CheckoutService {
+    private final PaymentGateway gateway;
+    private final AuditService audit;
+
+    // no @Autowired needed — it's the only constructor
+    public CheckoutService(PaymentGateway gateway, AuditService audit) {
+        this.gateway = gateway;
+        this.audit = audit;
+    }
+}
+```
+
+The container sees one constructor, treats it as *the* injection point, and resolves each parameter by the usual type → qualifier → primary → name algorithm. Cleaner, and it lets you mark fields `final`.
+
+## When you DO still need `@Autowired`
+
+**Multiple constructors.** With more than one constructor, Spring can't guess which to use, so you must annotate exactly one with `@Autowired` (mark it `required = true`, the default) to designate it:
+
+```java
+@Service
+public class ReportService {
+    public ReportService() { ... }                       // no-arg
+
+    @Autowired
+    public ReportService(DataSource ds) { ... }          // Spring uses this one
+}
+```
+
+You may annotate at most one constructor as `required = true`. (Several may be `required = false`, and Spring picks the greediest satisfiable one — a rare, advanced case.)
+
+## Why constructor injection is preferred
+
+- **Immutability:** dependencies can be `final`, set once.
+- **Fail-fast & non-null:** a missing mandatory dependency fails at object construction / context startup, and the object is never in a half-built state.
+- **Testability:** you can `new CheckoutService(mockGateway, mockAudit)` in a plain unit test, no reflection or Spring context needed.
+- **No field-injection reflection** poking into private fields.
+
+This is also why constructor injection sidesteps a class of circular-dependency surprises differently from field injection (next question): a constructor *cannot* return a partially-built object, so unresolvable cycles surface immediately.
+
+## Common gotcha
+
+Adding a second constructor (e.g., a convenience one) to a class that relied on the single-constructor rule will suddenly break injection — Spring no longer auto-selects, and you get a startup error until you add `@Autowired` to the intended one.
+
+<ProbeNote>The expected answer is precise: "single constructor → `@Autowired` is optional since Spring 4.3; multiple constructors → annotate exactly one." Tie it to *why* constructor injection is the recommended style — final fields, fail-fast, plain-`new` testability.</ProbeNote>

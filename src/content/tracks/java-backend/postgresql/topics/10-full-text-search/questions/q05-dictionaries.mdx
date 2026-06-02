@@ -1,0 +1,42 @@
+**A text search *configuration* is the recipe that turns raw text into lexemes, and the *dictionaries* inside it decide how each token is normalized.** Getting this right is what makes "running" match "ran" in English — and what stops you from applying English stemming to German text.
+
+## The pipeline: parser → dictionaries → lexemes
+
+`to_tsvector('english', text)` runs two stages. A **parser** splits the text into tokens and classifies each by type (word, number, email, URL, …). Then, per token type, a **chain of dictionaries** processes the token: the first dictionary that recognizes it wins. A dictionary can emit normalized lexeme(s), emit nothing (a stop word — dropped), or pass the token to the next dictionary in the chain.
+
+```sql
+SELECT * FROM ts_debug('english', 'The runners are running to runners.org');
+-- shows each token, its type, and which dictionary produced which lexeme
+```
+
+`ts_debug` is the tool to reach for when a match surprises you — it shows exactly where a token got dropped or stemmed.
+
+## Built-in configurations
+
+PostgreSQL ships configurations per language (`english`, `spanish`, `german`, `russian`, …) plus **`simple`**, which does no stemming and no stop words — it just lowercases. `simple` is useful for identifiers, tags, or codes where you don't want morphological folding.
+
+```sql
+SHOW default_text_search_config;            -- the config used when you omit the name
+SELECT to_tsvector('simple', 'The Runners');  -- 'runners':2 'the':1  (no stemming)
+```
+
+## Dictionary types you'll meet
+
+- **Snowball (stemmer)** — the workhorse; reduces words to a language-specific root.
+- **Stop-word lists** — drop high-frequency noise words (`the`, `and`).
+- **`synonym`** — map terms to a canonical lexeme (`postgres` → `postgresql`).
+- **`thesaurus`** — like synonym but phrase-aware.
+- **`unaccent`** — strip diacritics so `café` matches `cafe`; commonly prepended to a custom config.
+
+```sql
+CREATE TEXT SEARCH CONFIGURATION my_en ( COPY = english );
+ALTER TEXT SEARCH CONFIGURATION my_en
+  ALTER MAPPING FOR hword, hword_part, word
+  WITH unaccent, english_stem;
+```
+
+<Callout kind="danger" title="The config is baked into the stored vector">
+The configuration you used to build a stored/generated `tsvector` is frozen into that data. Changing the config later (or relying on a different `default_text_search_config`) means existing vectors and new queries normalize differently — you must rebuild the column. Always name the configuration explicitly; never depend on the session default.
+</Callout>
+
+<ProbeNote>The interviewer wants the parser → dictionary-chain → lexeme model, that dictionaries do stemming/stop-words/synonyms and the first to recognize a token wins, and that `simple` skips stemming. Senior signals: using `ts_debug` to diagnose, `unaccent` for diacritics, and knowing the config is frozen into stored vectors so you must always name it explicitly and rebuild on change.</ProbeNote>

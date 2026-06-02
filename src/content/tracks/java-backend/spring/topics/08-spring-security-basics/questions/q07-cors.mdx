@@ -1,0 +1,63 @@
+**CORS is the browser's same-origin gatekeeper: it decides whether JavaScript on origin A may read a response from origin B.** It is *not* a Spring Security feature — it's a browser rule enforced via response headers (`Access-Control-Allow-Origin`, …) — but in a secured app you must let the CORS preflight `OPTIONS` request through *before* authentication, which is why where you configure it matters.
+
+## @CrossOrigin — per-controller
+
+Annotate a controller or handler. Convenient for a single endpoint, but the policy is scattered across the codebase and easy to forget:
+
+```java
+@CrossOrigin(origins = "https://app.example.com")
+@GetMapping("/api/orders")
+List<Order> orders() { ... }
+```
+
+## WebMvcConfigurer.addCorsMappings — global, MVC level
+
+Centralized CORS for the whole MVC layer:
+
+```java
+@Configuration
+class CorsConfig implements WebMvcConfigurer {
+    @Override
+    public void addCorsMappings(CorsRegistry reg) {
+        reg.addMapping("/api/**")
+           .allowedOrigins("https://app.example.com")
+           .allowedMethods("GET", "POST", "PUT", "DELETE")
+           .allowCredentials(true);
+    }
+}
+```
+
+The catch: this runs at the `DispatcherServlet`, which is **after** the security filter chain. The preflight `OPTIONS` (which carries no credentials) can be rejected by Spring Security before it ever reaches MVC.
+
+## Spring Security CORS config — the right place for secured apps
+
+Register a `CorsConfigurationSource` and enable CORS in the filter chain. Now `CorsFilter` runs early, handles preflight, and lets it pass authentication:
+
+```java
+@Bean
+SecurityFilterChain chain(HttpSecurity http) throws Exception {
+    http.cors(Customizer.withDefaults());   // picks up the bean below
+    return http.build();
+}
+
+@Bean
+CorsConfigurationSource corsSource() {
+    CorsConfiguration c = new CorsConfiguration();
+    c.setAllowedOrigins(List.of("https://app.example.com"));
+    c.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE"));
+    c.setAllowCredentials(true);
+    var src = new UrlBasedCorsConfigurationSource();
+    src.registerCorsConfiguration("/**", c);
+    return src;
+}
+```
+
+## Which to use
+
+In any Spring Security app, configure CORS via `http.cors(...)` + a `CorsConfigurationSource` bean so the filter handles preflight correctly. Use `@CrossOrigin` only for quick, one-off endpoints in an unsecured app.
+
+<Callout kind="danger" title="Wildcard + credentials is illegal">
+You cannot combine `allowedOrigins("*")` with `allowCredentials(true)` — the browser rejects it. Use `allowedOriginPatterns(...)` if you need pattern matching with credentials.
+</Callout>
+
+<ProbeNote>Two facts win this: CORS is a *browser* mechanism (not a server-side authorization control), and in a secured app it must be configured through Spring Security (`http.cors()`) so the preflight `OPTIONS` clears the filter chain. Bonus: the wildcard-plus-credentials prohibition.</ProbeNote>

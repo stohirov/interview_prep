@@ -1,0 +1,37 @@
+**Advisory locks are application-defined mutexes that PostgreSQL tracks and arbitrates but never associates with any row or table — they lock a *number you choose*, and only code that agrees to check them is affected.** The database enforces nothing about your data; the lock means whatever your application decides it means.
+
+## How they work
+
+You lock one 64-bit integer (or two 32-bit ints). There are session-scoped and transaction-scoped variants, blocking and non-blocking:
+
+```sql
+SELECT pg_advisory_lock(42);          -- session: blocks until acquired, held until unlock/disconnect
+SELECT pg_try_advisory_lock(42);      -- returns true/false immediately, never blocks
+SELECT pg_advisory_xact_lock(42);     -- transaction: auto-released at COMMIT/ROLLBACK
+SELECT pg_advisory_unlock(42);        -- explicit release (session variant only)
+```
+
+**Session locks** persist across transactions and require explicit unlock (or they die with the connection). **Transaction locks** (`_xact_`) release automatically at end of transaction — usually what you want, since they can't leak.
+
+## When they're the right tool
+
+**1. Serializing application work without a lockable row.** Classic case: "only one worker should run this nightly job." There's no natural row to `FOR UPDATE`, so lock a constant:
+
+```sql
+-- Each worker tries; only one wins, the rest skip the job:
+SELECT pg_try_advisory_lock(hashtext('nightly-report'));
+```
+
+**2. Leader election / singleton processes** across a fleet of app instances using a shared database, with no extra infrastructure (no Redis, no ZooKeeper).
+
+**3. Coordinating around a key that isn't a row** — e.g. preventing two requests from concurrently rebuilding the cache for `user_id = 500` (`pg_advisory_xact_lock(500)`), even though you're not modifying user 500's row.
+
+## The pitfalls
+
+The lock space is **global per database** — a bare integer like `1` collides with anyone else using `1`. Namespace it: use the two-argument form `pg_advisory_lock(class_id, object_id)` or hash a descriptive string with `hashtext()`. And session-level locks **leak** if the code path that unlocks is skipped by an exception — prefer the `_xact_` variant, which the transaction boundary cleans up for you.
+
+<Callout kind="danger" title="Advisory locks are advisory">
+Nothing stops a transaction that *doesn't* call `pg_advisory_lock` from modifying the same data. They only coordinate parties that all agree to take the lock. They are not a substitute for `FOR UPDATE` or constraints when you need the database to actually protect a row.
+</Callout>
+
+<ProbeNote>The interviewer wants to hear a concrete use case the database can't otherwise express — leader election, a singleton cron job, or locking a logical key with no backing row. Strong answers prefer `pg_advisory_xact_lock` (no leaks) and namespace the key with `hashtext()` to avoid global collisions.</ProbeNote>

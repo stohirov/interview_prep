@@ -1,0 +1,33 @@
+**These interfaces form an inheritance chain, and each one adds a layer of capability — `JpaRepository` is the bottom and gives you everything.** Knowing the order shows you understand that you can pick the *narrowest* interface that exposes only what callers should use.
+
+## The hierarchy
+
+```text
+Repository<T, ID>                  // marker, no methods
+  └─ CrudRepository<T, ID>         // save, findById, findAll, delete, count, existsById
+       ├─ ListCrudRepository<T,ID> // same but returns List instead of Iterable
+       └─ PagingAndSortingRepository<T, ID>   // findAll(Pageable), findAll(Sort)
+            └─ ListPagingAndSortingRepository<T, ID>
+  └─ JpaRepository<T, ID>          // extends ListCrud + ListPagingAndSorting + flush, saveAndFlush,
+                                   //   deleteAllInBatch, getReferenceById, JPA-specific extras
+```
+
+`Repository` is an empty marker interface — it just tells Spring Data "manage this." `CrudRepository` adds the basic CRUD operations but returns `Iterable<T>` from `findAll`. `ListCrudRepository` (Spring Data 3.x) returns `List<T>`, which is almost always what you want. `PagingAndSortingRepository` adds `findAll(Pageable)` and `findAll(Sort)` — note it does **not** extend `CrudRepository`, so on its own it only does paging.
+
+## JpaRepository — the JPA-specific one
+
+```java
+public interface OrderRepository extends JpaRepository<Order, Long> { }
+```
+
+`JpaRepository` combines `ListCrudRepository` and `ListPagingAndSortingRepository` and adds JPA-flavoured methods: `flush()`, `saveAndFlush()`, `deleteAllInBatch()`, and `getReferenceById()` (returns a lazy proxy via `EntityManager.getReference`, no SELECT until you touch it). This is the interface most teams extend by default.
+
+## Why ever pick a narrower one?
+
+Two reasons. First, **API hygiene** — if a repository should never be paged, extend `CrudRepository` so callers can't reach for `Pageable`. Second, **portability** — `CrudRepository` and `PagingAndSortingRepository` are store-agnostic (they live in Spring Data Commons), so the same interface works for Mongo, Redis, etc. `JpaRepository` ties you to JPA. In practice most JPA projects extend `JpaRepository` and don't worry about it.
+
+<Callout kind="info" title="Returns and batch deletes differ">
+`JpaRepository.deleteAllInBatch()` issues a single `DELETE` and **bypasses** lifecycle callbacks and cascade, while `CrudRepository.deleteAll()` loads entities and deletes them one by one (slower, but fires `@PreRemove` and cascades). Pick deliberately.
+</Callout>
+
+<ProbeNote>They want the chain `Repository → CrudRepository → PagingAndSortingRepository → JpaRepository` and that `JpaRepository` is the JPA-specific superset. Strong candidates mention `ListCrudRepository` returning `List`, `getReferenceById` returning a lazy proxy, and choosing a narrower interface for API hygiene or store portability.</ProbeNote>

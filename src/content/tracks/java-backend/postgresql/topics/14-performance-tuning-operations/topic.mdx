@@ -1,0 +1,21 @@
+PostgreSQL ships with **conservative defaults designed to start anywhere** — including a Raspberry Pi — so a fresh install on a 64 GB server is leaving most of the machine on the table. Performance tuning is two distinct disciplines that interviewers often conflate: **configuration** (right-sizing memory and cost parameters in `postgresql.conf`) and **operations** (keeping the database healthy over time — vacuuming, watching for bloat, finding slow queries, pruning dead indexes). A senior answer treats them separately and knows that most production pain is operational, not a missing config knob.
+
+On the config side, a handful of parameters dominate. `shared_buffers` is Postgres's own page cache. `work_mem` is the per-operation sort/hash budget — the most dangerous parameter because it multiplies. `effective_cache_size` is a *planner hint*, not an allocation. `random_page_cost` tells the planner how expensive random I/O is, and its spinning-disk default is wrong on SSDs.
+
+```ini
+shared_buffers = 16GB              # ~25% of RAM
+effective_cache_size = 48GB        # ~75% of RAM (hint only)
+work_mem = 64MB                    # PER sort/hash node, PER connection
+maintenance_work_mem = 1GB         # VACUUM, CREATE INDEX, etc.
+random_page_cost = 1.1             # SSD
+```
+
+On the operational side, the recurring questions are always the same: *Which queries are slow?* (`pg_stat_statements`, `auto_explain`). *Is autovacuum keeping up?* (dead tuples, transaction-ID age). *Which indexes are dead weight?* (`pg_stat_user_indexes.idx_scan = 0`). *Is this table bloated, and which heavy hammer do I reach for?* (`CLUSTER`, `REINDEX`, `VACUUM FULL` — each with its own lock).
+
+The connective tissue across all of it is that Postgres relies on **statistics** and **background maintenance** to stay fast, and both quietly degrade. Tuning is as much about noticing degradation as about the initial numbers.
+
+<Callout kind="tip" title="The interview hook">
+Frame it as two buckets: "config" (memory and cost parameters, sized to the machine and workload) and "operations" (vacuum health, bloat, slow-query hunting, dead indexes). Say that defaults are deliberately tiny, that `work_mem` is the parameter that bites because it's *per node per connection*, and that the highest-leverage fix in most shops isn't a config change at all — it's connection pooling and keeping autovacuum ahead of churn.
+</Callout>
+
+The questions below walk each config parameter, how to size memory, autovacuum failure modes, pooling, and the operational toolkit for slow queries, unused indexes, and bloat.

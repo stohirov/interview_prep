@@ -1,0 +1,41 @@
+**PostgreSQL functions are written in a *procedural language*, declared with `LANGUAGE`, and the choice is a real trade-off between performance, expressiveness, and security (trusted vs untrusted).** The four you should know are `SQL`, `PL/pgSQL`, `PL/Python`, and `PL/V8`.
+
+## SQL — the default, often the best
+
+A plain SQL function is just a SQL statement (or a few) wrapped in a name. It's the fastest because the planner can **inline** a simple single-statement SQL function directly into the calling query, so there's no call overhead and the predicate can still use indexes.
+
+```sql
+CREATE FUNCTION active_orders(cust int) RETURNS SETOF orders
+LANGUAGE sql STABLE
+RETURN (SELECT * FROM orders WHERE customer_id = cust AND status='active');
+```
+
+Since PG14 you can use the parser-checked `BEGIN ATOMIC ... END` / `RETURN` body, which tracks dependencies (you can't drop a referenced table) instead of the old opaque string body. Reach for SQL whenever the logic is expressible as queries — no control flow needed.
+
+## PL/pgSQL — the procedural workhorse
+
+The standard installed-by-default procedural language: variables, `IF`/`LOOP`, `EXCEPTION` handling, cursors, dynamic `EXECUTE`. It's what you use when you need real control flow or exception handling. It's *trusted* (sandboxed; ordinary users may create functions in it).
+
+```sql
+CREATE FUNCTION safe_div(a numeric, b numeric) RETURNS numeric
+LANGUAGE plpgsql AS $$
+BEGIN
+  RETURN a / b;
+EXCEPTION WHEN division_by_zero THEN
+  RETURN NULL;
+END $$;
+```
+
+## PL/Python — power and danger
+
+Installed as `plpython3u`. The trailing **`u` means untrusted**: there is no trusted Python variant, so it runs unsandboxed and can touch the filesystem, network, and OS. Only a superuser can create `plpython3u` functions, and you only enable it when you genuinely need Python's libraries server-side. Great power, real risk.
+
+## PL/V8 — JavaScript
+
+A third-party extension (not in core; you must `CREATE EXTENSION plv8`) that runs JavaScript on Google's V8 engine. It's *trusted*, and it's especially handy for manipulating `jsonb` with JS semantics. Mention it to show breadth, but flag that it's an external dependency you have to build/install.
+
+<Callout kind="warn" title="Trusted vs untrusted">
+A *trusted* language (SQL, PL/pgSQL, PL/V8) is sandboxed — non-superusers may write functions in it. An *untrusted* one (`plpython3u`, `plperlu`) can reach the OS, so only superusers may create them. That distinction, not syntax, is what interviewers probe.
+</Callout>
+
+<ProbeNote>Strong answers default to SQL/PL/pgSQL, explain that simple SQL functions *inline* for speed, and crucially distinguish trusted vs untrusted — knowing that `plpython3u` has no trusted variant and needs superuser is the security-awareness signal. PL/V8 being a non-core extension is the breadth bonus.</ProbeNote>

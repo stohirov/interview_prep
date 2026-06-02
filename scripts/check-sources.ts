@@ -2,7 +2,21 @@
 // Walks the content tree, HEAD-checks every source URL, reports 404s and redirects.
 // Run: npm run check:sources
 
+import type { Source } from '../src/content/types';
 import { SOURCES } from '../src/content/tracks/java-backend/sources';
+import { OOP_SOURCES } from '../src/content/tracks/java-backend/oop/sources';
+import { PG_SOURCES } from '../src/content/tracks/java-backend/postgresql/sources';
+import { SPRING_SOURCES } from '../src/content/tracks/java-backend/spring/sources';
+
+// Every module keeps its sources in a Record<topicId, Source[]>; check them all.
+// Prefix topic ids with the module so the report is unambiguous and so identically
+// named topics across modules don't collide.
+const MODULE_SOURCES: Array<[string, Record<string, Source[]>]> = [
+  ['collections', SOURCES],
+  ['oop', OOP_SOURCES],
+  ['postgresql', PG_SOURCES],
+  ['spring', SPRING_SOURCES],
+];
 
 const REQUEST_TIMEOUT_MS = 15_000;
 const CONCURRENCY = 8;
@@ -26,7 +40,9 @@ async function head(url: string): Promise<Pick<Row, 'status' | 'location' | 'err
       signal: ctrl.signal,
       headers: { 'User-Agent': 'jip-source-check/1.0' },
     });
-    if (res.status === 405 || res.status === 403) {
+    // Some hosts reject HEAD (405/403) or even return 404 for it (e.g. projectreactor.io);
+    // confirm with a ranged GET before trusting the failure.
+    if (res.status === 405 || res.status === 403 || res.status === 404) {
       res = await fetch(url, {
         method: 'GET',
         redirect: 'manual',
@@ -65,8 +81,16 @@ async function withConcurrency<T, R>(items: T[], n: number, fn: (item: T) => Pro
 
 async function main(): Promise<void> {
   const rows: Omit<Row, 'status' | 'location' | 'error'>[] = [];
-  for (const [topicId, list] of Object.entries(SOURCES)) {
-    for (const s of list) rows.push({ topicId, title: s.title, url: s.url });
+  const seen = new Set<string>();
+  for (const [moduleId, record] of MODULE_SOURCES) {
+    for (const [topicId, list] of Object.entries(record)) {
+      for (const s of list) {
+        // Dedupe identical URLs that legitimately recur across topics/modules.
+        if (seen.has(s.url)) continue;
+        seen.add(s.url);
+        rows.push({ topicId: `${moduleId}/${topicId}`, title: s.title, url: s.url });
+      }
+    }
   }
 
   console.log(`Checking ${rows.length} sources (concurrency ${CONCURRENCY})...\n`);

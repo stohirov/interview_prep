@@ -1,0 +1,39 @@
+**A covering index carries every column a query needs, so PostgreSQL can answer it from the index alone and skip the heap entirely — that heap-free read is the *index-only scan*.** The point is to eliminate the random heap fetch that a normal Index Scan does for each matched row.
+
+## INCLUDE columns
+
+You can put extra columns in the index without making them part of the search key, using `INCLUDE`:
+
+```sql
+CREATE INDEX ON orders (customer_id) INCLUDE (status, total);
+
+-- both customer_id (key) and status/total (payload) come from the index
+SELECT status, total FROM orders WHERE customer_id = 42;
+```
+
+`INCLUDE` columns are stored only in the **leaf** pages as payload, not in the tree's internal pages. The difference from just widening the key, `(customer_id, status, total)`:
+
+- They **don't** bloat the internal nodes or affect the search ordering.
+- They **can't** be used for seeking, ordering, or the left-prefix rule — they're there purely to be *returned*.
+- They can carry types that aren't valid as B-tree keys, and they're the natural home for columns you only `SELECT` but never filter on.
+
+Use the key for columns you search/sort by; use `INCLUDE` for columns you only need to read back.
+
+## When does an index-only scan actually happen?
+
+Having all the columns is necessary but **not sufficient**. PostgreSQL still needs to know each row is *visible to your transaction*, and that information lives in the heap, not the index — because of MVCC.
+
+The escape hatch is the **visibility map (VM)**: a bitmap marking heap pages where *all* tuples are visible to everyone. If a matched row's page is flagged all-visible, the planner trusts the index and skips the heap fetch. If not, it must visit the heap anyway, partially defeating the optimization.
+
+```text
+EXPLAIN output:
+  Index Only Scan using ... 
+    Heap Fetches: 0     ← ideal, fully heap-free
+    Heap Fetches: 5821  ← VM stale; visited heap for these rows
+```
+
+<Callout kind="warn" title="VACUUM keeps index-only scans working">
+The visibility map is maintained by **`VACUUM`** (including autovacuum). On a heavily updated table the VM goes stale, `Heap Fetches` climbs, and the "index-only" scan quietly starts touching the heap. A non-zero `Heap Fetches` is the signal to vacuum the table.
+</Callout>
+
+<ProbeNote>Two things to land: a covering index uses `INCLUDE` for return-only columns (not searchable, no left-prefix), and an index-only scan needs the **visibility map** — so it depends on `VACUUM` and shows up as `Heap Fetches` in `EXPLAIN`. Explaining *why* MVCC forces the visibility check separates real understanding from buzzwords.</ProbeNote>

@@ -1,0 +1,36 @@
+**MVCC — Multi-Version Concurrency Control — is the mechanism by which PostgreSQL gives every transaction a consistent snapshot without locking reads: instead of overwriting a row, it keeps *multiple versions* and shows each transaction the right one.** The payoff is the slogan worth memorizing: **readers never block writers, and writers never block readers.**
+
+## The core idea
+
+A logical row is physically stored as a chain of **tuples** (row versions). An `UPDATE` doesn't modify the existing tuple in place — it writes a **new tuple** and marks the old one as expired. A `DELETE` just marks the tuple expired. So at any moment several versions of the same row may coexist on disk, each tagged with the transaction that created it and the transaction that expired it.
+
+```text
+UPDATE products SET price = 120 WHERE id = 5;
+
+  old tuple: price=100  (xmin=100, xmax=205)  <- expired by txn 205
+  new tuple: price=120  (xmin=205, xmax=0)    <- live
+```
+
+## How a transaction picks its version
+
+Each transaction runs against a **snapshot** — the set of transactions visible to it. For every tuple it considers, visibility rules ask: *was the tuple's creating transaction (`xmin`) committed and visible in my snapshot, and is its deleting transaction (`xmax`) not yet visible?* If yes, the transaction sees that version; otherwise it walks to the version it *should* see. So two concurrent transactions can read the same logical row and correctly get **different versions**.
+
+## Why reads and writes don't block
+
+Because a writer creates a *new* tuple rather than overwriting the old one, a concurrent reader still finds the old version it's entitled to — no lock needed. The reader doesn't wait for the writer; the writer doesn't wait for the reader. Only **writer–writer** conflicts on the *same row* block (or, at Serializable, abort), because two transactions genuinely can't both win the latest version.
+
+```sql
+-- Concurrently, with zero blocking between these:
+-- T1: SELECT * FROM products WHERE id = 5;   -- sees old version
+-- T2: UPDATE products SET price = 120 WHERE id = 5;  -- writes new version
+```
+
+## The cost: dead tuples
+
+Old versions don't vanish on commit — they become **dead tuples** that still occupy pages until **`VACUUM`** reclaims them. Heavy update/delete workloads generate dead tuples fast; if `VACUUM`/autovacuum can't keep up the table **bloats**, slowing scans. MVCC's read concurrency is essentially paid for by vacuuming.
+
+<Callout kind="info" title="The trade PostgreSQL made">
+Some databases (e.g., Oracle) keep old versions in a separate undo/rollback segment; PostgreSQL keeps them inline in the heap. That makes commits cheap and rollbacks trivial, but pushes cleanup to `VACUUM` — which is why VACUUM tuning is a recurring operational topic in PostgreSQL specifically.
+</Callout>
+
+<ProbeNote>The line they want to hear is "readers don't block writers and writers don't block readers." Back it with: updates create new tuples, snapshots + visibility rules select the right version, only same-row writers conflict, and the cost is dead tuples that `VACUUM` must reclaim.</ProbeNote>

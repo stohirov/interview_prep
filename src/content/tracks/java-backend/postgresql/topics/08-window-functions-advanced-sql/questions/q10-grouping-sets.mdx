@@ -1,0 +1,59 @@
+**`GROUPING SETS`, `ROLLUP`, and `CUBE` compute *multiple* `GROUP BY` aggregations in a single query and a single pass over the data** — instead of `UNION ALL`-ing several grouped queries together. They are the SQL way to produce subtotals and grand totals (think pivot-table report rows).
+
+## GROUPING SETS — pick the exact groupings
+
+```sql
+SELECT region, product, SUM(amount)
+FROM sales
+GROUP BY GROUPING SETS (
+  (region, product),   -- detail
+  (region),            -- subtotal per region
+  ()                   -- grand total
+);
+```
+
+This returns all three levels at once. The empty set `()` is the grand total over everything. In rows from a less-specific set, the unused columns come back as `NULL`.
+
+## ROLLUP — hierarchical subtotals
+
+`ROLLUP(a, b, c)` is shorthand for the descending prefixes: `(a,b,c), (a,b), (a), ()`. Perfect for a natural hierarchy (year → month → day, or country → state → city):
+
+```sql
+SELECT country, state, SUM(amount)
+FROM sales
+GROUP BY ROLLUP (country, state);
+-- => (country,state), (country), ()
+```
+
+## CUBE — every combination
+
+`CUBE(a, b)` produces **all** subsets: `(a,b), (a), (b), ()`. Use it for cross-tab reports where you want subtotals along every dimension independently:
+
+```sql
+SELECT region, product, SUM(amount)
+FROM sales
+GROUP BY CUBE (region, product);
+-- => (region,product), (region), (product), ()
+```
+
+## Telling a subtotal NULL from a data NULL
+
+A subtotal row has `NULL` in the columns it didn't group by — which is ambiguous if the data *also* contains `NULL`s. The `GROUPING()` function disambiguates: it returns `1` when the column was aggregated away (a subtotal), `0` otherwise.
+
+```sql
+SELECT
+  CASE WHEN GROUPING(region) = 1 THEN 'ALL REGIONS' ELSE region END AS region,
+  SUM(amount)
+FROM sales
+GROUP BY ROLLUP (region);
+```
+
+<Callout kind="info" title="Why not just UNION ALL?">
+You *could* `UNION ALL` one query per grouping level, but that scans the table once per level. `GROUPING SETS`/`ROLLUP`/`CUBE` compute every level in **one scan**, which the planner optimizes — far cheaper on large tables, and less code.
+</Callout>
+
+<Callout kind="tip" title="They're all sugar over GROUPING SETS">
+`ROLLUP` and `CUBE` are just convenient spellings; both expand to `GROUPING SETS`. You can mix them in one `GROUP BY` for complex report shapes.
+</Callout>
+
+<ProbeNote>They want: these compute multiple groupings in one pass — `ROLLUP` = hierarchical prefixes with subtotals + grand total, `CUBE` = all combinations, `GROUPING SETS` = explicit list. The senior detail is the `GROUPING()` function to distinguish subtotal NULLs from real NULLs, and that it beats `UNION ALL` of separate grouped queries.</ProbeNote>

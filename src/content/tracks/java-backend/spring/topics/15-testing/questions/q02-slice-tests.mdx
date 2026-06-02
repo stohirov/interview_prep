@@ -1,0 +1,55 @@
+**Slice tests boot a *deliberately narrow* slice of the context — only the auto-configurations relevant to one layer — so you test that layer with real Spring wiring but a fraction of the startup cost.** Each `@...Test` annotation disables full auto-configuration and turns on just the pieces it needs. The skill is matching the slice to what you're verifying.
+
+## @WebMvcTest — the web layer
+
+Loads MVC infrastructure (`DispatcherServlet`, your `@Controller`/`@RestController`, `@ControllerAdvice`, converters, validators, security config) and an auto-configured `MockMvc`. It does **not** load `@Service`, `@Repository`, or `@Component` beans — you supply collaborators with `@MockitoBean`.
+
+```java
+@WebMvcTest(OrderController.class)
+class OrderControllerTest {
+    @Autowired MockMvc mvc;
+    @MockitoBean OrderService service;
+
+    @Test void returns404() throws Exception {
+        given(service.find(1L)).willReturn(Optional.empty());
+        mvc.perform(get("/orders/1")).andExpect(status().isNotFound());
+    }
+}
+```
+
+Use it for request mapping, status codes, JSON (de)serialization, validation, and exception handling — everything *web* about a controller.
+
+## @DataJpaTest — the persistence layer
+
+Configures JPA, Hibernate, a `DataSource`, `TestEntityManager`, and your repositories. Two key behaviours: each test runs in a **transaction that rolls back** at the end (clean DB between tests), and by default it replaces your DataSource with an **embedded in-memory DB** (H2) — though you should override that with Testcontainers for fidelity (`@AutoConfigureTestDatabase(replace = NONE)`).
+
+```java
+@DataJpaTest
+class OrderRepositoryTest {
+    @Autowired OrderRepository repo;
+    @Test void findsByStatus() {
+        repo.save(new Order(Status.PAID));
+        assertThat(repo.findByStatus(Status.PAID)).hasSize(1);
+    }
+}
+```
+
+Use it for custom `@Query` methods, derived queries, and mapping correctness — not for service logic.
+
+## @JsonTest — serialization only
+
+Loads just Jackson/Gson configuration and gives you `JacksonTester`/`JsonContent` to assert that an object serializes to the exact JSON you expect (and back). Cheap and focused — ideal for verifying `@JsonProperty`, date formats, and custom serializers without an HTTP layer.
+
+## @RestClientTest — outbound HTTP clients
+
+For testing *your* client code that calls other services. It configures `RestTemplate`/`RestClient` builders and a `MockRestServiceServer` so you can stub the remote responses and assert your client parses them correctly — no real network.
+
+```java
+@RestClientTest(WeatherClient.class)
+class WeatherClientTest {
+    @Autowired WeatherClient client;
+    @Autowired MockRestServiceServer server;
+}
+```
+
+<ProbeNote>The probe is whether you map *slice → layer* correctly and know what each slice *omits*. The classic trap: forgetting `@WebMvcTest` excludes services, so you must `@MockitoBean` them — and that `@DataJpaTest` rolls back and defaults to an embedded DB.</ProbeNote>

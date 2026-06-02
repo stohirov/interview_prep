@@ -1,0 +1,51 @@
+**`LATERAL` lets a subquery or function in the `FROM` clause reference columns from tables that appear *earlier* in the same `FROM` — a correlated join you can put in `FROM` instead of the `SELECT` list.** Without `LATERAL`, a `FROM` subquery cannot see the other tables; with it, it runs once per outer row, like a `for` loop over the left side.
+
+## The problem it solves: top-N-per-group
+
+"Give me each customer's 3 most recent orders." A plain join can't `LIMIT` per customer. `LATERAL` can:
+
+```sql
+SELECT c.id, c.name, o.order_id, o.created_at
+FROM customers c
+CROSS JOIN LATERAL (
+  SELECT order_id, created_at
+  FROM orders o
+  WHERE o.customer_id = c.id      -- references the outer row!
+  ORDER BY o.created_at DESC
+  LIMIT 3
+) o;
+```
+
+The inner subquery references `c.id` from the outer table — only legal because of `LATERAL`. It executes once per customer, returning that customer's top 3.
+
+## Joining to a set-returning function
+
+`LATERAL` is implicit for functions in `FROM`, and explicit elsewhere:
+
+```sql
+SELECT u.id, e.value
+FROM users u,
+     LATERAL jsonb_array_elements_text(u.tags) AS e(value);
+```
+
+Each user's `tags` array is expanded against that user's row.
+
+## LEFT JOIN LATERAL — keep rows with no match
+
+`CROSS JOIN LATERAL` drops outer rows whose subquery returns nothing. Use `LEFT JOIN LATERAL ... ON true` to keep them (matched columns become `NULL`):
+
+```sql
+SELECT c.id, o.order_id
+FROM customers c
+LEFT JOIN LATERAL (
+  SELECT order_id FROM orders o
+  WHERE o.customer_id = c.id
+  ORDER BY created_at DESC LIMIT 1
+) o ON true;          -- customers with zero orders still appear
+```
+
+<Callout kind="info" title="LATERAL vs a correlated subquery vs a window function">
+A scalar correlated subquery in `SELECT` returns exactly one value per row; `LATERAL` can return **multiple columns and multiple rows** per outer row. For top-N-per-group you can also use `ROW_NUMBER() ... WHERE rn <= 3` — that scans all orders then filters, whereas `LATERAL` with `LIMIT 3` and an index on `(customer_id, created_at DESC)` can stop early per customer, often far cheaper for large tables.
+</Callout>
+
+<ProbeNote>The interviewer wants: LATERAL allows a FROM subquery/function to reference earlier FROM items, evaluated per outer row, and the canonical use is top-N-per-group with `LIMIT` (impossible with a plain join). Bonus: `LEFT JOIN LATERAL ... ON true` to retain unmatched rows, and the performance contrast with the ROW_NUMBER approach.</ProbeNote>

@@ -1,0 +1,39 @@
+**The one rule that matters most: money is `NUMERIC`, never a float.** Binary floating point can't represent `0.10` exactly, so `REAL`/`DOUBLE PRECISION` accumulate rounding error and will eventually report a cent that doesn't reconcile. Everything else is about picking the smallest *exact* integer type that fits.
+
+## The exact integer types
+
+| Type | Bytes | Range | Use for |
+| --- | --- | --- | --- |
+| `SMALLINT` | 2 | ±32K | small bounded counts |
+| `INTEGER` (`int4`) | 4 | ±2.1B | default for most IDs/counts |
+| `BIGINT` (`int8`) | 8 | ±9.2×10¹⁸ | surrogate keys, anything that could grow |
+
+Prefer `INTEGER` for counts; prefer `BIGINT` for **surrogate primary keys**. A high-volume table can exhaust a 4-byte key (the Postgres "transaction-ID-style" overflow is a real production incident), and migrating a PK from `int` to `bigint` later is painful. Use `GENERATED ALWAYS AS IDENTITY` rather than the legacy `serial`.
+
+## NUMERIC / DECIMAL — exact, arbitrary precision
+
+`NUMERIC` and `DECIMAL` are **the same type** (`DECIMAL` is an alias). `NUMERIC(p,s)` stores exactly `p` total digits with `s` after the decimal point — no rounding error, ever. This is the money type:
+
+```sql
+amount numeric(12,2)   -- up to 10 digits before the point, 2 after
+```
+
+The cost is speed: `NUMERIC` arithmetic is done in software, far slower than CPU integer/float math. That's a fine trade for money. Unbounded `NUMERIC` (no `(p,s)`) is allowed and stores any value exactly, but pin `(p,s)` for money so the column enforces "two decimal places."
+
+## REAL / DOUBLE PRECISION — fast, inexact
+
+`REAL` (`float4`, ~6 significant digits) and `DOUBLE PRECISION` (`float8`, ~15 digits) are IEEE-754 binary floats. Fast, compact, and *approximate*. Use them for scientific/measurement data where you genuinely want floating point — sensor readings, ML features, geometric coordinates — never for currency.
+
+```sql
+SELECT 0.1::double precision * 3;  -- 0.30000000000000004  ← why not for money
+```
+
+## Don't use the money type
+
+PostgreSQL has a `MONEY` type, but it has a fixed fraction tied to a server locale setting and no currency awareness — it's widely considered a mistake. Use `NUMERIC` plus a separate `currency` column.
+
+<Callout kind="danger" title="Floats and money never mix">
+`0.1 + 0.2 = 0.30000000000000004` in any IEEE-754 type. One float column in a billing path is a reconciliation bug waiting to happen. Money = `NUMERIC(p,s)`.
+</Callout>
+
+<ProbeNote>The interviewer is checking you instantly say "`NUMERIC` for money, never float, because binary floats can't represent `0.10`." Strong answers add: `BIGINT` for surrogate keys to avoid int4 exhaustion, `DECIMAL` is an alias for `NUMERIC`, and the `MONEY` type is best avoided.</ProbeNote>

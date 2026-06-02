@@ -1,0 +1,42 @@
+**Operators transform a `Flux`/`Mono` into a new one — they're the building blocks of a reactive pipeline, and the interview question is almost always "what's the difference between `flatMap`, `concatMap`, and `switchMap`?"** Get the transforming operators right and the rest follow.
+
+## map vs flatMap — synchronous vs asynchronous
+
+`map` is a **synchronous 1:1** transform: in, out, same value count, same order. `flatMap` takes each element, calls a function returning *another publisher*, and **merges** all those inner publishers' emissions into one stream — asynchronously and **concurrently**, so the results can **interleave** and arrive out of order.
+
+```java
+flux.map(id -> id.trim());                 // String -> String, 1:1
+flux.flatMap(id -> userRepo.findById(id)); // String -> Mono<User>, concurrent, unordered
+```
+
+Rule of thumb: if your function returns a `Mono`/`Flux` (an async call), you need `flatMap`, not `map`.
+
+## flatMap vs concatMap vs switchMap
+
+All three map to inner publishers; they differ in *concurrency and ordering*:
+
+- **`flatMap`** — subscribes to inner publishers eagerly and concurrently; output order is not guaranteed. Fastest, use when order doesn't matter.
+- **`concatMap`** — processes inners **one at a time, in order**; waits for each to complete before the next. Preserves order, no concurrency.
+- **`switchMap`** — when a new element arrives, **cancels the previous** inner publisher and switches to the new one. The "latest wins" operator — perfect for type-ahead search where stale requests should be abandoned.
+
+```java
+queries.switchMap(q -> searchService.search(q));  // cancel stale searches
+events.concatMap(e -> persist(e));                // ordered writes
+ids.flatMap(id -> fetch(id), 8);                  // up to 8 concurrent fetches
+```
+
+## Combining: zip vs merge
+
+- **`zip`** pairs elements **positionally** from multiple sources — emits one combined element per index, completing when the shortest source does. Use to wait for several calls and combine results.
+- **`merge`** interleaves elements from multiple sources **as they arrive**, no pairing, preserving no per-source order.
+
+```java
+Mono.zip(userMono, ordersMono, (u, o) -> new Profile(u, o));  // combine two results
+Flux.merge(streamA, streamB);                                  // interleave both
+```
+
+## Filtering and aggregating
+
+`filter(predicate)` drops non-matching elements. `reduce((acc, x) -> ...)` folds the whole stream into a single `Mono` (e.g. a sum), emitting only on completion — so it never finishes on an infinite stream.
+
+<ProbeNote>The make-or-break answer: `flatMap` = concurrent/interleaved, `concatMap` = ordered/sequential, `switchMap` = cancel-previous. Then `map` is sync 1:1, `zip` pairs by index, `merge` interleaves, `reduce` folds to a single value. Give `switchMap` + type-ahead as the concrete use case.</ProbeNote>

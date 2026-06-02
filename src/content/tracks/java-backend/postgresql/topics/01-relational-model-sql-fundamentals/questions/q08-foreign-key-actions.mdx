@@ -1,0 +1,41 @@
+**A foreign key is a constraint that says "every value in this column must exist as a key in another table" — it enforces *referential integrity*.** The `ON DELETE` / `ON UPDATE` actions decide what happens to the child rows when the referenced parent row is deleted or its key changes.
+
+## What a foreign key is
+
+```sql
+CREATE TABLE orders (
+    id          bigint PRIMARY KEY,
+    customer_id bigint NOT NULL REFERENCES customers (id)
+);
+```
+
+`customer_id` is the FK; it must match some `customers.id` (or be NULL, if nullable). The referenced column must be a `PRIMARY KEY` or `UNIQUE` constraint — PostgreSQL needs a guaranteed-unique target to point at. By default the action is `ON DELETE NO ACTION`, which rejects a parent delete that would orphan children.
+
+## The referential actions on parent DELETE
+
+```sql
+customer_id bigint REFERENCES customers (id) ON DELETE CASCADE
+customer_id bigint REFERENCES customers (id) ON DELETE SET NULL
+customer_id bigint REFERENCES customers (id) ON DELETE RESTRICT
+```
+
+- **`CASCADE`** — deleting the parent **also deletes the matching child rows**. Use it when children have no meaning without the parent (order_items under an order). Dangerous on important data: one parent delete can silently wipe a subtree.
+- **`SET NULL`** — child rows survive but their FK column is set to `NULL`, "orphaning" them deliberately. Requires the column to be nullable. Good for "employee's manager left, keep the employee with no manager." `SET DEFAULT` is the cousin that sets the column to its default value instead.
+- **`RESTRICT`** — **forbids** deleting a parent that still has children; the delete errors out. This is usually what you want for accounting-style data where deletes should be intentional.
+
+## RESTRICT vs NO ACTION — the subtle one
+
+Both block the delete, but the timing differs. `RESTRICT` is checked **immediately**, when the row is deleted. `NO ACTION` (the default) is checked at the **end of the statement** and can be deferred if the constraint is `DEFERRABLE`. So `NO ACTION` permits patterns where a triggered cascade or a same-statement re-insert fixes the reference before the check runs; `RESTRICT` never gives you that window.
+
+```sql
+-- with NO ACTION you can delete a parent and reassign children in one statement
+-- via a BEFORE trigger; with RESTRICT the same delete fails instantly.
+```
+
+`ON UPDATE` takes the same actions and fires when the *referenced key value* changes — rarely relevant with surrogate keys, important with natural keys.
+
+<Callout kind="tip" title="Index your foreign keys">
+PostgreSQL automatically indexes the parent's referenced column (it's a PK/UNIQUE) but **not** the child FK column. Without an index on `orders(customer_id)`, every parent delete or update does a sequential scan of the child to check the constraint — a classic source of mysterious slow deletes.
+</Callout>
+
+<ProbeNote>The interviewer wants the definition (referential integrity, target must be PK/UNIQUE) and crisp use cases for CASCADE / SET NULL / RESTRICT. The senior differentiators: knowing RESTRICT is checked immediately while NO ACTION defers to statement end, and that PostgreSQL does *not* auto-index the child FK column.</ProbeNote>

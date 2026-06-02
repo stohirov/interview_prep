@@ -4,8 +4,21 @@ A web app for senior Java backend interview preparation. Structured topics with 
 written for FAANG- and EPAM-style questions, every claim linked back to the JDK 25
 Javadoc, the JLS, or a JEP.
 
-The Collections Framework module ships seeded — Concurrency, JVM, Spring, System Design
-and DSA modules slot into the same scaffold without any structural changes.
+Four modules ship seeded — **Collections**, **OOP**, **PostgreSQL**, and **Spring
+Framework & Spring Boot** — and Concurrency, JVM, System Design and DSA modules slot
+into the same scaffold without any structural changes.
+
+## Modules
+
+| Module | Topics | Focus |
+| --- | --- | --- |
+| **Java Collections Framework** | 15 | Lists, Sets, Maps, Queues, the equals/hashCode contract, concurrent collections, Sequenced Collections |
+| **Object-Oriented Programming** | 16 | Four pillars, equals/hashCode, immutability, SOLID, GoF patterns, modern Java records/sealed/pattern matching |
+| **PostgreSQL** | 15 | Relational model, data types, indexing, query planning & EXPLAIN, transactions/MVCC, locks, partitioning, replication, backup/PITR, tuning |
+| **Spring Framework & Spring Boot** | 16 | IoC/DI, bean lifecycle, auto-configuration, MVC/REST, Spring Data JPA, transactions, security, AOP, caching, async/virtual threads, WebFlux, Actuator, testing, Boot 3 stack — layered middle → senior |
+
+PostgreSQL doc links use `/docs/current/` so they auto-track the latest major version;
+Spring links use the Framework 6.x / Boot 3.x reference paths under `docs.spring.io`.
 
 ## Run it
 
@@ -60,8 +73,8 @@ src/
     loader.ts         compile-time tree assembly + lookup helpers
     tracks/
       java-backend/
-        index.ts        Track definition
-        sources.ts      All sources, keyed by topic id
+        index.ts        Track definition (registers all four modules)
+        sources.ts      Collections sources, keyed by topic id
         collections/
           index.ts      Module definition (every topic and question listed)
           topics/
@@ -72,6 +85,18 @@ src/
             02-list-arraylist-linkedlist/
               …
             (15 topics)
+        oop/
+          index.ts
+          sources.ts    Module-local sources (OOP_SOURCES)
+          topics/        (16 topics)
+        postgresql/
+          index.ts
+          sources.ts    Module-local sources (PG_SOURCES)
+          topics/        (15 topics)
+        spring/
+          index.ts
+          sources.ts    Module-local sources (SPRING_SOURCES)
+          topics/        (16 topics)
   features/
     progress/         ProgressRepository interface + LocalStorage impl + Zustand store
     search/           Fuse.js index

@@ -1,0 +1,55 @@
+**An expression index (a.k.a. functional index) indexes the *result of an expression* rather than a raw column — which is the fix for the very common problem that wrapping a column in a function makes a normal index unusable.** If your `WHERE` computes something, index that exact computation.
+
+## The problem it solves
+
+A plain index on `email` is sorted by the raw stored value. A case-insensitive lookup transforms the column, and the planner can't use a `email` index for a `lower(email)` predicate — the index has no idea what `lower(email)` sorts like:
+
+```sql
+CREATE INDEX ON users (email);
+SELECT * FROM users WHERE lower(email) = 'a@b.com';  -- Seq Scan, index ignored
+```
+
+The predicate is **non-sargable** against that index. (You could rewrite the query, but you can't avoid the transform if you genuinely need case-insensitivity.)
+
+## The fix: index the expression
+
+```sql
+CREATE INDEX ON users (lower(email));
+SELECT * FROM users WHERE lower(email) = 'a@b.com';  -- Index Scan
+```
+
+PostgreSQL stores the *computed* `lower(email)` for every row in the index, sorted, so the predicate matches the index exactly. The query expression must match the index expression for the planner to use it.
+
+## Requirement: the function must be IMMUTABLE
+
+PostgreSQL can only index a value that's a deterministic function of the row's input. The function (and its operator class) must be marked **`IMMUTABLE`** — same inputs always give the same output.
+
+```sql
+-- works: lower() is IMMUTABLE
+CREATE INDEX ON users (lower(email));
+
+-- fails: now()-based expressions aren't immutable
+-- CREATE INDEX ON orders ((created_at > now()));  -- error
+```
+
+A classic trap is `timestamptz`-to-`date` casts, which depend on the session time zone and so aren't immutable; use an immutable variant or a range predicate instead.
+
+## More everyday uses
+
+```sql
+-- case-insensitive uniqueness
+CREATE UNIQUE INDEX ON users (lower(email));
+
+-- index a value extracted from jsonb
+CREATE INDEX ON events ((payload->>'user_id'));
+SELECT * FROM events WHERE payload->>'user_id' = '42';
+
+-- index a derived/computed value
+CREATE INDEX ON people (date_part('year', born));
+```
+
+<Callout kind="info" title="Expression index vs generated column">
+An alternative is a `GENERATED ALWAYS AS (...) STORED` column with a plain index on it — it materializes the value in the table (extra storage) but lets you `SELECT` it directly. An expression index keeps the value only in the index. Choose based on whether you also need to read the computed value back.
+</Callout>
+
+<ProbeNote>The expected answer is that `WHERE lower(email) = …` can't use an index on `email`, and the fix is `CREATE INDEX ON users (lower(email))`. The senior touch is the **`IMMUTABLE`** requirement and naming the non-sargable `timestamptz::date` cast as a real-world gotcha.</ProbeNote>

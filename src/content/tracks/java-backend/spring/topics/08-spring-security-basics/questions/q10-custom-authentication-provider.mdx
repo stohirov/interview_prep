@@ -1,0 +1,71 @@
+**When the built-in username/password or JWT flows don't fit, you customize at two layers: a custom `AuthenticationFilter` to *extract* a credential from the request, and a custom `AuthenticationProvider` to *verify* it.** Knowing which layer does what — and that they're separate — is the point of this question.
+
+## AuthenticationProvider — the verifier
+
+Decides whether a credential is valid and produces a fully authenticated `Authentication`. The `AuthenticationManager` (`ProviderManager`) tries each registered provider whose `supports(...)` matches:
+
+```java
+@Component
+class ApiKeyAuthenticationProvider implements AuthenticationProvider {
+
+    private final ApiKeyService keys;
+
+    @Override
+    public Authentication authenticate(Authentication auth) {
+        String presented = (String) auth.getCredentials();
+        ApiKey key = keys.find(presented)
+            .orElseThrow(() -> new BadCredentialsException("invalid API key"));
+        // build an AUTHENTICATED token (note the authorities-bearing constructor)
+        return new ApiKeyAuthenticationToken(
+            key.owner(), null, key.authorities());
+    }
+
+    @Override
+    public boolean supports(Class<?> authentication) {
+        return ApiKeyAuthenticationToken.class.isAssignableFrom(authentication);
+    }
+}
+```
+
+Throw an `AuthenticationException` (e.g. `BadCredentialsException`) to reject. Returning a token built with the authorities constructor marks it authenticated.
+
+## AuthenticationFilter — the extractor
+
+Pulls the raw credential out of the HTTP request, wraps it in an *unauthenticated* token, and hands it to the manager. You usually extend `OncePerRequestFilter` (or use the generic `AuthenticationFilter`):
+
+```java
+class ApiKeyFilter extends OncePerRequestFilter {
+
+    private final AuthenticationManager manager;
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest req,
+            HttpServletResponse res, FilterChain chain) throws IOException, ServletException {
+        String header = req.getHeader("X-API-Key");
+        if (header != null) {
+            var unauth = new ApiKeyAuthenticationToken(header);   // not yet authenticated
+            Authentication result = manager.authenticate(unauth);
+            SecurityContextHolder.getContext().setAuthentication(result);
+        }
+        chain.doFilter(req, res);
+    }
+}
+```
+
+## Wiring them into the chain
+
+```java
+http
+  .authenticationProvider(apiKeyProvider)
+  .addFilterBefore(apiKeyFilter, UsernamePasswordAuthenticationFilter.class);
+```
+
+## Division of labour
+
+Filter = **transport**: where the credential lives in the request and where to store the result. Provider = **policy**: is this credential valid, and what authorities does it grant. Keep verification logic out of the filter so it's reusable and unit-testable.
+
+<Callout kind="tip" title="Often you only need one">
+For a bearer/JWT scheme, prefer the built-in resource-server support. Write a custom *provider* only for a genuinely new credential type, and a custom *filter* only when the credential arrives in a non-standard place.
+</Callout>
+
+<ProbeNote>Draw the split clearly: the **filter extracts** the credential and stores the result in the `SecurityContext`; the **provider verifies** it and assigns authorities, throwing `AuthenticationException` on failure. Bonus points for `supports()` selecting the provider and `addFilterBefore(...)` placing the filter relative to `UsernamePasswordAuthenticationFilter`.</ProbeNote>

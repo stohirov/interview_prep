@@ -1,0 +1,71 @@
+**`jsonb` values are immutable, so you "modify" them by producing a new value with `jsonb_set` / `jsonb_insert` and writing it back.** `jsonb_path_query` is the read-side counterpart that extracts matches with a `jsonpath`.
+
+## `jsonb_set` — update or replace a value at a path
+
+```sql
+jsonb_set(target, path text[], new_value jsonb, create_if_missing boolean DEFAULT true)
+```
+
+It replaces the value at `path`. If the path's parent exists but the key doesn't, it's **created** unless you pass `false`.
+
+```sql
+SELECT jsonb_set('{"a":1,"b":2}', '{b}', '20');
+-- {"a": 1, "b": 20}
+
+SELECT jsonb_set('{"a":1}', '{c}', '3');             -- key created
+-- {"a": 1, "c": 3}
+
+SELECT jsonb_set('{"a":1}', '{c}', '3', false);      -- not created (missing)
+-- {"a": 1}
+```
+
+A real update writes the result back into the column:
+
+```sql
+UPDATE users SET data = jsonb_set(data, '{address,city}', '"Berlin"') WHERE id = 7;
+```
+
+Note `new_value` must itself be `jsonb` — a string needs JSON quotes (`'"Berlin"'`).
+
+## `jsonb_insert` — insert without overwriting
+
+```sql
+jsonb_insert(target, path, new_value, insert_after boolean DEFAULT false)
+```
+
+It **inserts** rather than replaces. For arrays the path points at an index and `insert_after` decides before/after. If the target key already exists in an object, it errors instead of overwriting — that's the difference from `jsonb_set`.
+
+```sql
+SELECT jsonb_insert('[0,1,2]', '{1}', '99');             -- {1} = position to insert before
+-- [0, 99, 1, 2]
+
+SELECT jsonb_insert('[0,1,2]', '{1}', '99', true);       -- after position 1
+-- [0, 1, 99, 2]
+```
+
+## Removing: the `-` and `#-` operators
+
+For completeness — there's no `jsonb_delete`; you use operators:
+
+```sql
+SELECT '{"a":1,"b":2}'::jsonb - 'b';            -- {"a": 1}        remove key
+SELECT '{"a":{"b":2}}'::jsonb #- '{a,b}';       -- {"a": {}}       remove at path
+```
+
+## `jsonb_path_query` — extract with a jsonpath
+
+This is a set-returning function: it evaluates a `jsonpath` against the document and returns **each match as a row**.
+
+```sql
+SELECT jsonb_path_query('{"tags":["a","b","c"]}', '$.tags[*]');
+-- "a"
+-- "b"
+-- "c"
+
+SELECT jsonb_path_query('{"items":[{"p":5},{"p":15}]}', '$.items[*] ? (@.p > 10)');
+-- {"p": 15}
+```
+
+Variants: `jsonb_path_query_array` collects matches into one JSON array, and `jsonb_path_query_first` returns only the first match.
+
+<ProbeNote>The interviewer wants the immutability framing: these functions return a *new* `jsonb` you assign back via `UPDATE`. Know the key contrast — `jsonb_set` replaces (and can create), `jsonb_insert` inserts (errors on existing object key), `create_if_missing` controls auto-create, and `jsonb_path_query` is the set-returning jsonpath reader with `_array` / `_first` cousins.</ProbeNote>

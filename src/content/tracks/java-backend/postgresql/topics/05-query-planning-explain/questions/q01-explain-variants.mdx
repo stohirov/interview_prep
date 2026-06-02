@@ -1,0 +1,42 @@
+**`EXPLAIN` shows the plan; `EXPLAIN ANALYZE` runs the query and shows the plan plus reality.** Knowing exactly what each variant does — and what it costs you — is the difference between a candidate who has *read about* EXPLAIN and one who debugs production with it.
+
+## EXPLAIN — plan only, nothing runs
+
+```sql
+EXPLAIN SELECT * FROM orders WHERE customer_id = 42;
+```
+
+Returns the chosen plan with **estimated** `cost` and `rows`. The query is *not* executed, so it's instant and safe even for an expensive or mutating statement. You only get the planner's guesses, never the truth.
+
+## EXPLAIN ANALYZE — actually executes
+
+```sql
+EXPLAIN ANALYZE SELECT * FROM orders WHERE customer_id = 42;
+```
+
+Now the query **runs**, and each node also reports `actual time`, `actual rows`, and `loops`. This is what lets you compare estimate vs reality.
+
+<Callout kind="warn" title="ANALYZE runs the statement — including writes">
+`EXPLAIN ANALYZE DELETE ...` really deletes. To inspect a mutating statement safely, wrap it: `BEGIN; EXPLAIN ANALYZE UPDATE ...; ROLLBACK;`
+</Callout>
+
+## Adding BUFFERS, VERBOSE, and friends
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS, VERBOSE, FORMAT JSON)
+SELECT ...;
+```
+
+- **`BUFFERS`** — shared/local/temp blocks `hit` (from cache) vs `read` (from disk). The fastest way to tell "is this slow because it's hitting disk?" Always turn it on.
+- **`VERBOSE`** — output column lists, schema-qualified names, and the `Output` of each node.
+- **`SETTINGS`** — any non-default planner GUCs in effect (great for "works on my machine" plan differences).
+- **`WAL`** — WAL records generated (for write statements).
+- **`FORMAT JSON|YAML|TEXT`** — machine-readable output for tools like explain.depesz.com or explain.dalibo.com.
+
+## What to actually read first
+
+1. The node where **estimated `rows` ≠ actual `rows`** by a large factor → an estimation problem.
+2. `BUFFERS`: high `read` (not `hit`) → I/O-bound; consider caching or a covering index.
+3. `actual time` accumulating in one node → your hotspot. Remember to multiply by `loops`.
+
+<ProbeNote>The interviewer wants to hear that plain `EXPLAIN` lies pleasantly (estimates only) and `EXPLAIN ANALYZE` tells the truth at the cost of running the query, and that you reach for `(ANALYZE, BUFFERS)` by default. A senior candidate also mentions wrapping mutating statements in a transaction and rolling back.</ProbeNote>

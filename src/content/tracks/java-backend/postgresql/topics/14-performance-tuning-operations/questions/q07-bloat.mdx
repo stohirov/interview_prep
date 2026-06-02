@@ -1,0 +1,42 @@
+**Bloat is the dead space MVCC leaves behind — dead tuples and partially-empty pages that vacuum reclaims for *reuse* but doesn't return to the OS.** A bloated table or index has far more pages than its live rows justify, so scans read more pages, the cache holds less useful data, and performance quietly decays. Finding it accurately is the hard part.
+
+## Why bloat happens
+
+Every `UPDATE`/`DELETE` creates a dead tuple. Plain `VACUUM` marks that space free for **future inserts in the same table**, but the file doesn't shrink. Under heavy churn — or when autovacuum falls behind (long transactions pinning `xmin`) — free space accumulates faster than it's reused, and the relation balloons.
+
+## Accurate measurement: pgstattuple
+
+The **`pgstattuple`** extension scans a relation and reports exact dead-tuple and free-space percentages — authoritative, but it reads the whole object, so it's heavy on large tables.
+
+```sql
+CREATE EXTENSION pgstattuple;
+
+SELECT * FROM pgstattuple('orders');           -- table: dead_tuple_percent, free_percent
+SELECT * FROM pgstatindex('orders_pkey');      -- index: leaf_fragmentation, avg_leaf_density
+```
+
+A high `dead_tuple_percent` or `free_percent` on the table, or low `avg_leaf_density` on an index, signals real bloat.
+
+## Fast estimation
+
+Because pgstattuple is expensive, most shops first run a **statistics-based estimate** (the well-known `check_postgres` / pgsql-bloat-estimation queries) that compares `pg_class.reltuples`/`relpages` against expected size from column widths. It's approximate but cheap enough to run fleet-wide; use it to *find candidates*, then confirm the worst ones with pgstattuple.
+
+A quick first signal lives in `pg_stat_user_tables`:
+
+```sql
+SELECT relname, n_live_tup, n_dead_tup,
+       n_dead_tup::float / NULLIF(n_live_tup, 0) AS dead_ratio,
+       last_autovacuum
+FROM pg_stat_user_tables
+ORDER BY n_dead_tup DESC;
+```
+
+## Fixing it
+
+For **index** bloat: `REINDEX (CONCURRENTLY)`. For **table** bloat that won't reuse: `VACUUM FULL` or `CLUSTER` (both rewrite the table and take `ACCESS EXCLUSIVE`) — or, online, tools like `pg_repack`. But first ask *why* it bloated: usually autovacuum tuning, not the one-time rewrite, is the durable fix.
+
+<Callout kind="info" title="Some free space is healthy">
+A small, steady `free_percent` is normal and good — it's reused by inserts, avoiding constant file growth. Only sustained, growing bloat (often a symptom of lagging autovacuum) warrants a rewrite.
+</Callout>
+
+<ProbeNote>The signal: distinguish **exact** measurement (`pgstattuple`, expensive) from cheap **estimation** queries used to triage at scale, and connect bloat back to its root cause — lagging autovacuum / long transactions — rather than treating `VACUUM FULL` as the answer. Knowing some free space is desirable is a senior nuance.</ProbeNote>

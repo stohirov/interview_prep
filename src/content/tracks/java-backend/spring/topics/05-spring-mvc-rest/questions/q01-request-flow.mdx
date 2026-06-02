@@ -1,0 +1,35 @@
+**The whole of Spring MVC is one front controller delegating to a fixed chain of collaborators — narrate it in order and you've answered the question.** Every request hits the `DispatcherServlet`, registered (by Boot) as the servlet for `/`, and it orchestrates everything that follows.
+
+## The sequence
+
+**1. `DispatcherServlet` receives the request.** Servlet `Filter`s have already run on the way in. The dispatcher's job is to coordinate, not to contain logic.
+
+**2. `HandlerMapping` resolves the handler.** The dispatcher asks each registered `HandlerMapping` — the dominant one is `RequestMappingHandlerMapping` — "which handler matches this URL, HTTP method, headers, and content type?" It returns a `HandlerExecutionChain`: the handler method plus the `HandlerInterceptor`s that apply.
+
+**3. Interceptors' `preHandle` runs.** Each interceptor in the chain gets a chance to short-circuit (return `false`) before the handler executes.
+
+**4. `HandlerAdapter` invokes the handler.** The dispatcher finds a `HandlerAdapter` that knows how to call this handler type (`RequestMappingHandlerAdapter` for `@RequestMapping` methods). The adapter resolves arguments via `HandlerMethodArgumentResolver`s — binding `@PathVariable`, `@RequestParam`, deserializing `@RequestBody` through an `HttpMessageConverter`, running `@Valid` — then calls your method.
+
+**5. The return value is handled.** A `HandlerMethodReturnValueHandler` processes what you returned:
+
+```java
+// REST: @ResponseBody / @RestController -> message converter writes JSON
+@GetMapping("/{id}")
+OrderDto get(@PathVariable Long id) { return service.find(id); }
+
+// MVC: a String view name -> ViewResolver renders a template
+@GetMapping("/page")
+String page(Model model) { model.addAttribute("o", ...); return "order"; }
+```
+
+For REST, content negotiation selects a converter (Jackson for JSON) and writes the body directly to the response. For MVC, the result is a `ModelAndView`; a `ViewResolver` turns the view name into a `View` (Thymeleaf, JSP) that renders HTML.
+
+**6. Interceptors' `postHandle`, then view render, then `afterCompletion`.** `afterCompletion` always runs, even on exceptions.
+
+**7. Exceptions** thrown anywhere in the handler are routed to a `HandlerExceptionResolver` — which is how `@ExceptionHandler` / `@ControllerAdvice` get invoked.
+
+<Callout kind="info" title="Two output paths, one dispatcher">
+The fork at step 5 is the key insight: `HttpMessageConverter` (serialize an object) vs `ViewResolver` (render a template). `@ResponseBody` chooses the first; a returned view name chooses the second.
+</Callout>
+
+<ProbeNote>Interviewers want the ordered chain — `DispatcherServlet → HandlerMapping → HandlerAdapter → controller → converter/view`. Naming `RequestMappingHandlerMapping`/`...Adapter` and the converter-vs-view fork signals you've actually traced the dispatch, not just memorized annotations.</ProbeNote>

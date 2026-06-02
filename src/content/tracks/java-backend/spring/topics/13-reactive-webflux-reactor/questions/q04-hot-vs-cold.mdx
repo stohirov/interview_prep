@@ -1,0 +1,44 @@
+**A cold publisher starts producing data anew for each subscriber; a hot publisher emits regardless of subscribers, and late subscribers only see what's emitted after they join.** This distinction decides whether two subscribers see the same data and whether work is duplicated.
+
+## Cold: the default, per-subscriber
+
+Most `Flux`/`Mono` you build are cold. The source is a *recipe* that re-executes on every `subscribe`. Each subscriber gets its own independent run from the start.
+
+```java
+Flux<Integer> cold = Flux.range(1, 3)
+    .doOnSubscribe(s -> System.out.println("DB query fires"));
+
+cold.subscribe(System.out::println);  // "DB query fires" -> 1 2 3
+cold.subscribe(System.out::println);  // "DB query fires" again -> 1 2 3
+```
+
+The HTTP call or DB query inside is made *twice*, once per subscriber, each replaying from the beginning. That's usually what you want for request-scoped data, but it's a footgun if subscribing twice means double side effects.
+
+## Hot: shared, emits independently
+
+A hot publisher produces a single stream that all current subscribers share; it doesn't restart, and a subscriber that arrives late misses earlier values. Think of a live event feed, a Kafka topic, or a `Sinks` you push into manually.
+
+```java
+Sinks.Many<String> sink = Sinks.many().multicast().onBackpressureBuffer();
+Flux<String> hot = sink.asFlux();
+
+sink.tryEmitNext("a");                 // no subscriber yet -> lost (or buffered)
+hot.subscribe(v -> System.out.println("S1: " + v));
+sink.tryEmitNext("b");                 // S1 sees "b"
+hot.subscribe(v -> System.out.println("S2: " + v));
+sink.tryEmitNext("c");                 // S1 and S2 both see "c"
+```
+
+## Turning cold into hot
+
+Operators bridge the two. `share()` (alias for `publish().refCount(1)`) multicasts a cold source to many subscribers so the upstream runs once. `cache()` does the same but also *replays* buffered values to late subscribers — useful for expensive one-time fetches you want all subscribers to receive.
+
+```java
+Mono<Config> config = loadConfig().cache();  // fetch once, replay to all
+```
+
+<Callout kind="info" title="Mental model">
+Cold = video on demand (everyone starts at 0:00, their own stream). Hot = live broadcast (you see it from whenever you tuned in). `share()`/`cache()` are how you convert on-demand into broadcast.
+</Callout>
+
+<ProbeNote>They want: cold replays per-subscriber and re-runs side effects; hot is shared and late subscribers miss earlier emissions. Naming `Sinks` for hot sources and `share()`/`cache()` as the conversion operators — plus the double-DB-call gotcha — signals real experience.</ProbeNote>

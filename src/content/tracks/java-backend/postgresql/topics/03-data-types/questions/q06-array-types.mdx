@@ -1,0 +1,47 @@
+**PostgreSQL arrays are a real, first-class type — and the interview question is really "do you know when an array crosses the line into a hidden many-to-many that should be a table?"** Any type can be an array (`integer[]`, `text[]`, even `jsonb[]`), they're 1-indexed by default, and they have genuine good uses. But reaching for an array where you'd otherwise model a relationship is a classic anti-pattern.
+
+## Where arrays are idiomatic
+
+- **Small, fixed-cardinality, value-only lists** that you read as a unit and rarely query by element: RGB triplets, a few tags, embedding/feature vectors, matrix rows.
+- **Aggregation results** where `array_agg()` is the natural shape.
+- Data with **no identity or attributes of its own** — the elements are just values, not entities you'd ever join to.
+
+```sql
+CREATE TABLE article (
+    id    bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    tags  text[] NOT NULL DEFAULT '{}'
+);
+
+SELECT * FROM article WHERE tags @> ARRAY['postgres'];  -- containment
+CREATE INDEX ON article USING gin (tags);               -- GIN makes @> fast
+```
+
+GIN indexing of `@>`, `<@`, and `&&` (overlap) is what makes array filtering viable at scale — without it, element queries are seq scans.
+
+## Where arrays are an anti-pattern
+
+The moment any of these is true, you want a child table instead:
+
+1. **The element references another table** — e.g. `product_ids int[]`. You can't declare a foreign key on array elements, so referential integrity is gone. Use a junction table.
+2. **You frequently filter, join, or aggregate by element.** Joins against a normalized table are simpler and the planner understands them better.
+3. **Elements have their own attributes** (a quantity, a timestamp, a status). That's a row, not an array slot.
+4. **The list is large or unbounded** and frequently mutated — updating one element rewrites the whole array (MVCC writes a new row version).
+
+```sql
+-- anti-pattern: no FK, awkward to join, full rewrite to add one
+order_items int[]
+
+-- correct: a junction table with integrity and per-item attributes
+CREATE TABLE order_item (
+    order_id   bigint REFERENCES orders(id),
+    product_id bigint REFERENCES product(id),
+    quantity   int NOT NULL,
+    PRIMARY KEY (order_id, product_id)
+);
+```
+
+<Callout kind="tip" title="The litmus test">
+Ask: "Could an element ever need a foreign key, its own columns, or to be queried/joined on individually?" If yes, it's a row in a child table, not an array slot. Arrays are for *values*, tables are for *entities*.
+</Callout>
+
+<ProbeNote>The interviewer wants you to accept arrays as legitimate (tags, vectors, `array_agg`, GIN-indexed `@>`) but immediately flag the anti-pattern: arrays of IDs that should be foreign keys in a junction table. Naming "no FK on array elements" and "updating one element rewrites the whole row" are the high-value points.</ProbeNote>

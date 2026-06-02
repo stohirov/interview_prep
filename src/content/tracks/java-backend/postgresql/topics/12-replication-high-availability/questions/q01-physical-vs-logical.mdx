@@ -1,0 +1,34 @@
+**Physical replication ships raw WAL bytes; logical replication decodes WAL into row-level change events.** That one distinction drives every other difference between them.
+
+## Physical replication
+
+The standby receives the primary's WAL **byte-for-byte** and replays it at the block level. The consequences follow directly:
+
+- It is an **exact clone of the entire cluster** — all databases, all tables, system catalogs included. You cannot replicate a subset.
+- It requires the **same major version** (the WAL format is version-specific) and the same architecture.
+- The standby is **read-only**; you cannot write to it independently.
+- It's low-overhead and the standard tool for **HA and physical backups**. This is what "streaming replication" means by default.
+
+## Logical replication
+
+A logical decoding plugin reads the WAL and turns it into a stream of **row-level changes** (INSERT/UPDATE/DELETE) expressed against specific tables, replayed as ordinary SQL on the subscriber:
+
+- **Selective** — you replicate chosen tables via publications, not the whole cluster.
+- **Cross-version** — a PostgreSQL 16 publisher can feed a 17 subscriber, which is *the* reason it's used for **near-zero-downtime major upgrades**.
+- The subscriber is a **fully writable** database; it can have extra tables, extra indexes, and receive writes from other sources.
+- Higher overhead, and it has limits: by default it replicates DML but **not DDL** (schema changes must be applied manually on both sides), and the published tables need a replica identity (a primary key or `REPLICA IDENTITY`).
+
+```sql
+-- logical: publisher side
+CREATE PUBLICATION orders_pub FOR TABLE orders, order_items;
+-- subscriber side
+CREATE SUBSCRIPTION orders_sub
+  CONNECTION 'host=primary dbname=shop'
+  PUBLICATION orders_pub;
+```
+
+## Choosing between them
+
+Reach for **physical** when you want a faithful hot-standby for failover and read offloading with the least fuss. Reach for **logical** when you need to replicate *part* of a database, replicate *across versions*, consolidate several databases into one, or feed a downstream consumer.
+
+<ProbeNote>The crisp answer is "physical = byte-level WAL of the whole cluster, same major version, read-only; logical = decoded row changes, selective, cross-version, writable." Naming logical replication as the mechanism for **near-zero-downtime major upgrades**, and that it doesn't replicate DDL, is the senior signal.</ProbeNote>

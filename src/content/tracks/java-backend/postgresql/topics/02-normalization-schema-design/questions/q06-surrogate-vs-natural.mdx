@@ -1,0 +1,41 @@
+**A surrogate key is a system-generated, meaningless identifier (`bigserial`, `uuid`); a natural key is a column that already identifies the row in the real world (email, ISBN, country code).** The debate is about stability and coupling: natural keys carry meaning but meaning *changes*, and a primary key that changes is expensive because every foreign key references it.
+
+## Natural keys — pros and cons
+
+**Pros:** no extra column, the key is human-meaningful, and joins/lookups read naturally (`WHERE country_code = 'US'`). They also enforce a real-world uniqueness rule for free.
+
+**Cons, and why they usually win the argument against:**
+- **They change.** Emails change, ISBNs get reassigned, company names rebrand. Updating a PK cascades to every referencing table — slow, lock-heavy, and risky.
+- **They can be wide.** A multi-column natural key (`(country, region, city)`) bloats every FK and every index that copies it.
+- **They leak.** Using SSN or email as a PK scatters PII across foreign keys and logs.
+- **You can't always trust uniqueness** you didn't generate ("surely no two people share a phone number" — until they do).
+
+## Surrogate keys — pros and cons
+
+**Pros:** stable forever (never updated, so no cascading PK changes), narrow and uniform (`bigint` is 8 bytes, fast to join and index), and decoupled from business meaning so a real-world rule change never touches the key.
+
+**Cons:** an extra column with no inherent meaning; you *still* need a natural `UNIQUE` constraint to prevent duplicate real-world rows (a surrogate key happily lets you insert the same customer twice); and an opaque id tells you nothing when you eyeball the data.
+
+## The standard answer: surrogate PK + natural UNIQUE
+
+The two are not mutually exclusive — the mature design uses **both**:
+
+```sql
+CREATE TABLE users (
+  id    bigserial PRIMARY KEY,        -- surrogate: stable, narrow, what FKs point at
+  email text NOT NULL UNIQUE,         -- natural key: enforces real-world uniqueness
+  name  text NOT NULL
+);
+```
+
+The surrogate is what foreign keys reference (stable, cheap to join); the natural `UNIQUE` constraint still guarantees you can't have two users with the same email. You get integrity *and* stability.
+
+## bigserial vs UUID for the surrogate
+
+`bigserial` (an 8-byte sequence-backed integer) is compact and index-friendly but predictable and centrally allocated. UUIDs are 16 bytes, globally unique, and can be generated client-side without a round-trip — valuable for distributed systems, sharding, and not exposing row counts. The catch is index locality: random UUID v4 inserts fragment a B-tree, which is exactly why UUID v7 exists (covered in the next question).
+
+<Callout kind="tip" title="The senior one-liner">
+"Surrogate primary key for stability and cheap joins, natural UNIQUE constraint to enforce the real-world rule. Natural keys make bad PKs because PKs should never change and natural values do."
+</Callout>
+
+<ProbeNote>Don't pick a side dogmatically — the expected answer is "both": surrogate PK *plus* a natural UNIQUE. The core argument for surrogates is that primary keys shouldn't change and natural keys do; the gotcha they probe is whether you remember the natural UNIQUE constraint, without which a surrogate lets duplicates in.</ProbeNote>

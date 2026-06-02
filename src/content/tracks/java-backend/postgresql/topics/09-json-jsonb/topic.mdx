@@ -1,0 +1,23 @@
+PostgreSQL ships **two JSON types, and the difference matters more than the name suggests**: `json` stores the exact text you handed it, while `jsonb` parses it into a decomposed binary form. That one decision — store-the-text vs store-the-tree — drives everything: how fast you read fields, whether you can index, and how the values compare.
+
+`json` keeps the input verbatim: insignificant whitespace, key order, and duplicate keys are all preserved. Every access has to *re-parse* the text. `jsonb` parses once on input into a binary structure with deduplicated keys (last value wins), no whitespace, and no guaranteed key order. Reads are fast because no parsing happens, and — crucially — `jsonb` supports **GIN indexing** and the rich containment/existence operator family. `json` supports neither.
+
+```sql
+SELECT '{"a": 1, "a": 2, "b": 3}'::json;    -- {"a": 1, "a": 2, "b": 3}  (dupes kept)
+SELECT '{"a": 1, "a": 2, "b": 3}'::jsonb;   -- {"a": 2, "b": 3}           (deduped, reordered)
+```
+
+The access operators are shared by both types. `->` returns a `json`/`jsonb` value; `->>` returns `text`. The `#>` / `#>>` pair does the same but follows a path array into nested structures.
+
+```sql
+SELECT data -> 'address' ->> 'city'      FROM users;   -- text
+SELECT data #>> '{address,city}'         FROM users;   -- same, path form
+```
+
+Where `jsonb` pulls ahead is querying. Containment `@>` ("does the left contain the right?") and the existence operators `?`, `?&`, `?|` are `jsonb`-only and **GIN-indexable**, so `WHERE data @> '{"status":"active"}'` can use an index instead of scanning. Since PostgreSQL 12 you also get SQL/JSON path expressions via `@?` and `@@` with `jsonpath`.
+
+<Callout kind="tip" title="The interview hook">
+Lead with the one-liner: "Use `jsonb` almost always — it's parsed once, indexable with GIN, and supports containment and existence operators; `json` only wins when you must preserve exact text, key order, or duplicate keys, like an audit log of the original payload." Then show you know the cost: `jsonb` is slightly slower to *write* (it parses up front) and doesn't preserve the input byte-for-byte.
+</Callout>
+
+The questions below cover the two types in depth, every operator family, GIN indexing with and without `jsonb_path_ops`, mutation functions, the modeling trade-off against real columns, and SQL/JSON path.

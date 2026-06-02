@@ -1,0 +1,44 @@
+**A JWT lets a server authenticate a request by *validating a signed token* instead of looking up a session — so the API stays stateless.** The token is a self-contained, cryptographically signed set of claims (subject, expiry, scopes); if the signature checks out and it isn't expired, the server trusts the claims without any database or session store hit.
+
+## The typical flow
+
+1. The client authenticates once (credentials, or an OAuth2 login) against whoever **issues** tokens.
+2. The issuer returns a signed JWT — `header.payload.signature`, base64url-encoded. The payload carries claims like `sub`, `exp`, `iss`, and `scope`.
+3. The client sends it on every request: `Authorization: Bearer eyJ...`.
+4. The API **validates** the token: checks the signature against the issuer's public key (or shared secret), the expiry, and the issuer/audience — no session lookup.
+5. Claims become the `Authentication` (`JwtAuthenticationToken`), with `scope`/roles mapped to authorities.
+
+## Resource server: just validate
+
+In Spring Security, the API is a **resource server** — it consumes tokens, it doesn't issue them. Configuration is tiny:
+
+```java
+@Bean
+SecurityFilterChain api(HttpSecurity http) throws Exception {
+    http
+        .sessionManagement(s -> s.sessionCreationPolicy(STATELESS))
+        .csrf(csrf -> csrf.disable())
+        .authorizeHttpRequests(a -> a.anyRequest().authenticated())
+        .oauth2ResourceServer(o -> o.jwt(Customizer.withDefaults()));
+    return http.build();
+}
+```
+
+```yaml
+spring.security.oauth2.resourceserver.jwt.issuer-uri: https://auth.example.com
+```
+
+Spring fetches the issuer's JWKS (public keys) and validates every bearer token automatically. The `BearerTokenAuthenticationFilter` does the work.
+
+## Resource server vs authorization server
+
+- **Authorization server** = the thing that **issues** tokens (handles login, runs the OAuth2 flows, signs JWTs). In the Spring world this is **Spring Authorization Server** (a separate project), or an external provider like Keycloak/Auth0/Okta.
+- **Resource server** = your protected API that **validates** incoming tokens and serves data. Most services you build are resource servers.
+
+Don't sign your own JWTs by hand in the API — let an authorization server issue them and have the resource server validate via the issuer's JWKS.
+
+<Callout kind="info" title="Stateless has a cost">
+You can't revoke a self-contained JWT before it expires — it's valid until `exp`. Keep access tokens short-lived (minutes) and use a separate refresh token, or maintain a denylist, if instant revocation matters.
+</Callout>
+
+<ProbeNote>Describe the round trip — authenticate once, get a signed token, send it as a bearer header, server validates the signature/expiry with no session. Then cleanly separate the roles: an **authorization server issues**, a **resource server validates**. The senior nuance is the revocation trade-off and short-lived access + refresh tokens.</ProbeNote>

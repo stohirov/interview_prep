@@ -1,0 +1,39 @@
+**Virtual threads help when work is *IO-bound and blocking* — waiting on a database, an HTTP call, a queue — and do essentially nothing for *CPU-bound* work, because the win is "a blocked thread costs nothing," and CPU work is never blocked, it's busy.** Knowing exactly which side a workload falls on is the senior judgment this question tests.
+
+## Where they shine: IO-bound / blocking
+
+A request that spends most of its time waiting on downstream IO is the perfect case. With platform threads you'd exhaust a bounded pool under load; with virtual threads, a blocked thread *unmounts* from its carrier and frees the OS thread for others. So thousands of concurrent requests each making blocking JDBC/HTTP calls scale on a handful of carrier threads.
+
+```java
+// IO-bound: 95% of the time is spent waiting -> virtual threads win big
+Order o = jdbc.queryForObject(...);
+Shipment s = restClient.get()...body(Shipment.class);
+```
+
+## Where they don't: CPU-bound
+
+If a task is crunching numbers, encoding video, or running a tight loop, it never yields by blocking — it just occupies a carrier thread continuously. You can't run more CPU work than you have cores, so spawning a million virtual threads for CPU work only adds scheduling overhead. **For CPU-bound work, use a bounded pool sized to the cores** (`ThreadPoolTaskExecutor` with core/max ≈ available processors), not virtual threads.
+
+| Workload | Virtual threads? |
+|---|---|
+| DB queries, HTTP/REST calls, blocking IO | Yes — large win |
+| Message consumers waiting on a broker | Yes |
+| Heavy computation, parsing, crypto, image/video | No — use a fixed pool |
+
+## The pinning caveat
+
+A virtual thread normally unmounts when it blocks. But if it blocks **inside a `synchronized` block/method** (or a native frame), it *pins* the carrier — the carrier OS thread is held and can't run other virtual threads, partially defeating the point. Pre-JDK 24 fix: replace `synchronized` around IO with a `ReentrantLock`. **JDK 24 largely resolves pinning** for `synchronized`, so it stops being a practical concern there — but native-method and a few other pins remain.
+
+```java
+// pins the carrier while blocked (pre-JDK 24):
+synchronized (lock) { restClient.get()...retrieve(); }
+// prefer:
+lock.lock();
+try { restClient.get()...retrieve(); } finally { lock.unlock(); }
+```
+
+<Callout kind="warn" title="Don't pool virtual threads">
+Virtual threads are meant to be created per task and thrown away. Pooling them (a fixed-size virtual-thread pool) reintroduces the very bottleneck they remove. Pool *platform* threads for CPU work; create *virtual* threads freely for IO.
+</Callout>
+
+<ProbeNote>The interviewer is checking you can classify a workload: IO-bound/blocking → virtual threads (huge win); CPU-bound → bounded platform pool. Bonus depth: explain pinning on `synchronized` + native frames, that `ReentrantLock` avoids it, that JDK 24 mostly fixes it, and that you should never pool virtual threads.</ProbeNote>

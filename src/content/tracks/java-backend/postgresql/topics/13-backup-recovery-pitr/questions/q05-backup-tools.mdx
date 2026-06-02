@@ -1,0 +1,42 @@
+**In production you don't hand-roll `archive_command` with `cp` — you use a purpose-built tool. The big three are pgBackRest, Barman, and WAL-G, and all three wrap base backups plus WAL archiving with compression, integrity checks, retention, and parallelism.** Knowing why these exist is the senior answer to "how do you actually run backups?"
+
+## Why not just scripts?
+
+A bare `archive_command = 'cp %p /archive/%f'` has no compression, no encryption, no checksums to detect a corrupt segment, no retention policy, no parallelism, and no built-in restore orchestration. These tools solve all of that and turn PITR into a couple of commands.
+
+## pgBackRest
+
+The most full-featured, widely adopted choice. Written in C, it offers **parallel** backup and restore, full/differential/incremental backups, per-block compression, encryption, page-level checksum verification, and direct **S3/Azure/GCS** repositories. You wire it in via `archive_command`, and it organizes everything under a "stanza."
+
+```bash
+pgbackrest --stanza=main backup --type=incr
+pgbackrest --stanza=main --type=time --target='2026-06-02 09:13:00' restore
+```
+
+```ini
+archive_command = 'pgbackrest --stanza=main archive-push %p'
+```
+
+## Barman
+
+"Backup and Recovery Manager," from EnterpriseDB. It's a **catalog-oriented** tool that typically runs on a dedicated backup server and manages many PostgreSQL instances centrally. Supports both WAL streaming and `archive_command`, retention policies, and one-command recovery.
+
+```bash
+barman backup pg-primary
+barman recover --target-time '2026-06-02 09:13:00' pg-primary latest /var/lib/postgresql/17/main
+```
+
+## WAL-G
+
+Successor to WAL-E, designed for **cloud object storage first** (S3, GCS, Azure). Lightweight, very fast with parallel compressed uploads, and popular in Kubernetes/containerized setups. Handles base backups and WAL push/fetch, including delta backups.
+
+```bash
+wal-g backup-push /var/lib/postgresql/17/main
+wal-g backup-fetch /var/lib/postgresql/17/main LATEST
+```
+
+<Callout kind="tip" title="Picking one">
+Rough guide: **pgBackRest** when you want the most robust, feature-complete single-cluster tooling; **Barman** when you want a central catalog managing many servers; **WAL-G** when you're cloud-native and object-storage-first. Any of the three beats a homemade `cp` script.
+</Callout>
+
+<ProbeNote>You're expected to name at least one and explain *why* it beats raw scripting — compression, encryption, integrity verification, retention, parallel restore, and S3-native repositories. Distinguishing them (pgBackRest feature-rich, Barman central catalog, WAL-G cloud-first) is a strong differentiator.</ProbeNote>

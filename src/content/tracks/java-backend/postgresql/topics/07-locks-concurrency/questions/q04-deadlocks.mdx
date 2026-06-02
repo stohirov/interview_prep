@@ -1,0 +1,39 @@
+**A deadlock is a cycle in the wait-for graph: transaction A holds a lock B wants, while B holds a lock A wants — neither can ever proceed.** PostgreSQL detects this automatically, kills one transaction, and lets the other continue. You don't prevent deadlocks by configuration; you prevent them by ordering.
+
+## The canonical deadlock
+
+```sql
+-- Session 1                          -- Session 2
+BEGIN;                                BEGIN;
+UPDATE accounts SET ... WHERE id=1;   UPDATE accounts SET ... WHERE id=2;
+-- (holds row 1)                      -- (holds row 2)
+UPDATE accounts SET ... WHERE id=2;   UPDATE accounts SET ... WHERE id=1;
+-- waits for session 2 ...            -- waits for session 1 ... DEADLOCK
+```
+
+Each session holds the row the other now wants. The cycle can never break on its own.
+
+## How PostgreSQL detects it
+
+PostgreSQL does **not** check for deadlocks the instant a transaction blocks — that would be wasteful, since most waits resolve quickly on their own. Instead, when a transaction has waited for a lock longer than **`deadlock_timeout`** (default **1 second**), the deadlock detector runs. It builds the **wait-for graph** (who is waiting on whom) and searches for a cycle. If it finds one, it picks a **victim** and aborts it with:
+
+```text
+ERROR:  deadlock detected
+DETAIL:  Process 123 waits for ShareLock on transaction 456; blocked by process 789.
+```
+
+The victim's transaction is rolled back, releasing its locks, so the other transaction proceeds. The error includes enough detail to identify the cycle, and the full picture is written to the server log.
+
+## Why the timeout, not instant detection
+
+`deadlock_timeout` is a performance trade-off. Running the cycle-detection algorithm on every lock wait would add overhead to *all* contention, the vast majority of which is innocent and clears in milliseconds. Waiting 1s before checking means only genuinely stuck transactions pay the detection cost. Lowering it makes detection faster but adds CPU; the default is almost always right.
+
+## Prevention is the developer's job
+
+Detection is a safety net, not a solution — a rolled-back transaction still hurts. The real fix: **always acquire locks in a consistent order**. If every transaction updates accounts in ascending `id` order, the cycle above is impossible (both sessions would queue on row 1). Keep transactions short to shrink the window, and use `SELECT ... FOR UPDATE ORDER BY id` to lock a set deterministically.
+
+<Callout kind="tip" title="Make your app deadlock-tolerant anyway">
+Even with consistent ordering, deadlocks can sneak in via indexes, foreign keys, or triggers. Treat `deadlock detected` (SQLSTATE `40P01`) like a serialization failure: catch it and **retry the whole transaction**. Idempotent, retryable transactions are the robust answer.
+</Callout>
+
+<ProbeNote>The complete answer names all three parts: the wait-for-graph cycle definition, `deadlock_timeout` triggering detection (not instant), and the victim rollback. The senior signal is pivoting to *prevention* — consistent lock ordering plus retry-on-`40P01` — rather than treating detection as the fix.</ProbeNote>

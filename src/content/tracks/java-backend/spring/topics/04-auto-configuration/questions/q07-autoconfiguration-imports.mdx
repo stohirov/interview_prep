@@ -1,0 +1,57 @@
+**Boot finds auto-configuration classes by reading a plain-text list inside each jar — in Boot 3 that file is `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`.** It's just fully-qualified class names, one per line. There's no classpath-wide scan for `@AutoConfiguration` annotations; the list is explicit and that's deliberate (faster startup, predictable).
+
+## The Boot 3 file
+
+```text
+# META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports
+com.acme.audit.AuditAutoConfiguration
+com.acme.audit.AuditWebAutoConfiguration
+```
+
+`@EnableAutoConfiguration` imports `AutoConfigurationImportSelector`, which collects these class names from **every jar on the classpath**, deduplicates and orders them, then hands the list to the context. Each named class is then evaluated against its `@Conditional` guards — listing a class only makes it a *candidate*, conditions decide whether it actually runs.
+
+## The legacy mechanism (Boot 2 and earlier)
+
+Before Boot 3, candidates were declared in `META-INF/spring.factories` under the `EnableAutoConfiguration` key:
+
+```properties
+# META-INF/spring.factories  (Boot 2.x)
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
+com.acme.audit.AuditAutoConfiguration,\
+com.acme.audit.AuditWebAutoConfiguration
+```
+
+<Callout kind="warn" title="spring.factories was removed in Boot 3">
+The `EnableAutoConfiguration` **key** in `spring.factories` no longer works for auto-configuration in Boot 3 — you must migrate to the `AutoConfiguration.imports` file. (`spring.factories` itself still exists for *other* extension points like `ApplicationContextInitializer`; only the auto-config key moved.)
+</Callout>
+
+## Why the change
+
+The new format is purpose-built: one file, one concern, simpler to parse and to read. It also pairs with the `@AutoConfiguration` annotation (Boot 3's replacement for using a bare `@Configuration` as an auto-config), which carries ordering metadata (`before`, `after`).
+
+## Generating it for a custom starter
+
+You rarely hand-write the file. Add the processor and annotate your class — the imports file is generated at build time:
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-autoconfigure-processor</artifactId>
+    <optional>true</optional>
+</dependency>
+```
+
+```java
+@AutoConfiguration
+@ConditionalOnClass(AcmeClient.class)
+public class AuditAutoConfiguration { ... }
+```
+
+## Discovery order at startup
+
+1. `@EnableAutoConfiguration` → `AutoConfigurationImportSelector`.
+2. Selector reads all `AutoConfiguration.imports` files across jars.
+3. Candidates are ordered (`@AutoConfiguration(before/after)`, `@AutoConfigureOrder`) and exclusions applied.
+4. Each candidate's `@Conditional` guards are evaluated; survivors register beans.
+
+<ProbeNote>The key fact: Boot 3 uses `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`, and the old `spring.factories` `EnableAutoConfiguration` key was **removed**. Mentioning that listing a class only makes it a candidate (conditions still decide) and that the file is auto-generated from `@AutoConfiguration` shows depth.</ProbeNote>

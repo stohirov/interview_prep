@@ -1,0 +1,47 @@
+**Distributed tracing follows a single request as it hops across services, stitching the per-service spans into one end-to-end trace so you can see *where* the latency lives.** In a microservice call chain — gateway → orders → inventory → payment — a log line on its own tells you nothing about the whole request. Tracing assigns a **trace ID** that propagates across every hop and a **span ID** per unit of work, so the entire journey is reconstructable.
+
+## Micrometer Tracing replaced Sleuth in Boot 3
+
+In Spring Boot 3 the old **Spring Cloud Sleuth** is gone, replaced by **Micrometer Tracing** — a vendor-neutral tracing facade (mirroring Micrometer's metrics facade). It doesn't trace by itself; it *bridges* to a concrete tracer:
+
+- **OpenTelemetry** via `micrometer-tracing-bridge-otel`
+- **Brave/Zipkin** via `micrometer-tracing-bridge-brave`
+
+You pick one bridge plus a reporter dependency to send spans to a collector.
+
+```xml
+<dependency>
+  <groupId>io.micrometer</groupId>
+  <artifactId>micrometer-tracing-bridge-otel</artifactId>
+</dependency>
+<dependency>
+  <groupId>io.opentelemetry</groupId>
+  <artifactId>opentelemetry-exporter-zipkin</artifactId>
+</dependency>
+```
+
+```yaml
+management:
+  tracing:
+    sampling:
+      probability: 0.1        # sample 10% of traces
+  zipkin:
+    tracing:
+      endpoint: http://zipkin:9411/api/v2/spans
+```
+
+## What you get for free
+
+Boot's instrumentation auto-creates spans for incoming HTTP requests, `RestClient`/`WebClient`/`RestTemplate` outbound calls, and more — propagating context via **W3C `traceparent`** headers. Crucially, the trace and span IDs are injected into the **MDC**, so your log pattern can print them:
+
+```
+%5p [${spring.application.name},%X{traceId:-},%X{spanId:-}]
+```
+
+Now a log line carries the trace ID, and you pivot from a Zipkin/Jaeger waterfall straight to the matching logs.
+
+## Sampling is the production lever
+
+Tracing every request is expensive in storage and overhead, so you **sample** — `probability: 0.1` keeps 10%. Sampling decisions propagate, so a trace is captured whole or not at all (no half-traces). For manual spans, inject `Tracer` or annotate with `@NewSpan`/`@SpanTag`.
+
+<ProbeNote>The must-hit facts: in Boot 3 it's **Micrometer Tracing, not Sleuth**, and it's a facade bridging to **OpenTelemetry or Brave/Zipkin**. Bonus signal: trace/span IDs land in the MDC so logs correlate to traces, and sampling probability is the cost/visibility trade-off you tune in production.</ProbeNote>

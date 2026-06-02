@@ -1,0 +1,54 @@
+**Since PostgreSQL 12 you get the SQL/JSON path language — a `jsonpath` type plus the `@?` and `@@` operators — for filtering deep inside `jsonb` with conditions, wildcards, and arithmetic.** It's the standardized, expressive alternative to chaining `->`/`#>` operators.
+
+## The `jsonpath` syntax
+
+A path starts at `$` (the document root), `@` is the current element inside a filter, `.*` and `[*]` are wildcards, and `? (...)` applies a filter predicate.
+
+```sql
+'$.address.city'                 -- a nested field
+'$.tags[*]'                      -- every array element
+'$.items[*] ? (@.price > 100)'  -- array elements where price > 100
+'$.**.id'                        -- "id" at any depth (recursive wildcard)
+```
+
+## The two operators: `@?` and `@@`
+
+`@?` asks **"does the path match anything?"** — it takes a path that *selects* items and returns true if at least one exists. `@@` evaluates a path that is itself a **predicate** and returns its boolean result.
+
+```sql
+-- @? : path selects items, true if any match
+SELECT * FROM products
+WHERE data @? '$.specs.weight ? (@ < 5)';
+
+-- @@ : path is a boolean predicate
+SELECT * FROM products
+WHERE data @@ '$.specs.weight < 5';
+```
+
+Both are **GIN-indexable** under either operator class — including `jsonb_path_ops` — so deep filters can use an index just like `@>`.
+
+## Extracting with path functions
+
+The operators answer yes/no; the functions return the matched data:
+
+```sql
+SELECT jsonb_path_query(data, '$.items[*] ? (@.qty > 1)') FROM orders;
+SELECT jsonb_path_exists(data, '$.flags ? (@.beta == true)') FROM accounts;
+SELECT jsonb_path_match(data, '$.score > 90') FROM results;
+```
+
+`jsonb_path_query` returns each match as a row; `jsonb_path_exists` mirrors `@?`; `jsonb_path_match` mirrors `@@`.
+
+## Strict vs lax mode
+
+By default jsonpath runs in **`lax`** mode, which auto-unwraps arrays and tolerates missing keys (returning no match instead of erroring). Prefix with `strict` to require the structure to match exactly and surface errors.
+
+```sql
+SELECT jsonb_path_query('{"a":[1,2,3]}', 'strict $.a[*] ? (@ > 1)');  -- 2, 3
+```
+
+<Callout kind="info" title="Filter predicates vs comparison">
+Inside `? (...)` you compare with `==` (not `=`), and combine with `&&` / `||`. Outside a filter, `@@` evaluates the path expression as a whole boolean.
+</Callout>
+
+<ProbeNote>The interviewer wants you to know SQL/JSON path arrived in PG12, the `$` root / `@` current / `? ()` filter syntax, and the split between `@?` (does a selecting path match anything) and `@@` (evaluate a boolean predicate). Bonus: both are GIN-indexable, the matching `jsonb_path_*` functions extract data, and lax mode (the default) auto-unwraps arrays and swallows missing keys.</ProbeNote>

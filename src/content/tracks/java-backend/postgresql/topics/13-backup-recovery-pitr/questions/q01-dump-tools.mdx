@@ -1,0 +1,39 @@
+**Three tools, three jobs: `pg_dump` backs up *one database* logically, `pg_dumpall` backs up *the whole cluster including globals*, and `pg_basebackup` takes a *physical* copy of the entire data directory.** Confusing them is a classic interview tell.
+
+## pg_dump — one database, logical
+
+Exports a single database as SQL or an archive. It supports several output formats:
+
+- **plain** (`-Fp`) — a `.sql` script you replay with `psql`.
+- **custom** (`-Fc`) — compressed, single file, restored with `pg_restore`; supports selective restore.
+- **directory** (`-Fd`) — one file per object; the only format that supports **parallel** dump/restore with `-j`.
+- **tar** (`-Ft`).
+
+```bash
+pg_dump -Fc -d mydb -f mydb.dump          # custom format
+pg_dump -Fd -j 4 -d mydb -f mydb_dir/     # parallel directory dump
+pg_restore -d newdb -j 4 mydb_dir/        # parallel restore
+```
+
+It produces a **single consistent snapshot** (it runs in one transaction), is portable across PG versions and OS/architectures, and lets you restore a single table. The cost: it's slow on large databases and gives you no continuous recovery.
+
+## pg_dumpall — the whole cluster
+
+`pg_dump` does **not** capture cluster-wide objects: roles, tablespaces, and other globals. `pg_dumpall` dumps **every database plus the globals**. Its output is **plain SQL only** — no custom/directory format, so no parallelism and no selective restore.
+
+```bash
+pg_dumpall -f cluster.sql            # all databases + globals
+pg_dumpall --globals-only -f roles.sql   # just roles/tablespaces
+```
+
+A common pattern: `pg_dumpall --globals-only` for the roles, plus per-database `pg_dump -Fc` for the data.
+
+## pg_basebackup — physical, whole cluster
+
+Copies the raw data files of the **entire cluster** at the file level. It's the basis for **replication standbys** and **PITR**. Restore is fast (no replaying SQL or rebuilding indexes) but the copy is tied to the same PostgreSQL major version and platform, and it's all-or-nothing — you can't extract one table.
+
+```bash
+pg_basebackup -D /backup/base -Fp -X stream -P
+```
+
+<ProbeNote>They want the clean three-way split: `pg_dump` = one DB logical; `pg_dumpall` = all DBs + globals, plain-text only; `pg_basebackup` = physical whole-cluster, the foundation for PITR and standbys. Knowing that only directory format does parallel `-j`, and that `pg_dump` misses roles (hence `pg_dumpall --globals-only`), marks real experience.</ProbeNote>

@@ -1,0 +1,37 @@
+**Spring MVC is blocking and thread-per-request; WebFlux is non-blocking and runs on a small event loop. Neither is universally "better" — the choice is driven by your I/O profile and how reactive your dependencies are.** The honest senior answer rejects "WebFlux is faster" and reaches for nuance.
+
+## How each handles a request
+
+**Spring MVC (Servlet stack)** assigns one thread to a request for its entire lifetime. While that thread waits on a database or downstream call, it's *parked* — consuming a thread and its stack memory. Concurrency is capped by the thread pool size; thousands of slow concurrent requests mean thousands of threads (or queuing/timeouts).
+
+**WebFlux (Reactor + Netty)** runs on a few event-loop threads (roughly one per CPU core). A request that hits I/O releases the thread immediately and resumes via callback when data is ready. A handful of threads multiplex thousands of connections — *as long as nothing blocks them*.
+
+```java
+// MVC: blocking, thread held until DB returns
+@GetMapping("/u/{id}") User get(@PathVariable Long id) { return repo.findById(id); }
+
+// WebFlux: non-blocking, thread freed during the DB call
+@GetMapping("/u/{id}") Mono<User> get(@PathVariable Long id) { return repo.findById(id); }
+```
+
+## When WebFlux wins
+
+- **High concurrency, I/O-bound** workloads: API gateways, fan-out aggregation of many downstream calls, lots of slow/idle connections.
+- **Streaming**: server-sent events, large or infinite responses where you want backpressure and bounded memory.
+- You can be **reactive end-to-end** (R2DBC, `WebClient`, reactive security).
+
+## When MVC wins
+
+- **CPU-bound** work — an event loop gives you nothing when the bottleneck is computation, not waiting.
+- You depend on **blocking libraries** (JDBC/JPA, blocking SDKs). Wrapping them on a bounded elastic scheduler claws back blocking but adds complexity and erases most of the benefit.
+- **Simplicity and debuggability**: imperative code, readable stack traces, mature tooling, the whole team already knows it. The reactive learning curve and "stack traces from hell" are real costs.
+
+<Callout kind="warn" title="The cardinal sin">
+Calling blocking code (JDBC, `Thread.sleep`, `.block()`) on a WebFlux event-loop thread starves every connection that thread multiplexes. If you can't go reactive all the way down, you likely shouldn't go reactive at all.
+</Callout>
+
+<Callout kind="tip" title="The Loom caveat">
+Virtual threads now let MVC-style blocking code scale to high concurrency without the reactive complexity. For many I/O-bound apps that previously justified WebFlux, virtual threads are now the simpler answer — reserve WebFlux for genuine streaming/backpressure needs.
+</Callout>
+
+<ProbeNote>They want thread-per-request-blocking vs event-loop-non-blocking, that WebFlux's win is I/O-bound concurrency and streaming (not CPU work), that blocking on the event loop is fatal, and the maturity that you'd weigh virtual threads before choosing reactive.</ProbeNote>

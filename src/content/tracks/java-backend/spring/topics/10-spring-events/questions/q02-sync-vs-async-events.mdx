@@ -1,0 +1,48 @@
+**By default event publishing is synchronous: `publishEvent` blocks until every listener finishes, on the same thread, inside the same transaction.** `@Async` on a listener is how you break out of that — but it changes the semantics in ways you must be ready to defend.
+
+## Synchronous is the default — and what it implies
+
+```java
+void place(Order o) {
+    repo.save(o);
+    events.publishEvent(new OrderPlacedEvent(o.id())); // blocks here
+    log.info("done");                                   // runs only after all listeners return
+}
+```
+
+Because it's the same thread and same transaction:
+
+- A **slow** listener slows the publisher's request directly.
+- A **thrown** exception from a listener propagates to the publisher and rolls back the transaction (the listener's work and the publisher's work share one transaction boundary).
+- Listeners run in registration order (controllable via `@Order`), each fully before the next.
+
+This is usually what you want for in-band side effects that must succeed or fail with the main work.
+
+## Going async with @Async
+
+Add `@Async` to the listener method and enable async support with `@EnableAsync`:
+
+```java
+@Configuration
+@EnableAsync
+class AsyncConfig {}
+
+@Component
+class NotificationListener {
+    @Async
+    @EventListener
+    void on(OrderPlacedEvent e) { /* runs on a TaskExecutor thread */ }
+}
+```
+
+Now `publishEvent` hands the listener to a `TaskExecutor` thread and returns immediately. The trade-offs:
+
+- **No shared transaction or thread.** The listener runs on its own thread, so the publisher's `@Transactional` context and any `ThreadLocal` (security context, MDC) do **not** propagate unless you configure it (e.g. a `DelegatingSecurityContextAsyncTaskExecutor`).
+- **Exceptions are swallowed.** A throwing `@Async void` listener's exception goes to an `AsyncUncaughtExceptionHandler`, not the caller. The publisher never sees it.
+- **You should configure the executor.** Without a defined `TaskExecutor` bean Spring picks a default (in Boot 3, a thread-pool executor); for production set bounded pool sizes and a queue so a burst of events can't exhaust threads.
+
+## Async + transactions: the common trap
+
+If you make a listener `@Async` to react *after* a commit, you've combined two concerns badly — the async thread may run *before* the publisher's transaction commits, so it can read stale or absent data. For "do X after the transaction commits" the right tool is `@TransactionalEventListener(phase = AFTER_COMMIT)`, optionally also `@Async`. Use `@Async` for "do this off the request thread," not for ordering against a transaction.
+
+<ProbeNote>State the default (sync, same thread, same transaction) before anything else, then show `@EnableAsync` + `@Async`. The senior signals: async listeners lose the transaction/thread context and swallow exceptions into `AsyncUncaughtExceptionHandler`, and `@Async` is the wrong fix for "after commit" — that's `@TransactionalEventListener`.</ProbeNote>

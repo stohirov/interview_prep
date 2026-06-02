@@ -1,0 +1,45 @@
+**The provider choice collapses to one axis: in-process (local) versus distributed (shared over the network), and everything else — speed, eviction, serialization, consistency — follows from that.** Spring's abstraction lets you swap providers without touching annotated code; only the `CacheManager` bean changes.
+
+## Caffeine — in-process, fastest
+
+A high-performance Java cache living in the JVM heap. Nanosecond access, no serialization, rich eviction (size, time, weight, W-TinyLFU). It is the default if Caffeine is on the classpath and no other provider is configured.
+
+- **Pro:** fastest possible; `sync = true` support to collapse concurrent misses.
+- **Con:** **per-instance** — each app node has its own copy, so entries can diverge across a cluster, and an evict on one node doesn't reach the others. Lost on restart.
+
+## Redis — distributed, shared
+
+An out-of-process key/value store. All app instances read/write the *same* cache over the network.
+
+- **Pro:** one consistent view across the cluster; survives app restarts; central TTL; can hold huge datasets beyond heap.
+- **Con:** every access is a network hop (microseconds–milliseconds, not nanos) and requires **serialization** (JSON or Java) — version-skew and serialization cost are the real-world pain points. It's also another piece of infrastructure to run.
+
+## Hazelcast — distributed, embedded
+
+An in-memory data grid that partitions and replicates data across the *app nodes themselves* (no separate server). Gives a shared cache plus distributed locks/compute.
+
+- **Pro:** distributed without a standalone store; near-cache option for local reads.
+- **Con:** heavier than Caffeine; cluster membership and split-brain to reason about.
+
+## Ehcache (3.x) — local, optionally tiered
+
+A mature JSR-107 (JCache) cache. Primarily in-process like Caffeine, but supports tiered storage (heap → off-heap → disk) and clustering via a Terracotta server.
+
+- **Pro:** JCache standard, off-heap/disk tiers ease GC pressure.
+- **Con:** slower than Caffeine for pure-heap use; clustering needs extra infra.
+
+## Choosing
+
+```text
+Single instance / read cache  -> Caffeine
+Multiple instances, must agree -> Redis (or Hazelcast)
+Standards / off-heap tiers     -> Ehcache 3
+```
+
+A common production pattern is **two tiers**: Caffeine as a fast L1 in front of Redis as the shared L2 — local hits stay nanosecond-cheap, misses fall through to the shared store.
+
+<Callout kind="tip" title="Couchbase exists too">
+Spring Boot also auto-configures Couchbase as a cache provider. Mention it for breadth, but the Caffeine-vs-Redis local/distributed trade-off is what interviewers actually want.
+</Callout>
+
+<ProbeNote>This tests whether you reason from the local-vs-distributed axis rather than reciting features. Strong answers tie Caffeine to nanosecond no-serialization local reads (but per-node divergence) and Redis to a consistent shared view at the cost of a network hop and serialization — and may volunteer the L1+L2 (Caffeine over Redis) tiered pattern.</ProbeNote>

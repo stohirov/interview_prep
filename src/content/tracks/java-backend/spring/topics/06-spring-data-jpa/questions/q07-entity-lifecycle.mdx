@@ -1,0 +1,54 @@
+**JPA fires callback methods at well-defined points in an entity's lifecycle — `@PrePersist` before an INSERT, `@PostLoad` after a SELECT, and so on — letting you run logic like setting timestamps or validating without scattering it across services.** They're annotations on methods, defined by the `jakarta.persistence` spec.
+
+## The seven callbacks
+
+```text
+@PrePersist   before INSERT (entity becomes managed via persist)
+@PostPersist  after INSERT  (the row now exists; PK is assigned)
+@PostLoad     after the entity is loaded from the DB into the context
+@PreUpdate    before an UPDATE (only fires if dirty checking found changes)
+@PostUpdate   after the UPDATE
+@PreRemove    before a DELETE
+@PostRemove   after the DELETE
+```
+
+A common use is auditing timestamps:
+
+```java
+@Entity
+public class Order {
+    @Id @GeneratedValue Long id;
+    Instant createdAt;
+    Instant updatedAt;
+
+    @PrePersist
+    void onCreate() { createdAt = updatedAt = Instant.now(); }
+
+    @PreUpdate
+    void onUpdate() { updatedAt = Instant.now(); }
+}
+```
+
+The method must be `void`, take no arguments, and live on the entity (or on a separate listener class via `@EntityListeners`).
+
+## Timing subtleties that trip people up
+
+`@PrePersist` runs when `persist()` is called, which may be **before** the actual INSERT (Hibernate batches DML until flush) — but the entity is already managed. `@PostPersist` runs after the INSERT, so an `@GeneratedValue` identity PK is available there but not necessarily in `@PrePersist`. `@PreUpdate` only fires when dirty checking detects a real change at flush — touch a field back to its original value and it won't fire. And crucially, **bulk `@Modifying` JPQL UPDATE/DELETE bypasses these callbacks entirely** — they operate on managed entities, not on direct SQL.
+
+## Don't hand-roll auditing
+
+Spring Data already does the common case. With `@EnableJpaAuditing` and `AuditingEntityListener`, the annotations `@CreatedDate`, `@LastModifiedDate`, `@CreatedBy`, `@LastModifiedBy` populate audit fields automatically — built on these same callbacks.
+
+```java
+@EntityListeners(AuditingEntityListener.class)
+public class Order {
+    @CreatedDate Instant createdAt;
+    @LastModifiedDate Instant updatedAt;
+}
+```
+
+<Callout kind="warn" title="Keep callbacks pure">
+Don't call the `EntityManager`, fire other queries, or publish events from inside a callback — you're mid-flush and behaviour is undefined/risky. Use them for setting fields on *this* entity only.
+</Callout>
+
+<ProbeNote>List the callbacks and pair each with its DB event. The high-value points: callbacks run on **managed entities** so bulk `@Modifying` queries skip them, `@PreUpdate` only fires on actual dirty changes, identity PKs aren't reliable until `@PostPersist`, and Spring's `@CreatedDate`/`@LastModifiedDate` auditing is built on top — don't reinvent it.</ProbeNote>

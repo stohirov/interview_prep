@@ -1,0 +1,41 @@
+**Authentication answers "who are you?"; authorization answers "what are you allowed to do?"** They run in that order — you can't decide access without first establishing identity — but they are distinct mechanisms with distinct failure codes, and conflating them is a classic interview tell.
+
+## Authentication (AuthN)
+
+Establishing identity by verifying credentials: a username/password, a bearer token, a client certificate, an OAuth2 login. In Spring Security the result is an `Authentication` object holding the **principal** (usually a `UserDetails`), the credentials, and a flag that it's authenticated. The pieces:
+
+- `AuthenticationManager` (the entry point) delegates to one or more `AuthenticationProvider`s.
+- A provider verifies the credentials (e.g. `DaoAuthenticationProvider` loads a `UserDetails` via `UserDetailsService` and checks the password with a `PasswordEncoder`).
+- On success the `Authentication` is stored in the `SecurityContext`.
+
+Failure here is **401 Unauthorized** — you haven't proven who you are.
+
+## Authorization (AuthZ)
+
+Once identity is known, deciding whether *that* identity may perform *this* action, based on its **authorities** (roles/scopes). Two layers:
+
+```java
+// URL-level, in the SecurityFilterChain
+.authorizeHttpRequests(auth -> auth
+    .requestMatchers("/admin/**").hasRole("ADMIN")
+    .requestMatchers("/orders/**").hasAuthority("SCOPE_orders")
+    .anyRequest().authenticated())
+```
+
+```java
+// Method-level
+@PreAuthorize("hasRole('ADMIN') and #userId == authentication.name")
+public void deleteUser(String userId) { ... }
+```
+
+Failure here is **403 Forbidden** — we know who you are, you're just not permitted.
+
+## Roles vs authorities
+
+A "role" is just an authority with the `ROLE_` prefix. `hasRole("ADMIN")` is sugar for `hasAuthority("ROLE_ADMIN")`. Mixing these up (`hasRole("ROLE_ADMIN")` double-prefixes and silently never matches) is a common bug.
+
+<Callout kind="info" title="The mnemonic">
+401 = "I don't know you" (authentication failed). 403 = "I know you, but no" (authorization failed). If you return 403 to an anonymous user you've usually mis-wired the order.
+</Callout>
+
+<ProbeNote>State the two-word distinction (who vs what) and the two status codes (401 vs 403) without hesitation. The follow-up is almost always "role vs authority" — be ready to say a role is an authority with a `ROLE_` prefix and that `hasRole` adds it for you.</ProbeNote>

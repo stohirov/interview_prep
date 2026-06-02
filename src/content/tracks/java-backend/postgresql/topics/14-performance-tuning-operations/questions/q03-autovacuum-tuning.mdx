@@ -1,0 +1,43 @@
+**Autovacuum isn't optional housekeeping — it's load-bearing.** Because of MVCC, every `UPDATE` and `DELETE` leaves a **dead tuple** behind; autovacuum reclaims that space, updates the visibility map (enabling index-only scans), refreshes planner statistics, and — critically — prevents **transaction-ID wraparound**. When it falls behind, you get bloat, bad plans, and eventually a forced shutdown.
+
+## When it triggers
+
+Per table, autovacuum fires when dead tuples exceed:
+
+```text
+threshold + scale_factor × reltuples
+```
+
+The default `autovacuum_vacuum_scale_factor = 0.2` means a table is only vacuumed after **20% of its rows are dead**. On a 100M-row table that's 20M dead tuples before it even starts — far too lax for large hot tables.
+
+## Why it falls behind
+
+**1. Scale factor too high for big tables.** 20% of a huge table is enormous. Lower it per-table:
+
+```sql
+ALTER TABLE orders SET (autovacuum_vacuum_scale_factor = 0.02,
+                        autovacuum_vacuum_threshold = 5000);
+```
+
+**2. Long-running transactions hold back `xmin`.** A transaction (or an idle-in-transaction session, or an abandoned replication slot / `hot_standby_feedback`) that started an hour ago pins the oldest visible snapshot. Autovacuum **cannot remove dead tuples newer than that snapshot** — so it runs but reclaims nothing, and bloat grows anyway. This is the #1 real-world cause. Watch `pg_stat_activity` for old `xact_start` and long `idle in transaction` sessions.
+
+**3. Cost limits throttle it.** Autovacuum deliberately throttles I/O via `autovacuum_vacuum_cost_limit` / `cost_delay`. On modern hardware the defaults are too timid; raise the cost limit (or lower the delay) so vacuum keeps pace with churn.
+
+**4. Too few workers.** `autovacuum_max_workers` (default 3) can't cover many large busy tables at once.
+
+## How to tell
+
+```sql
+SELECT relname, n_dead_tup, n_live_tup,
+       last_autovacuum, autovacuum_count
+FROM pg_stat_user_tables
+ORDER BY n_dead_tup DESC;
+```
+
+Rising `n_dead_tup` with a stale `last_autovacuum` means it's losing the race.
+
+<Callout kind="danger" title="Wraparound is the emergency">
+If `age(datfrozenxid)` approaches `autovacuum_freeze_max_age`, Postgres launches aggressive anti-wraparound vacuums and, at the limit, refuses new writes to protect data. Never let a long transaction or stuck autovacuum sit indefinitely.
+</Callout>
+
+<ProbeNote>The senior signal is naming **long-running transactions / idle-in-transaction / replication slots holding back `xmin`** as why autovacuum "runs but doesn't help," plus tuning **scale factor per-table** rather than globally, and respecting wraparound as a genuine outage risk.</ProbeNote>

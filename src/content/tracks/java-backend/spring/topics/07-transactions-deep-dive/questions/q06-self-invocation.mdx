@@ -1,0 +1,52 @@
+**The self-invocation problem: when one method of a bean calls another method *on the same bean* via `this.other()`, the call never goes through the proxy — so `@Transactional`, `@Async`, and `@Cacheable` on `other()` are silently ignored.** It's the single most common "why isn't my annotation working" bug in Spring.
+
+## Why it happens
+
+The proxy only intercepts calls that arrive *from outside* the object. An external caller holds a reference to the **proxy** and calls `proxy.outer()`. But inside `outer()`, the keyword `this` is the **raw target object**, not the proxy. So `this.inner()` calls the real method directly, the interceptor never runs, and no transaction is started.
+
+```java
+@Service
+class ReportService {
+
+    public void run() {
+        load();              // self-call: bypasses the proxy -> NOT transactional
+    }
+
+    @Transactional
+    public void load() {     // annotation here is ignored when reached via run()
+        // ... runs with NO transaction
+    }
+}
+```
+
+The same trap defeats `@Async` (runs synchronously) and `@Cacheable` (never caches) when reached by a self-call.
+
+## The fixes
+
+**1. Self-inject the proxy** and call through it. Spring injects the proxy reference, so the call is intercepted:
+
+```java
+@Service
+class ReportService {
+    @Autowired private ReportService self;          // the proxy, not 'this'
+
+    public void run() { self.load(); }              // goes through the proxy -> transactional
+
+    @Transactional
+    public void load() { ... }
+}
+```
+
+**2. Split into a second bean.** Move `load()` into a different `@Service`; the inter-bean call is naturally external and goes through that bean's proxy. This is usually the cleanest design.
+
+**3. Use `AopContext.currentProxy()`** — call `((ReportService) AopContext.currentProxy()).load()`. Requires `exposeProxy = true` and couples your code to Spring AOP; rarely recommended.
+
+**4. Switch to AspectJ weaving** (`mode = AspectJ`). Because the advice is woven into the bytecode rather than living in a proxy, even `this.load()` is advised. Removes the limitation entirely at the cost of weaving setup.
+
+**5. `TransactionTemplate`** — sidestep the annotation and manage the transaction programmatically right where you need it.
+
+<Callout kind="warn" title="It fails silently">
+There's no error — the method just runs without a transaction (or without caching/async). The only signal is wrong behavior in production. When an annotation "does nothing," suspect a self-call first.
+</Callout>
+
+<ProbeNote>The interviewer wants the mechanism — `this` is the target, not the proxy, so the interceptor is skipped — plus at least two fixes. "Split into another bean" and "self-inject the proxy" are the answers that show you understand *why*, not just a recipe.</ProbeNote>

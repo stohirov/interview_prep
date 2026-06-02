@@ -1,0 +1,51 @@
+**This is the single most important AOP gotcha, and the answer is pure mechanics: the proxy wraps the bean from the *outside*, so a method calling another method on `this` never goes through the proxy — and the advice silently never runs.** `@Transactional`, `@Cacheable`, `@Async` all vanish on internal calls. Candidates who can explain *why* — not just *that* — stand out.
+
+## The setup
+
+```java
+@Service
+class OrderService {
+
+    public void process(Order o) {
+        validate(o);
+        save(o);              // <-- internal call to a @Transactional method
+    }
+
+    @Transactional
+    public void save(Order o) {
+        repo.persist(o);
+    }
+}
+```
+
+You'd expect `save()` to run in a transaction. It does **not** when called via `process()`.
+
+## The mechanics, step by step
+
+1. The container creates `OrderService` (the **target**), then wraps it in a **proxy** (`OrderService$$SpringCGLIB`). Everyone who `@Autowired`s `OrderService` receives the *proxy*, never the raw target.
+2. The proxy is a subclass (CGLIB) or an interface impl (JDK) that overrides methods: each override runs the advice (`begin transaction → super.save() → commit`) then delegates to the target.
+3. When external code calls `orderService.process()`, that call hits the **proxy's** `process()`. But `process()` itself isn't `@Transactional`, so the proxy just delegates straight into the **raw target's** `process()`.
+4. Now execution is *inside the target object*. The line `save(o)` is really `this.save(o)` — and `this` is the **raw target**, not the proxy. The call goes directly to the target's own `save()` method, completely bypassing the proxy's overridden version.
+5. No proxy ⇒ no advice ⇒ no transaction. The annotation is effectively dead.
+
+The root cause: **`this` inside the bean is the target, never the proxy.** The proxy only sees calls that arrive through its own reference.
+
+## How to fix it
+
+- **Refactor** so the advised method lives in a *different* bean, and inject that bean. Cross-bean calls go through the proxy. (Cleanest, preferred.)
+- **Self-inject the proxy** and call through it:
+
+```java
+@Autowired @Lazy
+private OrderService self;        // injected proxy, @Lazy breaks the cycle
+
+public void process(Order o) {
+    validate(o);
+    self.save(o);                 // now goes through the proxy → tx applies
+}
+```
+
+- Use `AopContext.currentProxy()` (requires `exposeProxy = true`) — works but ugly.
+- Switch to **AspectJ weaving**, which advises the method's *own bytecode*, so even `this.save()` is intercepted.
+
+<ProbeNote>Don't stop at "self-invocation isn't proxied." Walk the chain: caller hits the proxy → proxy delegates into the raw target → inside the target `this` *is* the target → `this.method()` skips the proxy → advice never runs. Then give a fix (separate bean, or self-injected `@Lazy` proxy, or AspectJ).</ProbeNote>

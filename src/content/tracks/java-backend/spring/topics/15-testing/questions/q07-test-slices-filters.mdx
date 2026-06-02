@@ -1,0 +1,53 @@
+**By default `@WebMvcTest` loads your Spring Security configuration, so requests in the slice go through the security filter chain — and `@AutoConfigureMockMvc(addFilters = false)` switches that chain off.** Whether you want it on or off depends on what the test is *about*: the endpoint's logic, or its security.
+
+## Why security shows up in a web slice
+
+`@WebMvcTest` is a slice of the *web* layer, and Spring Security's filters are part of that layer. If you have a `SecurityFilterChain` bean, the slice picks it up. So a controller test that doesn't authenticate will get **401/403** before the controller ever runs — surprising if you only wanted to test the mapping and validation.
+
+```java
+@WebMvcTest(OrderController.class)
+class OrderControllerTest {
+    @Autowired MockMvc mvc;
+    @MockitoBean OrderService service;
+
+    @Test void unauthenticatedIs401() throws Exception {
+        mvc.perform(get("/orders")).andExpect(status().isUnauthorized());
+    }
+}
+```
+
+## Option A — keep filters, supply identity
+
+When you *do* want to verify authorization, leave the chain on and provide an authenticated user with `@WithMockUser` (or `SecurityMockMvcRequestPostProcessors.user(...)`):
+
+```java
+@Test
+@WithMockUser(roles = "ADMIN")
+void adminCanList() throws Exception {
+    mvc.perform(get("/orders")).andExpect(status().isOk());
+}
+```
+
+This is the right approach for testing `@PreAuthorize`, role checks, and access rules — the security *is* the feature under test.
+
+## Option B — turn filters off
+
+When the test is purely about controller behaviour and security is noise, disable the filter chain:
+
+```java
+@WebMvcTest(OrderController.class)
+@AutoConfigureMockMvc(addFilters = false)
+class OrderControllerTest { /* requests skip the security filters */ }
+```
+
+`addFilters = false` removes the servlet filters (including Spring Security's) from the `MockMvc` setup, so requests reach the controller directly. It keeps the test focused and removes auth boilerplate from every method.
+
+<Callout kind="warn" title="Don't disable filters to hide a problem">
+Turning filters off is fine for tests that aren't *about* security — but it means those tests can't catch an accidentally unprotected endpoint. Make sure you have separate tests (Option A, or an integration test) that exercise the real chain, so disabling it in unit-level slices doesn't leave authorization untested.
+</Callout>
+
+## Other slice toggles
+
+The pattern generalizes: slices expose `@AutoConfigure...` annotations to tune what's loaded. `@AutoConfigureTestDatabase(replace = NONE)` keeps your real (Testcontainers) DataSource in `@DataJpaTest` instead of swapping in H2; `@WebMvcTest(controllers = X, excludeFilters = ...)` narrows the registered beans.
+
+<ProbeNote>The interviewer checks you know web slices *include* security by default (hence the surprise 401s) and that `addFilters = false` skips the chain. The senior nuance: only disable it when security isn't the subject, and ensure authorization is still tested *somewhere* with the real chain on.</ProbeNote>

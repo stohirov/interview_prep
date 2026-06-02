@@ -1,0 +1,58 @@
+**A polymorphic relationship — comments that can attach to posts, photos, *or* videos — is the textbook case where the elegant-looking design (one FK column plus a type tag) is the one that breaks referential integrity, and the database can't help you.** The whole question is a trade-off between schema cleanliness and the foreign-key guarantees you're willing to surrender.
+
+## Option A — single FK column + type discriminator
+
+One table, a `commentable_id` plus a `commentable_type` string saying which table it points to:
+
+```sql
+CREATE TABLE comments (
+  id               bigserial PRIMARY KEY,
+  body             text NOT NULL,
+  commentable_type text   NOT NULL,   -- 'post' | 'photo' | 'video'
+  commentable_id   bigint NOT NULL
+  -- no REFERENCES possible: a column can target only ONE table
+);
+```
+
+The fatal flaw: **you cannot declare a foreign key**, because `commentable_id` targets different tables depending on the row. Nothing stops a comment pointing at a `post` id that doesn't exist, and `ON DELETE CASCADE` is impossible — deleting a post leaves orphaned comments. This is Rails' default and it's popular because it's simple, but you've moved integrity into application code. Indexing needs `(commentable_type, commentable_id)`.
+
+## Option B — multiple nullable FK columns (exclusive arc)
+
+One nullable FK per target type, with a `CHECK` enforcing that exactly one is set:
+
+```sql
+CREATE TABLE comments (
+  id       bigserial PRIMARY KEY,
+  body     text NOT NULL,
+  post_id  bigint REFERENCES posts(id)  ON DELETE CASCADE,
+  photo_id bigint REFERENCES photos(id) ON DELETE CASCADE,
+  video_id bigint REFERENCES videos(id) ON DELETE CASCADE,
+  CHECK (num_nonnulls(post_id, photo_id, video_id) = 1)
+);
+```
+
+**Real foreign keys are back** — cascades work, orphans are impossible. The cost: the table widens with every new commentable type (a schema migration each time), and queries get `COALESCE`-y. Excellent when the set of types is small and stable.
+
+## Option C — joined / shared parent table
+
+Introduce a `commentable` supertype table; each entity *is a* commentable via a 1:1 link, and comments reference the parent:
+
+```sql
+CREATE TABLE commentables (id bigserial PRIMARY KEY);
+CREATE TABLE posts  (id bigint PRIMARY KEY REFERENCES commentables(id), title text);
+CREATE TABLE photos (id bigint PRIMARY KEY REFERENCES commentables(id), url text);
+
+CREATE TABLE comments (
+  id             bigserial PRIMARY KEY,
+  commentable_id bigint NOT NULL REFERENCES commentables(id) ON DELETE CASCADE,
+  body           text NOT NULL
+);
+```
+
+**Full referential integrity *and* no schema change to add a new commentable type** — just make the new table reference `commentables`. The price is an extra join everywhere and the orchestration of allocating the parent id when you insert a post/photo. This is the normalized "right answer" when integrity matters most.
+
+<Callout kind="info" title="There's no free lunch">
+Option A buys simplicity by giving up FKs. Option B keeps FKs but doesn't scale to many types. Option C keeps both but adds a join and an indirection. Name the trade explicitly — that's what's being tested.
+</Callout>
+
+<ProbeNote>The trap is praising Option A's elegance without flagging that it sacrifices the foreign key. Strong candidates lay out all three, lead with "the single-column version loses referential integrity," and pick based on the number/stability of types: exclusive-arc for few-and-stable, shared-parent table when integrity is non-negotiable.</ProbeNote>

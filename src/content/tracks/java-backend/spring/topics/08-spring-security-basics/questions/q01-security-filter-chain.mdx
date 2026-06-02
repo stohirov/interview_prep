@@ -1,0 +1,47 @@
+**The `SecurityFilterChain` is an ordered list of servlet `Filter`s that Spring Security inserts into the servlet container's filter chain via a single `DelegatingFilterProxy`.** Every HTTP request passes through these filters before it ever reaches a `DispatcherServlet` or controller — this is where authentication and authorization actually happen.
+
+## How a request flows
+
+The container hands the request to a `DelegatingFilterProxy`, which delegates to a `FilterChainProxy` (the bean named `springSecurityFilterChain`). `FilterChainProxy` picks the **first** `SecurityFilterChain` whose request matcher matches the URL, then runs that chain's filters in order. Typical members, in order:
+
+- `SecurityContextHolderFilter` — loads any existing `SecurityContext`.
+- `CsrfFilter` — validates the CSRF token for state-changing requests.
+- `UsernamePasswordAuthenticationFilter` / `BearerTokenAuthenticationFilter` — perform authentication.
+- `ExceptionTranslationFilter` — turns `AccessDeniedException` / `AuthenticationException` into a 403/401 or a redirect.
+- `AuthorizationFilter` — the last gate; enforces the `authorizeHttpRequests` rules.
+
+## Building it (lambda DSL)
+
+You declare it as a bean. `HttpSecurity` is a builder; each lambda configures one filter:
+
+```java
+@Bean
+SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    http
+        .authorizeHttpRequests(auth -> auth
+            .requestMatchers("/login", "/css/**").permitAll()
+            .requestMatchers("/api/admin/**").hasAuthority("SCOPE_admin")
+            .anyRequest().authenticated())
+        .formLogin(Customizer.withDefaults())
+        .logout(Customizer.withDefaults());
+    return http.build();
+}
+```
+
+`http.build()` assembles the concrete filter list. Note: `WebSecurityConfigurerAdapter` was **removed** in Spring Security 6 — overriding `configure(HttpSecurity)` no longer exists; you return a bean instead.
+
+## Multiple chains
+
+You can register several `SecurityFilterChain` beans, each with `securityMatcher(...)`, and order them with `@Order`. A common split: one stateless chain for `/api/**` (JWT, CSRF off) and one session-based chain for the browser UI.
+
+```java
+@Bean @Order(1)
+SecurityFilterChain api(HttpSecurity http) throws Exception {
+    http.securityMatcher("/api/**")
+        .csrf(csrf -> csrf.disable())
+        .oauth2ResourceServer(o -> o.jwt(Customizer.withDefaults()));
+    return http.build();
+}
+```
+
+<ProbeNote>The interviewer wants to hear "ordered list of filters, matched by `FilterChainProxy`, configured as a `@Bean` with the lambda DSL." Bonus signal: naming `AuthorizationFilter` as the final gate, mentioning multiple chains ordered with `@Order`, and stating plainly that `WebSecurityConfigurerAdapter` is gone in 6.x.</ProbeNote>

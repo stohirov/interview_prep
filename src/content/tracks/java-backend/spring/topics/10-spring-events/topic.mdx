@@ -1,0 +1,36 @@
+**Spring's event mechanism is the in-JVM observer pattern wired into the container: one bean publishes an event, any number of beans listen, and neither knows about the other.** It exists to decouple components that live in the same `ApplicationContext` — instead of `OrderService` calling `EmailService` and `InventoryService` directly, it publishes an `OrderPlacedEvent` and walks away. The listeners subscribe. Adding a new reaction means adding a listener, not editing the publisher.
+
+You publish through `ApplicationEventPublisher` (inject it, or inject the `ApplicationContext` which implements it):
+
+```java
+@Service
+class OrderService {
+    private final ApplicationEventPublisher events;
+    OrderService(ApplicationEventPublisher events) { this.events = events; }
+
+    void place(Order o) {
+        // ... persist the order ...
+        events.publishEvent(new OrderPlacedEvent(o.id()));
+    }
+}
+```
+
+```java
+@Component
+class EmailListener {
+    @EventListener
+    void on(OrderPlacedEvent e) { /* send confirmation */ }
+}
+```
+
+Since Spring 4.2 the event can be **any object** — no need to extend `ApplicationEvent` — and listeners are plain methods annotated with `@EventListener`, matched by parameter type. That's the modern API.
+
+The single fact candidates most often get wrong: **publishing is synchronous by default.** `publishEvent` does not return until every listener has run, on the *same thread*, inside the *same transaction*. It is a method call dressed up as messaging. That has consequences — a slow or throwing listener blocks the publisher, and a listener's work commits or rolls back with the publisher's transaction. You opt into other behavior explicitly: `@Async @EventListener` moves a listener to another thread, and `@TransactionalEventListener` ties it to transaction lifecycle phases like `AFTER_COMMIT`.
+
+The boundary to keep clear: these events never leave the JVM. They are not Kafka, not RabbitMQ, not durable — if the process dies mid-handling, the event is gone. Spring Modulith adds a persistent event publication registry on top to make cross-module delivery at-least-once, which is the closest Spring gets to a broker without one.
+
+<Callout kind="tip" title="The interview hook">
+Lead with: "Spring events are an in-process observer pattern, and by default they're *synchronous and transactional* — same thread, same transaction as the publisher." Stating that one sentence up front signals you won't confuse them with a message broker, which is exactly where this topic goes next.
+</Callout>
+
+The questions below cover the listener API, sync vs async, transaction-bound phases, when to reach for a real broker instead, and how Spring Modulith turns events into reliable module boundaries.

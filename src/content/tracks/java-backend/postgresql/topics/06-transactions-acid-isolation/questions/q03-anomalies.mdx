@@ -1,0 +1,49 @@
+**The four anomalies are the concurrency bugs that isolation levels exist to prevent — and each is defined by a specific interleaving of two transactions.** Knowing the difference between "non-repeatable read" and "phantom" is the classic discriminator here.
+
+## Dirty Read — reading uncommitted data
+
+Transaction A reads a row that Transaction B has modified but **not yet committed**. If B rolls back, A acted on data that never existed.
+
+```text
+T1: UPDATE accounts SET balance = 0 WHERE id = 1;   -- not committed
+T2: SELECT balance FROM accounts WHERE id = 1;       -- reads 0 (dirty)
+T1: ROLLBACK;                                        -- the 0 never existed
+```
+
+**PostgreSQL never permits this** — at any isolation level. Read Uncommitted behaves as Read Committed precisely because MVCC only ever shows committed row versions.
+
+## Non-Repeatable Read — the same row changes under you
+
+Transaction A reads a row, Transaction B updates **that row** and commits, and A re-reads it to get a *different value*. It's about a row's value mutating mid-transaction.
+
+```text
+T1: SELECT price FROM products WHERE id = 5;   -- 100
+T2: UPDATE products SET price = 120 WHERE id = 5; COMMIT;
+T1: SELECT price FROM products WHERE id = 5;   -- 120  (non-repeatable)
+```
+
+Prevented at Repeatable Read and above (a fixed snapshot).
+
+## Phantom Read — the *set* of matching rows changes
+
+Transaction A runs a query with a predicate, Transaction B **inserts (or deletes)** a row matching that predicate and commits, and A re-runs the query to find *new rows appearing*. The difference from non-repeatable read: it's about membership of a result set, not a single row's value.
+
+```text
+T1: SELECT count(*) FROM orders WHERE total > 1000;   -- 3
+T2: INSERT INTO orders (total) VALUES (5000); COMMIT;
+T1: SELECT count(*) FROM orders WHERE total > 1000;   -- 4  (phantom)
+```
+
+The standard only requires Serializable to prevent this, but **PostgreSQL's Repeatable Read already prevents it** via its transaction-wide snapshot.
+
+## Serialization Anomaly — a result no serial order could produce
+
+Even with *no* dirty/non-repeatable/phantom read, two transactions can interleave so the committed result corresponds to no serial ordering. Classic case: two transactions each read a shared total and each insert based on what they read, both passing a "sum must stay under X" check that the combined result violates.
+
+Only **Serializable (SSI)** prevents this; it detects the dangerous read/write dependency cycle and aborts one transaction with `40001`.
+
+<Callout kind="info" title="The two-axis mental model">
+Non-repeatable read = an *existing row's value* changed. Phantom = the *set of rows* matching a predicate changed. Serialization anomaly = the *combined outcome* is impossible serially even when each read looked consistent. Stating these three distinctions cleanly is what separates a memorized answer from an understood one.
+</Callout>
+
+<ProbeNote>Expect a follow-up asking you to distinguish non-repeatable read from phantom — answer with "single row value vs. result-set membership." Mention that PostgreSQL never allows dirty reads and that its Repeatable Read already kills phantoms.</ProbeNote>

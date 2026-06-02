@@ -1,0 +1,27 @@
+**Inversion of Control is the core idea that makes Spring "Spring": your objects don't construct or look up their own collaborators — the framework does it for them and hands them in.** You write plain classes that declare what they need; the container owns the lifecycle, wiring, and configuration. Dependency Injection is the *mechanism* IoC uses — collaborators are pushed in (via the constructor, a setter, or a field) rather than pulled in with `new` or a service locator. Strip those away and your business code stops caring *where* a dependency comes from, which is what makes it testable and swappable.
+
+The thing that does the wiring is the **container**, represented at runtime by the `ApplicationContext`. You give it metadata — `@Configuration` classes, `@Bean` methods, component-scanned `@Component`s, or (historically) XML — and it produces a registry of fully constructed, dependency-injected **beans**.
+
+```java
+@Service
+public class OrderService {
+    private final PaymentGateway gateway;
+    private final OrderRepository repo;
+
+    // No 'new', no lookup — the container supplies these.
+    public OrderService(PaymentGateway gateway, OrderRepository repo) {
+        this.gateway = gateway;
+        this.repo = repo;
+    }
+}
+```
+
+The container's job is a defined sequence: read bean definitions, resolve dependencies into a graph, instantiate singletons eagerly at startup, run lifecycle callbacks (`@PostConstruct`, `BeanPostProcessor`s, `InitializingBean`), and then manage each bean until shutdown. By default beans are **singletons** — one shared instance per context, not a JVM-wide singleton.
+
+A `bean` is just an object the container manages. Whether it's declared with a stereotype annotation (`@Component`, `@Service`, …) and discovered by scanning, or declared with a `@Bean` method in a `@Configuration` class, the result is the same kind of managed object — the two routes differ in *who* you'd use each for (your own classes vs. third-party classes you can't annotate).
+
+<Callout kind="tip" title="The interview hook">
+Define the three terms cleanly and in order: "IoC is the principle — the framework controls object creation and wiring, not my code. DI is how IoC is implemented — dependencies are injected, not looked up. The `ApplicationContext` is the concrete container that reads my bean definitions and produces a graph of wired singletons." Then mention constructor injection as the default and you've framed the entire topic.
+</Callout>
+
+The questions below cover IoC vs. DI precisely, the three injection styles and why constructor wins, `BeanFactory` vs. `ApplicationContext`, what a bean actually is, the stereotype annotations, `@Bean` vs. `@Component`, component scanning, and the CGLIB magic behind `@Configuration`.

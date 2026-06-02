@@ -1,0 +1,39 @@
+**Composite (multi-level) partitioning means a partition is itself partitioned — you declare `PARTITION BY` on a child, giving a tree like RANGE-by-date then HASH-by-tenant.** PostgreSQL supports it directly; the only rule is that leaf partitions hold the rows, and intermediate levels are just routing layers.
+
+## How to build it
+
+```sql
+CREATE TABLE events (
+    ts        timestamptz NOT NULL,
+    tenant_id int         NOT NULL,
+    payload   jsonb
+) PARTITION BY RANGE (ts);
+
+-- A monthly partition that is itself partitioned by tenant hash:
+CREATE TABLE events_2025_06 PARTITION OF events
+    FOR VALUES FROM ('2025-06-01') TO ('2025-07-01')
+    PARTITION BY HASH (tenant_id);
+
+-- Leaf partitions actually store rows:
+CREATE TABLE events_2025_06_p0 PARTITION OF events_2025_06
+    FOR VALUES WITH (MODULUS 4, REMAINDER 0);
+CREATE TABLE events_2025_06_p1 PARTITION OF events_2025_06
+    FOR VALUES WITH (MODULUS 4, REMAINDER 1);
+-- ... p2, p3
+```
+
+A row routes top-down: by `ts` into the month, then by `hash(tenant_id)` into a leaf. Pruning works at **every level** — `WHERE ts >= ... AND tenant_id = 7` prunes both the date dimension (plan-time) and the hash dimension (equality).
+
+## When it earns its keep
+
+Use it when **two independent dimensions both matter**: you retire data by time (RANGE on `ts`) *and* you want even sizing or isolation per tenant within each month (HASH/LIST on `tenant_id`). A single-level partition can only optimize one of those.
+
+## When it's overkill — and the cost
+
+Subpartitioning multiplies partition count: 24 months × 4 hash buckets = 96 leaf tables, each needing its own indexes and ANALYZE. Planning and `\d+` output get noisy, and operational scripts grow. Don't add a second level unless the second dimension genuinely changes your queries or management.
+
+<Callout kind="info" title="Indexes still propagate">
+An index created on the top partitioned table cascades down to every leaf automatically (PG 11+), so you define it once. But each leaf is a separate physical index — there is no single combined index across the tree.
+</Callout>
+
+<ProbeNote>The signal is knowing it's just `PARTITION BY` on a child, that **only leaves hold rows**, and that pruning works per level. The mature caveat is the **partition-count explosion** (levels multiply) — recommend subpartitioning only when both dimensions independently drive queries or retention.</ProbeNote>

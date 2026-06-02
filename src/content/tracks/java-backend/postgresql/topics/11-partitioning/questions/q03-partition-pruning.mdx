@@ -1,0 +1,41 @@
+**Partition pruning is how the planner (and executor) proves that whole partitions cannot contain matching rows and skips them entirely — it's the feature that makes partitioning pay off.** Without pruning, a query against a 60-partition table touches all 60; with it, a date filter touches one. It's controlled by `enable_partition_pruning` (on by default).
+
+## Plan-time pruning
+
+When the partition key appears in a `WHERE` clause with constants, the planner compares the predicate against each partition's bounds and excludes the ones that can't match — they never even appear in the plan.
+
+```sql
+EXPLAIN SELECT * FROM logs WHERE ts >= '2025-06-10' AND ts < '2025-06-20';
+```
+
+```text
+Seq Scan on logs_2025_06 logs  (cost=...)
+  Filter: (ts >= '2025-06-10' AND ts < '2025-06-20')
+```
+
+Only `logs_2025_06` is scanned; the other monthly partitions are gone from the plan. This is far cheaper than the old `constraint_exclusion` mechanism and scales to thousands of partitions.
+
+## Run-time pruning
+
+Plan-time pruning needs constants. When the key is compared to a value **not known until execution** — a bind parameter (`$1`), a subquery result, or the inner side of a nested-loop join — PostgreSQL prunes *during* execution instead. You'll see it in `EXPLAIN ANALYZE`:
+
+```text
+Append (actual rows=...)
+  Subplans Removed: 11
+  ->  Seq Scan on logs_2025_06 ...
+```
+
+`Subplans Removed: 11` means 11 partitions were pruned at run time. This is critical for prepared statements and PgBouncer-style workloads where the value arrives via `$1`.
+
+## What blocks pruning
+
+- The predicate isn't on the **partition key** (filtering a non-key column prunes nothing).
+- The key is wrapped in a non-immutable function or a cast that hides it.
+- `enable_partition_pruning = off`.
+- For HASH, only equality on the key prunes; range predicates can't.
+
+<Callout kind="tip" title="Verify, don't assume">
+Always confirm with `EXPLAIN (ANALYZE)`. If you see every partition scanned, your filter isn't on the partition key — the single most common reason partitioning "doesn't help."
+</Callout>
+
+<ProbeNote>The depth signal is distinguishing **plan-time** (constants, partitions absent from the plan) from **run-time** pruning (`$1`/joins, `Subplans Removed` in EXPLAIN ANALYZE). Both rely on the filter hitting the partition key — saying that, and naming `enable_partition_pruning`, marks real experience.</ProbeNote>

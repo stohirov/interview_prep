@@ -1,0 +1,23 @@
+**Reactive programming flips the model: instead of a thread blocking while it waits for I/O, you describe a pipeline of data and let the runtime push values through it as they arrive.** Spring WebFlux is the non-blocking web stack built on Project Reactor, which implements the Reactive Streams specification. The payoff is concurrency: a handful of event-loop threads (Netty by default) can serve thousands of concurrent connections, because no thread is ever parked waiting on a database or remote call.
+
+The whole stack rests on four interfaces from the Reactive Streams spec — `Publisher`, `Subscriber`, `Subscription`, `Processor` — and one idea that makes it more than "callbacks with a fancy name": **backpressure**. A subscriber calls `request(n)` to tell the publisher how many elements it can handle, so a fast producer can't overwhelm a slow consumer. Reactor's two publisher types specialise this: `Mono<T>` for 0..1 element, `Flux<T>` for 0..N.
+
+```java
+@GetMapping("/users/{id}/orders")
+Flux<Order> orders(@PathVariable String id) {
+    return userRepository.findById(id)            // Mono<User>
+        .flatMapMany(user -> orderRepo.findByUser(user.id()))  // Flux<Order>
+        .filter(Order::isPaid)
+        .take(100);
+}
+```
+
+Nothing runs until something subscribes — Reactor pipelines are **lazy**, assembled as a blueprint and executed only when the framework subscribes for you. That laziness is also why you must never call blocking code (`Thread.sleep`, JDBC, `block()`) on an event-loop thread: one blocked thread starves every connection it was multiplexing.
+
+The hard part isn't the syntax, it's the discipline. The stack is "reactive all the way down" or it isn't reactive at all: WebFlux needs R2DBC (not JDBC/JPA), reactive Spring Security (Context, not `ThreadLocal`), and reactive HTTP clients (`WebClient`). Mix in one blocking call and you lose the entire benefit while keeping all the complexity.
+
+<Callout kind="tip" title="The interview hook">
+Lead with *why*: "Reactive trades thread-per-request for a small event loop plus backpressure, so I get high concurrency under I/O-bound load with bounded memory. The cost is that everything in the call chain must be non-blocking and the debugging story is harder." Then be honest about virtual threads changing that calculus — interviewers love a candidate who knows when *not* to reach for reactive.
+</Callout>
+
+The questions below cover the Reactive Streams contract, Mono vs Flux, backpressure, hot vs cold publishers, the core operators, WebFlux vs MVC, reactive security, R2DBC vs JDBC, and whether Loom makes the whole thing optional.

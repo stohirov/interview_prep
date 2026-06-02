@@ -1,0 +1,56 @@
+**`@EnableAsync` is the switch that makes `@Async` real — it registers the post-processor that wraps `@Async` beans in a proxy — and because it's proxy-based, the self-invocation trap is identical to `@Transactional`: calling an `@Async` method from *within the same class* runs it synchronously on the caller's thread.** No proxy is crossed, so no async dispatch happens.
+
+## What `@EnableAsync` does
+
+Put it on a `@Configuration` class (Boot enables it for you when appropriate, but it's good to be explicit):
+
+```java
+@Configuration
+@EnableAsync
+public class AsyncConfig { }
+```
+
+It imports `AsyncAnnotationBeanPostProcessor`, which scans beans for `@Async` and replaces each with a proxy that intercepts calls and submits them to the `TaskExecutor`. Without `@EnableAsync`, `@Async` is just a no-op annotation — the method runs inline.
+
+## The self-invocation problem
+
+```java
+@Service
+public class OrderService {
+
+    public void process(Order o) {
+        validate(o);
+        audit(o);          // BUG: runs on THIS thread, not async
+    }
+
+    @Async
+    public void audit(Order o) { ... }
+}
+```
+
+`this.audit(o)` calls the **raw object**, not the proxy. The proxy only intercepts calls that arrive from *outside* the bean (e.g. a controller calling `orderService.audit(...)`). An internal `this.` call bypasses it entirely, so `@Async` (and `@Transactional`, `@Cacheable`, etc.) silently does nothing.
+
+## Fixes
+
+1. **Move the async method to another bean** and inject it — the cleanest fix. The cross-bean call goes through that bean's proxy.
+
+```java
+@Service
+public class OrderService {
+    private final AuditService audit;            // separate bean
+    public void process(Order o) { validate(o); audit.record(o); }  // proxied → async
+}
+```
+
+2. **Self-inject the proxy** and call through it (works but smells):
+
+```java
+@Autowired private OrderService self;
+public void process(Order o) { self.audit(o); }   // crosses the proxy
+```
+
+<Callout kind="warn" title="Same root cause everywhere">
+Self-invocation defeating the proxy is *the* recurring Spring AOP gotcha — it breaks `@Async`, `@Transactional`, `@Cacheable`, `@Retryable` alike. The mechanism is always: `this.method()` targets the unwrapped object, so no advice runs.
+</Callout>
+
+<ProbeNote>The interviewer is connecting two things: that `@EnableAsync` registers the proxying post-processor, and that proxy-based interception means *internal* calls skip the advice. Strong answers state the fix (extract to a separate bean) and note it's the same trap as `@Transactional`.</ProbeNote>

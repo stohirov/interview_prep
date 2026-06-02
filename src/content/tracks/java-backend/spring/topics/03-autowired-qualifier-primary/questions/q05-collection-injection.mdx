@@ -1,0 +1,53 @@
+**When you inject `List<T>` or `Map<String, T>`, Spring gives you *every* bean of type `T` — this is the intended way to collect all implementations of an interface, not an ambiguity error.** It's the basis of every plugin/strategy registry pattern in Spring.
+
+## `List<T>` — all beans, ordered
+
+```java
+public interface Validator { void validate(Order o); }
+
+@Component class AmountValidator  implements Validator { ... }
+@Component class AddressValidator implements Validator { ... }
+
+@Service
+class OrderService {
+    private final List<Validator> validators;
+    OrderService(List<Validator> validators) { this.validators = validators; }
+
+    void check(Order o) { validators.forEach(v -> v.validate(o)); }
+}
+```
+
+Spring injects all matching beans. Note this is *not* `NoUniqueBeanDefinitionException` territory — asking for a collection is unambiguous by definition.
+
+## Controlling order
+
+Collection order is **not** guaranteed by registration; control it with `@Order` or by implementing `Ordered`:
+
+```java
+@Component @Order(1) class AmountValidator  implements Validator { ... }
+@Component @Order(2) class AddressValidator implements Validator { ... }
+```
+
+Lower values come first. Without `@Order`, don't rely on the order.
+
+## `Map<String, T>` — keyed by bean name
+
+```java
+@Service
+class PaymentRouter {
+    private final Map<String, PaymentGateway> gateways;
+    PaymentRouter(Map<String, PaymentGateway> gateways) { this.gateways = gateways; }
+
+    void pay(String name, Order o) { gateways.get(name).charge(o); }
+}
+```
+
+The `String` keys are the **bean names** (`stripe`, `paypal`, …). This is perfect for "dispatch by a config value" routing without a `switch` statement. The key type must be `String` — that's the only supported map key.
+
+## Edge cases worth naming
+
+- **Empty collection:** if *no* beans of the type exist, you get an empty `List`/`Map`, not `null` and not an error. (Pre-4.3 behavior differed; modern Spring injects empty.)
+- **`@Primary` is ignored** for collection injection — you're collecting all, so there's no "default" to pick.
+- **`ObjectProvider<T>`** also exposes `.stream()` / `.orderedStream()` for the same effect lazily, which is handy when you want the beans resolved on demand.
+
+<ProbeNote>The interviewer checks two things: that collection injection grabs *all* beans (not an error), and that ordering needs `@Order`/`Ordered` — registration order is not stable. Bonus points for "`Map<String, T>` is keyed by bean name" and the strategy-registry use case.</ProbeNote>

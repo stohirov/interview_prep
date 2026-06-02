@@ -1,0 +1,49 @@
+**The persistence context is the `EntityManager`'s working set of entities for one transaction — it's the *first-level cache*, the home of dirty checking, and the thing that makes "load, mutate, no save()" work.** A *managed* entity is one currently tracked by this context.
+
+## What it is
+
+Each `EntityManager` (one per transaction, in the typical Spring setup) holds a persistence context: a map from entity identity (`type` + PK) to the entity instance. It is the **first-level cache** — and it's always on, per transaction, not optional like the second-level cache.
+
+```java
+@Transactional
+void demo(Long id) {
+    User a = repo.findById(id).orElseThrow();  // SELECT → cached in context
+    User b = repo.findById(id).orElseThrow();  // NO SELECT → returned from context
+    System.out.println(a == b);                // true — same instance (identity guarantee)
+}
+```
+
+Within one persistence context, fetching the same PK twice returns the **same object** — no second SELECT, guaranteed identity.
+
+## Entity states
+
+```text
+NEW (transient)  not associated with any context, no PK persisted
+MANAGED          tracked by the context; changes are auto-persisted at flush
+DETACHED         was managed, but the context closed or was cleared
+REMOVED          marked for deletion; row deleted at flush
+```
+
+## What "managed" buys you: dirty checking
+
+This is the headline feature. A managed entity's loaded state is snapshotted; at **flush** (typically before a query, and at commit) Hibernate compares current vs snapshot and issues UPDATEs for what changed — **no `save()` call needed**.
+
+```java
+@Transactional
+void rename(Long id, String name) {
+    User u = repo.findById(id).orElseThrow();  // managed
+    u.setName(name);                           // just mutate it
+}   // commit → flush → automatic UPDATE
+```
+
+That same mechanism is why mutating a **detached** entity does nothing until you `merge` it back.
+
+## Flush vs commit
+
+`flush()` pushes pending SQL to the DB but keeps the transaction open; commit flushes then commits. Hibernate auto-flushes before queries (so your unsaved changes are visible to the query) and at commit. The context lives for the length of the transaction and is **cleared** when it ends — which is exactly why touching a lazy field afterwards throws `LazyInitializationException`.
+
+<Callout kind="warn" title="A big context is a memory and flush cost">
+Loading thousands of entities into one context bloats memory and makes every flush slower (dirty checking scans them all). For batch jobs, periodically `entityManager.flush()` then `clear()`, or use stateless sessions.
+</Callout>
+
+<ProbeNote>Nail these: persistence context = **first-level cache**, scoped to the transaction, gives **identity** (same PK → same instance, no re-SELECT) and **dirty checking** (mutate a managed entity, auto-UPDATE at flush — no `save()`). Name the four states and that the context clears at transaction end (→ `LazyInitializationException`).</ProbeNote>

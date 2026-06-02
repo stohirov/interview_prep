@@ -1,0 +1,27 @@
+**PostgreSQL does not promote a standby automatically — failover is "detect the primary is dead, promote a standby, and redirect clients," and you need external tooling because doing all three safely is hard.** Core PostgreSQL gives you the *mechanism* (`pg_promote()` / `pg_ctl promote` turns a standby into a primary); the tools provide the *orchestration*.
+
+## The three jobs of failover
+
+1. **Detection** — reliably decide the primary is actually down, not just briefly unreachable.
+2. **Promotion** — pick a standby (ideally the most caught-up one, by LSN) and promote it to primary.
+3. **Redirection** — point the application at the new primary, and reconfigure the remaining standbys to follow it.
+
+The dangerous failure mode is **split-brain**: two nodes both believing they're primary, accepting conflicting writes. Preventing it requires consensus and **fencing** (ensuring the old primary can't keep taking writes).
+
+## The tools
+
+**Patroni** — the modern de-facto standard. It's a control agent on each node that stores cluster state in a **distributed consensus store** (etcd, Consul, or ZooKeeper). Leader election runs through that store, so only one node can hold the leader lock — this is what structurally prevents split-brain. Patroni handles automatic failover, and is typically paired with **HAProxy** (or a similar proxy) so clients connect to one address that always routes to the current primary.
+
+**repmgr** — an older, lighter toolkit. `repmgrd` daemons monitor nodes and can do automatic failover, but it lacks a built-in distributed consensus store, so split-brain protection leans on **witness nodes** and careful fencing scripts. Simpler to grasp; more manual care to operate safely.
+
+**pg_auto_failover** — a Microsoft-originated option using a dedicated **monitor** node to coordinate failover between a primary and secondary. Lighter-weight than Patroni for smaller topologies.
+
+## Why client redirection is the underrated part
+
+Promoting a standby is useless if the app keeps connecting to the dead primary. Common patterns: a proxy in front (**HAProxy/PgBouncer**) that always points at the leader, a **virtual IP** that moves with the primary, or multi-host connection strings (`host=a,b&target_session_attrs=read-write`) so the driver finds the writable node itself.
+
+<Callout kind="warn" title="Split-brain is the failure that loses data">
+The reason serious setups use Patroni is its consensus store: a node can only be primary if it holds the distributed leader lock. Without that — or without fencing the old primary — a network partition can leave two primaries accepting writes, and reconciling divergent data afterward is often impossible.
+</Callout>
+
+<ProbeNote>The structured answer names the three jobs (detect, promote, redirect) and the **split-brain** danger. Knowing that Patroni relies on a consensus store (etcd/Consul) for leader election — and that client redirection (HAProxy / VIP / multi-host connstring) is a separate problem from promotion — marks a candidate who has actually operated HA Postgres.</ProbeNote>

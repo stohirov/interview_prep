@@ -1,0 +1,32 @@
+**ACID is the four-letter contract a transaction makes: Atomicity, Consistency, Isolation, Durability.** Each names a different failure it protects you from, and a strong answer ties each property to a concrete mechanism rather than reciting definitions.
+
+## Atomicity — all or nothing
+
+A transaction's statements either *all* take effect or *none* do. If anything fails — a constraint violation, a crash, an explicit `ROLLBACK` — the partial work is undone, leaving no half-applied state.
+
+```sql
+BEGIN;
+UPDATE accounts SET balance = balance - 100 WHERE id = 1;
+UPDATE accounts SET balance = balance + 100 WHERE id = 2;
+COMMIT;   -- if the second UPDATE fails, the first is rolled back too
+```
+
+PostgreSQL achieves this with the **write-ahead log (WAL)** and multi-versioning: uncommitted changes are visible only to their own transaction until `COMMIT`.
+
+## Consistency — constraints hold across the boundary
+
+A transaction moves the database from one valid state to another. Every `PRIMARY KEY`, `FOREIGN KEY`, `CHECK`, `NOT NULL`, and `UNIQUE` constraint that held before must hold after. This is partly the *database's* job (it enforces declared constraints) and partly the *application's* (it must encode business invariants as constraints or logic). It is the least "mechanical" of the four.
+
+## Isolation — concurrent transactions don't corrupt each other
+
+Concurrent transactions behave as if they ran in some serial order — to a degree controlled by the **isolation level**. This is the property with knobs: Read Committed, Repeatable Read, and Serializable trade isolation strength for concurrency. PostgreSQL implements it with **MVCC**, so readers and writers don't block each other.
+
+## Durability — committed means committed
+
+Once `COMMIT` returns, the change survives a crash, power loss, or OS panic. PostgreSQL flushes the **WAL** to disk (an `fsync`) before acknowledging the commit, so the change can be replayed during crash recovery even if the data pages themselves weren't yet written.
+
+<Callout kind="info" title="The classic example">
+The bank transfer touches all four: Atomicity (both legs or neither), Consistency (total balance unchanged — a `CHECK` or invariant), Isolation (a concurrent reader doesn't see one leg), Durability (the transfer survives a crash). It's the canonical illustration for a reason.
+</Callout>
+
+<ProbeNote>Don't just expand the acronym — pair each letter with a mechanism: Atomicity/WAL+rollback, Consistency/constraints, Isolation/MVCC+isolation levels, Durability/WAL fsync. Knowing that *Consistency* is shared between DB and application is a senior-level distinction.</ProbeNote>

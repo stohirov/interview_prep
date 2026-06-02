@@ -1,0 +1,40 @@
+**PostgreSQL implements Serializable with SSI — Serializable Snapshot Isolation — an *optimistic* technique that detects non-serializable interleavings and aborts a transaction rather than locking to prevent them.** It is not two-phase locking; understanding that distinction is the heart of this question.
+
+## The traditional way vs. SSI
+
+Classic Serializable uses **strict two-phase locking (S2PL)**: readers take shared locks, writers take exclusive locks, everyone blocks until commit. Correct, but readers block writers — exactly what MVCC was designed to avoid.
+
+PostgreSQL keeps MVCC's non-blocking reads and layers SSI on top. SSI starts from Repeatable Read's transaction-wide snapshot and adds **dependency tracking** to catch the cases a snapshot alone can't (serialization anomalies).
+
+## How SSI works
+
+It monitors **read/write dependencies** between concurrent transactions using lightweight **predicate locks** (SIRead locks) that record *what each transaction read*, not just what it wrote. These locks don't block anyone — they're bookkeeping.
+
+The theory: a non-serializable execution always contains a transaction with both an **incoming** and an **outgoing** read/write conflict edge — a "dangerous structure" (two consecutive `rw` edges, a pivot). When SSI detects such a pattern among in-flight or recently-committed transactions, it knows the schedule *might* not be serializable and aborts one transaction with:
+
+```text
+ERROR: could not serialize access due to read/write dependencies
+       among transactions
+SQLSTATE: 40001
+```
+
+```sql
+BEGIN ISOLATION LEVEL SERIALIZABLE;
+SELECT sum(amount) FROM transactions WHERE account = 1;
+INSERT INTO transactions (account, amount) VALUES (1, -100);
+COMMIT;   -- if a concurrent txn made this non-serializable, fails 40001
+```
+
+## Why "optimistic" matters
+
+SSI assumes conflicts are rare and lets transactions run unobstructed, paying the cost only when a real conflict is detected (an abort). This beats locking under low contention but degrades under high contention, where many transactions abort and retry. SSI can also produce **false positives** — it aborts on a *potential* anomaly that wouldn't have actually materialized — because it errs toward safety.
+
+## The non-negotiable: retry
+
+Because any Serializable transaction can fail at `COMMIT` with `40001`, the application **must** catch that SQLSTATE and re-run the whole transaction. Without a retry loop, Serializable surfaces as random failures.
+
+<Callout kind="tip" title="Make all transactions SERIALIZABLE or none">
+SSI's guarantees only hold among transactions that are themselves Serializable. A Read Committed transaction running alongside can still create the anomaly you were trying to prevent. For a workload that relies on Serializable correctness, run *every* participating transaction at that level.
+</Callout>
+
+<ProbeNote>Lead with "SSI is optimistic — it detects and aborts, it doesn't lock-to-prevent like S2PL." Mention predicate/SIRead locks, the `40001` retry requirement, possible false positives, and that mixing isolation levels undermines the guarantee. That set of points marks a genuinely strong answer.</ProbeNote>

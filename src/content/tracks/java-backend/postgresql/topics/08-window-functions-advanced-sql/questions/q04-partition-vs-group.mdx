@@ -1,0 +1,53 @@
+**`GROUP BY` collapses each group into one row; `PARTITION BY` divides rows into groups for a window function but keeps every row.** They sound similar and even produce the same per-group numbers — the difference is the *shape* of the result.
+
+## GROUP BY — one row per group
+
+```sql
+SELECT department, AVG(salary) AS avg_salary
+FROM employees
+GROUP BY department;
+```
+
+Output: one row per department. The individual employees are gone. Anything in the `SELECT` must be grouped or aggregated.
+
+## PARTITION BY — every row kept
+
+```sql
+SELECT
+  employee_id,
+  department,
+  salary,
+  AVG(salary) OVER (PARTITION BY department) AS dept_avg
+FROM employees;
+```
+
+Output: one row per **employee**, each annotated with its department's average. You keep `employee_id` and `salary` *and* get the group-level number on the same line — exactly what `GROUP BY` cannot do.
+
+## The "compare row to its group" pattern
+
+This is where `PARTITION BY` shines and `GROUP BY` forces a join:
+
+```sql
+SELECT employee_id, salary, dept_avg, salary - dept_avg AS diff_from_avg
+FROM (
+  SELECT employee_id, salary,
+    AVG(salary) OVER (PARTITION BY department) AS dept_avg
+  FROM employees
+) t
+WHERE salary > dept_avg;   -- everyone paid above their dept average
+```
+
+With `GROUP BY` you'd compute averages separately and join back; the window does it in one scan.
+
+## Key differences
+
+<Callout kind="info" title="Side by side">
+- **Result shape:** `GROUP BY` → fewer rows. `PARTITION BY` → same rows.
+- **Where it lives:** `GROUP BY` is a clause of the query. `PARTITION BY` lives *inside* an `OVER (...)`.
+- **Combine them:** you can use both — a window function runs on rows already produced by `GROUP BY`. The `PARTITION BY` then groups *those* aggregated rows.
+- **Filtering:** filter `GROUP BY` results with `HAVING`; filter window results in an outer query/CTE (windows run after `HAVING`).
+</Callout>
+
+A subtle but important point: `PARTITION BY` is **optional**. `OVER ()` with no partition treats the entire result set as one window — `SUM(amount) OVER ()` is the grand total on every row.
+
+<ProbeNote>The crisp answer: GROUP BY reduces cardinality, PARTITION BY does not. The interviewer is checking you understand window functions don't collapse rows and that the "value vs its group average" comparison is the canonical reason to choose PARTITION BY. Bonus: they can be combined, since windows execute on post-GROUP BY rows.</ProbeNote>

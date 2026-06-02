@@ -1,0 +1,39 @@
+**A Hash index stores the *hash* of the indexed value, so it answers equality (`=`) only — no ranges, no ordering, no sorting.** That narrow scope is the whole story: it can be a touch smaller and faster than B-tree for pure equality on large or long-valued keys, but it gives up everything B-tree throws in for free.
+
+## How it works
+
+PostgreSQL hashes the key into buckets; a lookup hashes the search value, jumps to the bucket, and checks the entries there. There's no tree to descend and no order, which is precisely why it can't do `<`, `>`, `BETWEEN`, or `ORDER BY`.
+
+```sql
+CREATE INDEX ON sessions USING hash (token);
+-- helps:    WHERE token = 'abc123...'
+-- useless:  WHERE token LIKE 'abc%' ,  ORDER BY token
+```
+
+## Why it was rarely used before PostgreSQL 10
+
+The killer flaw: **before PG 10, Hash index changes were not written to the WAL.** Consequences:
+
+- They were **not crash-safe** — a crash could leave the index corrupt, requiring a manual `REINDEX`.
+- They were **not replicated** to standbys, so they were unusable in any replicated/HA setup.
+
+The docs themselves warned against them, so people simply used B-tree for equality too — it's equally good at `=` and also handles everything else. Hash indexes were effectively a trap.
+
+<Callout kind="info" title="Fixed in PostgreSQL 10">
+Since PG 10, Hash indexes are **WAL-logged**, making them crash-safe and replication-safe. They are now a legitimate option — but still a niche one.
+</Callout>
+
+## When to actually consider it (PG 10+)
+
+- **Equality only**, with no range or sort needs on that column.
+- A **large, long key** (e.g., a long text token, a URL) where the fixed-size hash makes the index meaningfully smaller and equality probes cheaper than carrying the full value in a B-tree.
+
+## The honest caveat
+
+For most workloads B-tree is *still* the default recommendation even for equality, because:
+
+- It also serves ranges and ordering, so one index covers more queries.
+- It supports **unique** constraints and **multicolumn** keys; Hash indexes are single-column and can't enforce uniqueness.
+- The B-tree-vs-Hash gap is small, so the extra flexibility usually wins.
+
+<ProbeNote>The probe is twofold: do you know Hash is *equality-only*, and do you know the historical reason it was avoided — *not WAL-logged, hence not crash-safe or replicated, fixed in PG 10*. Saying "I'd usually still pick B-tree even for equality" shows mature judgment.</ProbeNote>

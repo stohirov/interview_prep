@@ -1,0 +1,49 @@
+**The planner uses an index only when it estimates the index is *cheaper* than the alternative — so "the index exists" and "the index is used" are different facts.** Most "why isn't my index used?!" cases are the planner being correct, or being misled by something fixable. Here are the recurring causes.
+
+## 1. Low selectivity — the predicate matches too many rows
+
+If a query returns a large fraction of the table, an Index Scan means that many *random* heap fetches, which is more expensive than one sequential pass. The planner correctly prefers a Seq Scan. The rough flip point is a single-digit percentage of rows, tuned by `random_page_cost` (default 4.0, often too high for SSDs).
+
+## 2. The table is small
+
+A few hundred rows live in a handful of pages; scanning them sequentially beats descending an index. The planner ignores the index on purpose, and that's fine.
+
+## 3. Stale or missing statistics
+
+The planner costs plans from `ANALYZE` statistics. After a bulk load it may think a 10M-row table has 100 rows and mis-cost everything.
+
+```sql
+ANALYZE orders;                      -- refresh stats
+ALTER TABLE orders ALTER COLUMN status SET STATISTICS 1000;  -- finer histogram
+```
+
+## 4. Non-sargable predicates
+
+Wrapping the column in a function, casting it, or applying arithmetic hides it from a plain index:
+
+```sql
+WHERE lower(email) = 'a@b.com'        -- index on email unusable
+WHERE created_at::date = '2024-01-01' -- cast defeats the index
+WHERE price * 1.2 > 100               -- expression on the column
+WHERE phone LIKE '%5555'              -- leading wildcard can't seek a B-tree
+```
+
+Fix with an **expression index** (`CREATE INDEX ON t (lower(email))`) or by rewriting as a sargable range (`created_at >= '2024-01-01' AND created_at < '2024-01-02'`).
+
+## 5. Type mismatch
+
+Comparing a column to a differently-typed value can force an implicit cast on the *column* and skip the index — e.g. a `text` column compared to an integer literal.
+
+## 6. Left-prefix / wrong column order
+
+A query on a composite index that skips the leading column (`WHERE b = …` on an index `(a, b)`) can't seek it.
+
+## Confirm before you "fix"
+
+Run `EXPLAIN (ANALYZE, BUFFERS)` and compare estimated vs actual rows. If they agree and the Seq Scan is genuinely cheap, leave it. If the estimate is wildly off, fix the *estimate* — don't reach for `SET enable_seqscan = off`, which is a diagnostic toy, not a production fix.
+
+<Callout kind="warn" title="random_page_cost on SSDs">
+The default `random_page_cost = 4.0` assumes spinning disks and makes index scans look too expensive. On SSD/cloud storage, lowering it toward ~1.1 often restores correct index usage and is one of the highest-leverage tuning changes.
+</Callout>
+
+<ProbeNote>The interviewer wants you to NOT panic and to enumerate causes: **selectivity** (the main one, tied to `random_page_cost`), small tables, **stale stats**, **non-sargable predicates**, type mismatch, and left-prefix misuse. Saying "I'd `EXPLAIN ANALYZE` and check estimated-vs-actual rows before touching anything" signals methodical debugging.</ProbeNote>

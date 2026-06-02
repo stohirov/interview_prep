@@ -1,0 +1,42 @@
+**Propagation answers one question: when a `@Transactional` method is called, should it join the caller's transaction, start its own, or run without one?** `REQUIRED` is the default and covers ~95% of cases; the others exist for specific needs, and interviewers want to know you can reach for the right one.
+
+## The seven values
+
+```text
+REQUIRED       join the current tx, or start one if none (DEFAULT)
+REQUIRES_NEW   always start a NEW tx; suspend the caller's until this commits/rolls back
+NESTED         run in a savepoint inside the current tx (partial rollback)
+SUPPORTS       join a tx if one exists; otherwise run non-transactionally
+NOT_SUPPORTED  suspend any current tx; run non-transactionally
+MANDATORY      must run in an existing tx; throw if there is none
+NEVER          must NOT run in a tx; throw if one exists
+```
+
+## The three that matter most
+
+**REQUIRED** — the default. Inner and outer share one physical transaction; one rollback rolls back everything. If `inner()` throws and is caught by `outer()`, the whole thing is still doomed — the transaction is marked **rollback-only**.
+
+**REQUIRES_NEW** — suspends the caller and runs in an *independent* transaction with its own commit/rollback. The classic use is **audit logging**: you want the log row to commit even if the business transaction rolls back.
+
+```java
+@Transactional                                  // outer
+public void process(Order o) {
+    audit.record("started", o);                 // REQUIRES_NEW → commits independently
+    risky(o);                                    // if this throws, outer rolls back,
+}                                                //   but the audit row survives
+
+@Transactional(propagation = REQUIRES_NEW)
+public void record(...) { ... }
+```
+
+**NESTED** — uses a JDBC **savepoint** inside the outer transaction. Rolling back the inner part returns to the savepoint without killing the whole transaction; but if the *outer* rolls back, the nested work goes too (unlike `REQUIRES_NEW`, which already committed). Requires a savepoint-capable JDBC driver.
+
+## The self-invocation gotcha
+
+Spring's `@Transactional` is proxy-based AOP. Calling `this.inner()` from `outer()` in the **same bean** bypasses the proxy entirely — propagation (and even the annotation) is **ignored**. The advice only fires on calls that go *through* the proxy, i.e. from another bean. This catches everyone at least once.
+
+<Callout kind="warn" title="REQUIRES_NEW costs a connection">
+Suspending the outer transaction and opening a new one holds **two** DB connections simultaneously. Overuse can deadlock or exhaust the pool — reserve it for genuinely independent work like auditing.
+</Callout>
+
+<ProbeNote>Know all seven, but be fluent on the big three: `REQUIRED` (default, share the tx), `REQUIRES_NEW` (independent tx — audit logging), `NESTED` (savepoint, partial rollback). Must-mention gotchas: **self-invocation bypasses the proxy**, a caught exception still marks `REQUIRED` rollback-only, and `REQUIRES_NEW` holds two connections.</ProbeNote>

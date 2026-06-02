@@ -1,0 +1,35 @@
+**This is a trick question. PostgreSQL famously ships *no* query hints like Oracle's `/*+ INDEX(...) */` or MySQL's `FORCE INDEX`, and that omission is a deliberate, documented design philosophy.** Answering "you add a hint" fails immediately; the expected answer is *why there are none* and *what you do instead*.
+
+## The rationale
+
+The core PostgreSQL developers argue that hints are a way to **paper over a planner or statistics bug** rather than fix it. A hint freezes one decision at one moment in time; six months later the data distribution shifts, the hint is now wrong, and it silently forces a bad plan with no feedback loop. By refusing hints, the project forces the real problem — usually a bad estimate — to be surfaced and fixed, which improves the planner for everyone. The official FAQ position: hints hide the underlying issue and accumulate as un-auditable technical debt.
+
+## What you do instead
+
+**1. Fix the statistics** — the actual cause most of the time.
+- `ANALYZE` the table; raise `default_statistics_target` / per-column `SET STATISTICS` for skew.
+- `CREATE STATISTICS` for correlated columns the planner assumes are independent.
+
+**2. Make predicates sargable** — expression indexes, range rewrites instead of `function(col)`.
+
+**3. Tune cost constants** — `random_page_cost` (lower on SSDs), `effective_cache_size`, `work_mem`. These steer the planner globally without lying about any one query.
+
+**4. Session-level `enable_*` toggles — for diagnosis, not production.**
+
+```sql
+SET enable_nestloop = off;   -- prove a hash join would be faster, then go fix WHY
+```
+
+These are blunt on/off switches (`enable_seqscan`, `enable_hashjoin`, …), explicitly intended as debugging tools to confirm a hypothesis, not as permanent settings.
+
+**5. Rewrite the query** — sometimes a CTE with `MATERIALIZED`, a `LATERAL`, or reordering eliminates the planner's bad choice structurally.
+
+## The escape hatch nobody recommends
+
+The third-party extension **`pg_hint_plan`** does add Oracle-style hint comments. Mentioning it shows breadth, but immediately add that it's a last resort: core Postgres rejects it precisely because it re-introduces the staleness problem above.
+
+<Callout kind="info" title="The one-liner">
+"PostgreSQL has no hints by design — the philosophy is that a hint hides a statistics or planner problem instead of fixing it. So I fix the estimate (ANALYZE / extended statistics), make the predicate sargable, or adjust cost constants; the `enable_*` flags are for diagnosis only."
+</Callout>
+
+<ProbeNote>This is a culture/depth probe. They want you to know hints are *intentionally* absent, articulate the "hints hide the real bug" rationale, and pivot to statistics, sargability, and cost-constant tuning. Knowing `enable_*` is diagnostic-only — and that `pg_hint_plan` exists but is discouraged — is the senior finish.</ProbeNote>

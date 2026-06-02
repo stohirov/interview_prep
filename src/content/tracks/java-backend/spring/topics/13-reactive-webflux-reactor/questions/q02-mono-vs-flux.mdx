@@ -1,0 +1,37 @@
+**`Mono<T>` and `Flux<T>` are Reactor's two `Publisher` implementations, and the only difference is cardinality: `Mono` emits 0 or 1 element then completes; `Flux` emits 0 to N (possibly infinite) elements then completes.** Choosing the right one is a typing decision that documents intent — a method returning `Mono<User>` promises *at most one* user.
+
+## When to use which
+
+Use **`Mono<T>`** for a single asynchronous result: fetch one entity by id, an HTTP response, a `save()` that returns the saved row, or a side-effecting call with no payload (`Mono<Void>`). Use **`Flux<T>`** for a stream: query results, server-sent events, a Kafka topic, a paginated feed.
+
+```java
+Mono<User>  user   = userRepo.findById(id);      // 0..1
+Flux<Order> orders = orderRepo.findByUser(id);   // 0..N
+Mono<Void>  done   = mailer.send(message);        // completion signal only
+```
+
+## Converting between them
+
+This is the part interviewers probe, because it's where people get stuck.
+
+```java
+// Flux -> Mono
+Mono<Long>      count = orders.count();          // a single aggregate
+Mono<Order>     first = orders.next();           // first element (or empty)
+Mono<List<Order>> all = orders.collectList();    // BEWARE: buffers everything
+
+// Mono -> Flux
+Flux<Order> many = user.flatMapMany(u -> orderRepo.findByUser(u.id()));
+```
+
+`flatMapMany` is the canonical "one input, many outputs" bridge. Note `collectList()` defeats streaming — it materialises the whole stream into memory, so avoid it on large or unbounded sources.
+
+## Both are lazy and reusable
+
+Neither does anything until subscribed. The same `Mono`/`Flux` can be subscribed multiple times; whether each subscription re-runs the work depends on whether the source is cold or hot (covered separately). A `Mono<T>` is *not* a `CompletableFuture<T>` — the future has already started running, while the `Mono` is a deferred recipe.
+
+## A subtle empty-vs-error point
+
+`Mono.empty()` completes with *no* value (`onComplete` with no `onNext`) — distinct from an error. Downstream you handle "nothing found" with `switchIfEmpty(...)` or `defaultIfEmpty(...)`, not with error handling. Conflating empty and error is a common bug.
+
+<ProbeNote>Nail cardinality (0..1 vs 0..N), name `flatMapMany` and `collectList`/`next` as the bridges, and flag that `Mono` is lazy unlike a `CompletableFuture`. Bonus: distinguishing `Mono.empty()` from an error signal.</ProbeNote>

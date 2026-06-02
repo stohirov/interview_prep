@@ -1,0 +1,40 @@
+**Boot 3 / Framework 6 / Security 6 removed several long-deprecated APIs — the headline ones are `WebSecurityConfigurerAdapter` (gone) and `WebMvcConfigurerAdapter` (replaced by the `WebMvcConfigurer` interface) — while `RestTemplate` is *not* removed, just in maintenance mode.** Knowing precisely which is which separates a real upgrade story from a memorized list.
+
+## `WebSecurityConfigurerAdapter` — removed in Security 6
+
+Spring Security dropped the adapter-extension model entirely. You no longer subclass `WebSecurityConfigurerAdapter` and override `configure(...)`; you declare a **`SecurityFilterChain` bean** (and `WebSecurityCustomizer`/`AuthenticationManager` beans as needed):
+
+```java
+@Bean
+SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    http
+        .authorizeHttpRequests(a -> a
+            .requestMatchers("/public/**").permitAll()
+            .anyRequest().authenticated())
+        .oauth2ResourceServer(o -> o.jwt(Customizer.withDefaults()));
+    return http.build();
+}
+```
+
+This component-based style was introduced in Security 5.7 and is now the *only* option — code still on the adapter won't compile against Security 6.
+
+## `WebMvcConfigurerAdapter` — long deprecated, now gone
+
+This one is older. Because Java 8 added default methods, the empty-override adapter became unnecessary: you now implement the **`WebMvcConfigurer`** interface directly and override only the methods you need.
+
+```java
+@Configuration
+class WebConfig implements WebMvcConfigurer {        // not ...Adapter
+    @Override public void addCorsMappings(CorsRegistry r) { /* ... */ }
+}
+```
+
+## `RestTemplate` — maintenance mode, NOT deprecated
+
+This is the trap. `RestTemplate` is **not** removed or formally `@Deprecated`; it's in maintenance mode — supported, stable, no new features. New code should prefer `RestClient` (synchronous) or `WebClient` (reactive), but existing `RestTemplate` code is fine to keep. Saying "RestTemplate is deprecated" is the common wrong answer.
+
+<Callout kind="warn" title="State each status precisely">
+Three different statuses, don't conflate them: `WebSecurityConfigurerAdapter` = **removed** (Security 6); `WebMvcConfigurerAdapter` = **deprecated long ago, now removed** in favor of the interface; `RestTemplate` = **maintenance mode, not deprecated**. Mixing these up signals you've read a changelog but not done the migration.
+</Callout>
+
+<ProbeNote>The discriminator is precision. Interviewers want: replace `WebSecurityConfigurerAdapter` with a `SecurityFilterChain` bean (component-based config), implement `WebMvcConfigurer` instead of the removed adapter, and correctly state that `RestTemplate` is *maintenance mode, not deprecated* — with `RestClient`/`WebClient` as the recommended successors.</ProbeNote>

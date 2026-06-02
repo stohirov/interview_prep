@@ -1,0 +1,44 @@
+**Indexes aren't free — every one is a standing tax paid on writes, on disk, and on every planning cycle.** They speed up reads by maintaining a second sorted copy of the data, and that copy has to be kept correct, stored, and considered. The senior framing: an index is a write-cost liability you justify with a concrete read pattern, not something you sprinkle on "just in case."
+
+## 1. Write amplification
+
+This is the big one. Every `INSERT`, and every `UPDATE` that changes an indexed column, must update **every applicable index** as well as the table.
+
+- A table with 6 indexes turns one logical insert into 7 structural writes.
+- Each index update is its own WAL traffic, its own page dirtying, its own potential page split.
+
+```sql
+-- inserting one order updates the heap PLUS all of:
+CREATE INDEX ON orders (customer_id);
+CREATE INDEX ON orders (created_at);
+CREATE INDEX ON orders (status);
+```
+
+<Callout kind="tip" title="HOT updates dodge some of this">
+A **Heap-Only Tuple** update — one that changes *no indexed column* and fits on the same page — skips index maintenance entirely. That's a reason not to index columns that churn constantly: keeping a hot column out of every index preserves HOT updates.
+</Callout>
+
+## 2. Storage and cache pressure
+
+An index can rival or exceed the table's own size. That space costs disk, but more importantly it **competes for the buffer cache** — pages spent caching a rarely-used index are pages not caching hot data, so over-indexing can slow the whole system, not just writes.
+
+## 3. Planner overhead
+
+More indexes on a table mean more candidate plans for the optimizer to enumerate and cost on *every* query against it. It's usually small, but on wide tables with many indexes it adds measurable planning latency, especially for short OLTP queries where planning is a real fraction of total time.
+
+## 4. Maintenance overhead
+
+Indexes **bloat** under updates/deletes, eventually needing `REINDEX`. They also need their own statistics and `VACUUM` work. More indexes, more of this.
+
+## The discipline
+
+- Index for **real, measured query patterns**, not hypotheticals.
+- Periodically drop the dead weight — find never-used indexes via `pg_stat_user_indexes` (`idx_scan = 0`).
+- Prefer **one well-ordered composite** over several overlapping single-column indexes.
+
+```sql
+SELECT relname, indexrelname, idx_scan
+FROM pg_stat_user_indexes WHERE idx_scan = 0 ORDER BY relname;
+```
+
+<ProbeNote>A complete answer covers all three axes: **write amplification** (every index updated per write — the headline cost), **storage/cache pressure**, and **planner time**. Bonus signals: HOT updates as the reason to keep churning columns un-indexed, and using `pg_stat_user_indexes.idx_scan = 0` to prune unused indexes.</ProbeNote>

@@ -1,0 +1,52 @@
+**`WebMvcConfigurer` is the supported, additive way to customize Spring MVC — you implement the callbacks you care about and Spring merges your tweaks into the default configuration.** It's the right answer to "how do I change MVC behavior" precisely because it *adds to* the defaults rather than replacing them.
+
+## The shape
+
+Declare a `@Configuration` bean implementing `WebMvcConfigurer` and override only the hooks you need (all have empty default methods):
+
+```java
+@Configuration
+class WebConfig implements WebMvcConfigurer {
+
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(new AuthInterceptor()).addPathPatterns("/api/**");
+    }
+
+    @Override
+    public void addCorsMappings(CorsRegistry registry) {
+        registry.addMapping("/api/**").allowedOrigins("https://app.example.com");
+    }
+
+    @Override
+    public void configureMessageConverters(List<HttpMessageConverter<?>> converters) {
+        converters.add(new MyCustomConverter()); // or extendMessageConverters to keep defaults
+    }
+
+    @Override
+    public void addFormatters(FormatterRegistry registry) {
+        registry.addConverter(new StringToOrderStatusConverter());
+    }
+}
+```
+
+## The common hooks
+
+- `addInterceptors` — register `HandlerInterceptor`s with path patterns.
+- `addCorsMappings` — declarative CORS.
+- `addFormatters` — custom `Converter`/`Formatter` for type conversion in binding.
+- `configureContentNegotiation` — header/parameter strategies (see content negotiation).
+- `configureMessageConverters` / `extendMessageConverters` — replace vs augment converters.
+- `addResourceHandlers` — static resource mapping.
+- `addArgumentResolvers` / `addReturnValueHandlers` — custom method argument/return support.
+- `configureViewResolvers`, `addViewControllers`.
+
+## The crucial distinction: additive vs replacing
+
+Implementing `WebMvcConfigurer` keeps Spring Boot's auto-configured MVC defaults and layers your changes on top. Adding `@EnableWebMvc` **switches off** Boot's MVC auto-configuration and gives you the bare framework defaults — rarely what you want in a Boot app. Likewise, `configureMessageConverters` *replaces* the default converter list while `extendMessageConverters` *appends* to it.
+
+<Callout kind="warn" title="Don't add @EnableWebMvc in Boot">
+In a Spring Boot app, just implement `WebMvcConfigurer` — do **not** add `@EnableWebMvc`. That annotation disables `WebMvcAutoConfiguration`, so you'd lose Jackson setup, default converters, static resources, and error handling, and have to reconfigure them by hand.
+</Callout>
+
+<ProbeNote>The expected answer is "implement `WebMvcConfigurer` to additively customize MVC." The senior tell is knowing that `@EnableWebMvc` disables Boot's auto-config (and so is usually a mistake), and that `extendMessageConverters` preserves defaults where `configureMessageConverters` replaces them.</ProbeNote>

@@ -1,0 +1,18 @@
+Replication exists to solve two related but distinct problems, and conflating them is the most common interview slip: **high availability** (if the primary dies, a standby takes over with minimal downtime and data loss) and **read scaling** (offload read traffic to replicas). Everything in PostgreSQL replication is built on one foundation — the **Write-Ahead Log (WAL)**, the ordered, byte-level stream of every change made to the cluster. A standby is, at its core, a server replaying the primary's WAL.
+
+From that foundation, two families branch out. **Physical replication** ships raw WAL byte-for-byte: the standby is an exact block-level clone of the whole cluster, same major version, read-only. This is the default streaming replication you reach for to build HA. **Logical replication** decodes WAL into row-level change events (INSERT/UPDATE/DELETE) and replays them via SQL on the subscriber — selective (per-table), cross-version, and writable on the other side, at the cost of more overhead and feature limits.
+
+```sql
+-- on the primary: who is connected and how far behind?
+SELECT client_addr, state, sent_lsn, write_lsn, flush_lsn, replay_lsn,
+       write_lag, flush_lag, replay_lag
+FROM pg_stat_replication;
+```
+
+The other axis is **durability**: with **asynchronous** replication the primary commits without waiting for any standby (fast, but a crash can lose the last transactions); with **synchronous** replication (`synchronous_standby_names`) the commit blocks until a standby confirms, trading latency for zero data loss. Layered on top are **replication slots** (guarantee the primary retains WAL a standby still needs), **hot vs warm standby** (readable vs not), and **failover orchestration** (Patroni, repmgr, pg_auto_failover) that promotes a standby and redirects clients when the primary fails.
+
+<Callout kind="tip" title="The interview hook">
+Anchor everything to one sentence: "Replication is just standbys replaying the primary's WAL — physical ships the WAL bytes, logical decodes them into row changes." Then layer the trade-off axes on top: sync vs async (durability vs latency), hot vs warm (readable or not), slots (WAL retention vs disk-fill risk). That structure shows you understand the *mechanism*, not just the feature names.
+</Callout>
+
+The questions below cover physical vs logical, sync vs async, monitoring lag, standby modes, slots, WAL itself, logical pub/sub, failover tooling, and PgBouncer connection pooling.

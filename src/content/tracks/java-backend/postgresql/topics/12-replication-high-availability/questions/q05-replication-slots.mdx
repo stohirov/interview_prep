@@ -1,0 +1,32 @@
+**A replication slot is a server-side bookmark that guarantees the primary keeps the WAL a standby still needs — preventing the primary from recycling WAL the standby hasn't consumed yet.** It solves the "the standby fell behind and the WAL it needed is already gone" problem, but it introduces a sharp double-edged risk.
+
+## The problem it solves
+
+The primary recycles old WAL segments once they're no longer needed for its own crash recovery — it has no inherent knowledge of how far behind a standby is. If a standby disconnects (network blip, maintenance) and stays down long enough, the primary may delete WAL the standby still needs to catch up. The standby then can't resume from streaming and must be **fully rebuilt** from a fresh base backup.
+
+Before slots, the workaround was setting `wal_keep_size` (formerly `wal_keep_segments`) to retain a fixed amount of WAL — but that's a guess: too little and the standby breaks, too much and you waste disk regardless.
+
+## How a slot fixes it
+
+A slot records the **oldest LSN a consumer still requires** and the primary refuses to recycle WAL beyond that point. The standby can disconnect for hours and still resume, because the WAL it needs is guaranteed to be present.
+
+```sql
+-- physical slot for a streaming standby
+SELECT pg_create_physical_replication_slot('standby1_slot');
+-- inspect retention
+SELECT slot_name, slot_type, active, restart_lsn,
+       pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) AS retained
+FROM pg_replication_slots;
+```
+
+The standby references the slot via `primary_slot_name` in its config. There are two kinds: **physical** slots (for streaming standbys) and **logical** slots (for logical replication and CDC tools like Debezium).
+
+## The dangerous flip side
+
+Because a slot *forces* WAL retention, a slot whose consumer has **stalled or been abandoned** will make the primary retain WAL **without bound** — and that fills the primary's disk, which can take the whole database down. This is the most important thing to say.
+
+<Callout kind="danger" title="A stale slot can fill the disk and crash the primary">
+If a standby is decommissioned but its slot is left behind, the primary keeps every WAL segment forever, growing `pg_wal/` until the disk is full and writes fail. Always **drop unused slots** (`pg_drop_replication_slot('name')`), monitor `pg_replication_slots`, and cap retention with `max_slot_wal_keep_size` so a stuck slot is dropped rather than killing the primary.
+</Callout>
+
+<ProbeNote>The complete answer is both halves: a slot guarantees the primary retains WAL a standby needs (so it survives disconnects without a rebuild), **but** an abandoned slot retains WAL unboundedly and can fill the disk and crash the primary. Naming `max_slot_wal_keep_size` as the safety cap is the senior signal.</ProbeNote>

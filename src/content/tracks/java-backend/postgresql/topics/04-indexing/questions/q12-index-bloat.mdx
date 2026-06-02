@@ -1,0 +1,50 @@
+**Index bloat is wasted space inside an index — dead entries and half-empty pages that make the index bigger than the live data warrants, slowing scans and burning cache.** It's a direct consequence of PostgreSQL's MVCC storage model, and the modern fix is a single online command, so the senior signal is knowing the cause, how to *measure* it, and how to fix it without downtime.
+
+## What causes it
+
+Under MVCC, an `UPDATE` writes a **new row version** and a `DELETE` marks the old one dead — the old index entries don't vanish immediately. `VACUUM` later removes dead tuples and *reuses* the freed space, but it doesn't shrink the index file or repack pages. So under churn you accumulate:
+
+- **Dead index entries** waiting on vacuum.
+- **Sparse pages** left half-full after deletions and **page splits** from inserts that never get re-compacted.
+
+Heavy `UPDATE`/`DELETE` workloads, and especially long-running transactions that hold back the xmin horizon so VACUUM *can't* clean up, drive bloat fastest.
+
+## How to measure it
+
+The precise tool is the **`pgstattuple`** extension, specifically `pgstatindex` for B-trees:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pgstattuple;
+
+SELECT * FROM pgstatindex('orders_customer_idx');
+--  avg_leaf_density: ~90% healthy; a low value (e.g. 40%) means heavy bloat
+--  leaf_fragmentation: high → pages out of physical order
+```
+
+For a cheap cluster-wide first pass, check raw sizes and the popular estimating bloat queries, plus spot unused indexes:
+
+```sql
+SELECT indexrelid::regclass, pg_size_pretty(pg_relation_size(indexrelid)), idx_scan
+FROM pg_stat_user_indexes ORDER BY pg_relation_size(indexrelid) DESC;
+```
+
+## How to fix it
+
+`REINDEX` rebuilds the index from scratch, fully compacted. The crucial flag for production is **`CONCURRENTLY`**, which builds a fresh copy and swaps it in *without an `ACCESS EXCLUSIVE` lock* — reads and writes continue:
+
+```sql
+REINDEX INDEX CONCURRENTLY orders_customer_idx;
+REINDEX TABLE CONCURRENTLY orders;   -- all indexes on the table
+```
+
+<Callout kind="warn" title="REINDEX CONCURRENTLY caveats">
+It's slower, needs disk for a full second copy of the index, and **can't run inside a transaction block**. If it's interrupted it may leave an `INVALID` leftover index (`\d` shows it, name ending `_ccnew`) that you then drop manually. Plain `REINDEX` locks the table — only use it in a maintenance window.
+</Callout>
+
+## Prevent it from recurring
+
+- Keep **autovacuum** healthy and tuned (more aggressive on hot tables).
+- Hunt down **long-running transactions** that stall vacuum (`pg_stat_activity`).
+- Drop unused indexes (`idx_scan = 0`) so there's less to bloat.
+
+<ProbeNote>The expected arc: bloat comes from **MVCC dead tuples + sparse pages**, you measure it with **`pgstattuple`/`pgstatindex`** (leaf density), and you fix it online with **`REINDEX ... CONCURRENTLY`**. Naming long-running transactions as a root cause of stalled VACUUM, and the `CONCURRENTLY` caveats (no txn block, invalid leftovers), shows real operational depth.</ProbeNote>

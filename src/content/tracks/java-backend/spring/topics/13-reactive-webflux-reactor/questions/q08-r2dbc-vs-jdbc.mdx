@@ -1,0 +1,30 @@
+**JDBC is a blocking API — every call parks the calling thread until the database answers — which is fatal on a WebFlux event loop. R2DBC (Reactive Relational Database Connectivity) is a from-scratch, non-blocking driver spec whose calls return `Publisher`s, so it fits the reactive stack.** If you're on WebFlux and talking to a relational DB, R2DBC is how you stay non-blocking end-to-end.
+
+## The fundamental difference
+
+JDBC's `ResultSet.next()`, `Connection.commit()`, etc. are synchronous: the thread blocks on socket I/O. There is no non-blocking mode bolted on — the API shape itself is blocking. R2DBC redefines the contract: `connection.execute(...)` returns a `Publisher` of results, the driver uses non-blocking sockets (Netty under the hood for Postgres), and backpressure flows from your `Flux` down to how many rows are fetched.
+
+```java
+// R2DBC via Spring Data
+public interface OrderRepo extends ReactiveCrudRepository<Order, Long> {
+    Flux<Order> findByCustomerId(Long id);   // streams rows, never blocks
+}
+```
+
+Rows arrive as a `Flux`, honour backpressure, and the event-loop thread is free between rows.
+
+## Why JPA/Hibernate doesn't fit reactive
+
+This is the sharp part of the question. JPA can't simply "go reactive" for two structural reasons:
+
+**1. It's built on blocking JDBC.** The entire Hibernate engine issues synchronous JDBC calls. R2DBC isn't a drop-in driver for it.
+
+**2. It's stateful and depends on synchronous semantics.** The persistence context (first-level cache), lazy loading via proxies, dirty checking on flush, and transaction-scoped sessions all assume a thread you can block at will. **Lazy loading** is the killer: `order.getItems()` triggers a SQL query *transparently, synchronously*, in the middle of your code — there's nowhere to return a `Mono` from a getter without breaking the entire programming model. Reactive demands that I/O be explicit (it returns a publisher); JPA's whole value proposition is making I/O *implicit*.
+
+So the reactive data stack is **R2DBC + Spring Data R2DBC**, which is deliberately thinner: no lazy loading, no dirty checking, no automatic relationship traversal. You write more explicit queries and join data yourself with operators.
+
+<Callout kind="warn" title="No managed relationships">
+Spring Data R2DBC is not an ORM. There's no `@OneToMany` auto-fetch; you fetch related rows with a second query and combine them via `flatMap`/`zip`. Trading Hibernate's convenience for non-blocking I/O is a real cost — factor it in before going reactive.
+</Callout>
+
+<ProbeNote>Lead with: JDBC's API is inherently blocking, R2DBC returns `Publisher`s and uses non-blocking sockets. Then explain JPA's incompatibility precisely — it sits on JDBC *and* its lazy-loading/dirty-checking/persistence-context model requires synchronous, blockable execution. Mentioning that R2DBC isn't an ORM (no lazy loading) shows you've used it.</ProbeNote>

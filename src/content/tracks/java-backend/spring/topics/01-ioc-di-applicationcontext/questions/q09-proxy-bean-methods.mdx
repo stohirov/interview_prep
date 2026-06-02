@@ -1,0 +1,45 @@
+**`proxyBeanMethods` is the attribute on `@Configuration` that switches the CGLIB proxy on or off. `true` (the default) gives "full mode" — inter-`@Bean` calls return the shared singleton. `false` gives "lite mode" — no proxy, faster startup, but a direct call to another `@Bean` method creates a *new* instance.** You set it `false` when your configuration never calls one `@Bean` method from another.
+
+## What each setting does
+
+```java
+@Configuration(proxyBeanMethods = false)   // lite mode
+public class AppConfig {
+    @Bean DataSource dataSource() { return new HikariDataSource(); }
+    @Bean OrderRepository orderRepository(DataSource ds) {   // inject, don't call
+        return new OrderRepository(ds);
+    }
+}
+```
+
+- **`proxyBeanMethods = true` (default).** Spring generates a CGLIB subclass of the config class. Calling `dataSource()` from another `@Bean` method is intercepted and routed through the container's singleton cache, so you always get the one shared bean. Costs: proxy creation at startup, and the class can't be `final`.
+- **`proxyBeanMethods = false`.** No CGLIB subclass is created. `@Bean` methods behave like plain Java methods — calling one directly returns a brand-new object that the container never manages. Spring still registers each `@Bean`'s *return value* as a bean; it just doesn't enforce singleton semantics on intra-class calls.
+
+## When to set false
+
+Set `false` when **your `@Bean` methods don't invoke each other** — instead they receive their dependencies as **method parameters** (the recommended style anyway). In that case the proxy buys you nothing, so skipping it gives:
+
+- **Faster startup / lower memory** — no CGLIB class generation per config. At scale (many config classes) this is measurable, which is why Spring Boot's own auto-configuration classes are almost all `@Configuration(proxyBeanMethods = false)`.
+- **Native-image / AOT friendliness** — fewer runtime-generated classes helps GraalVM.
+
+## The danger if you set it wrong
+
+If you set `proxyBeanMethods = false` *and* still call a `@Bean` method from another one, you silently get duplicate instances — exactly the multi-`DataSource`-pool bug the proxy was protecting you from.
+
+```java
+@Configuration(proxyBeanMethods = false)
+public class Broken {
+    @Bean DataSource dataSource() { return new HikariDataSource(); }
+    @Bean OrderRepository repo() {
+        return new OrderRepository(dataSource());  // BUG: a 2nd, unmanaged pool!
+    }
+}
+```
+
+The fix is always the same: pass the dependency as a **parameter** (`repo(DataSource ds)`), letting the container inject the managed singleton, rather than calling the method.
+
+<Callout kind="tip" title="Rule of thumb">
+Default to `proxyBeanMethods = false` and wire dependencies through method parameters — it's faster, AOT-friendly, and forces the cleaner injection style. Only keep `true` when you genuinely call `@Bean` methods from one another and rely on singleton de-duplication.
+</Callout>
+
+<ProbeNote>They want to know you understand the proxy's *cost* and that you can avoid needing it. Strong answer: `false` skips the CGLIB proxy for faster startup and AOT, valid only when `@Bean` methods inject deps via parameters instead of calling each other — call a `@Bean` method directly under `false` and you get duplicate, unmanaged instances. Citing Boot auto-config's use of `false` seals it.</ProbeNote>

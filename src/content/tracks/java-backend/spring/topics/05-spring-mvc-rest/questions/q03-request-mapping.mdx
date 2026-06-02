@@ -1,0 +1,48 @@
+**`@GetMapping`, `@PostMapping`, and friends are just `@RequestMapping` with the HTTP method baked in — composed meta-annotations for readability.** They all feed the same `RequestMappingHandlerMapping`, which builds a `RequestMappingInfo` from the URL pattern, method, headers, and content types you declare, then matches incoming requests against it.
+
+## `@RequestMapping` — the general form
+
+The original, most flexible annotation. It works at class level (a shared prefix) and method level, and accepts the full set of mapping conditions:
+
+```java
+@RequestMapping(
+    value = "/api/orders/{id}",
+    method = RequestMethod.GET,
+    produces = MediaType.APPLICATION_JSON_VALUE,
+    consumes = MediaType.APPLICATION_JSON_VALUE,
+    headers = "X-API-Version=1",
+    params = "verbose")
+OrderDto get(@PathVariable Long id) { ... }
+```
+
+## The composed shortcuts
+
+Spring 4.3+ added method-specific variants. Each is annotated with `@RequestMapping(method = …)` internally:
+
+- `@GetMapping` → `method = GET`
+- `@PostMapping` → `method = POST`
+- `@PutMapping` → `method = PUT`
+- `@DeleteMapping` → `method = DELETE`
+- `@PatchMapping` → `method = PATCH`
+
+They expose the same `value`, `produces`, `consumes`, `params`, `headers` attributes — only `method` is fixed.
+
+```java
+@RestController
+@RequestMapping("/api/orders") // class-level prefix
+class OrderController {
+    @GetMapping("/{id}")  OrderDto get(@PathVariable Long id) { ... }
+    @PostMapping          OrderDto create(@RequestBody CreateOrder c) { ... }
+    @DeleteMapping("/{id}") void delete(@PathVariable Long id) { ... }
+}
+```
+
+## How matching and narrowing work
+
+Class-level paths combine with method-level paths. Among candidates, the mapping with the **most specific** pattern wins (an exact path beats `/{id}`). `produces` is matched against the request's `Accept` header, `consumes` against `Content-Type` — so you can route two methods on the same URL by media type. If a path matches but the method doesn't, Spring returns `405 Method Not Allowed`; if `consumes` doesn't match, `415 Unsupported Media Type`.
+
+<Callout kind="tip" title="Prefer the composed annotations">
+Use `@GetMapping`/`@PostMapping` for everyday handlers — they read as the HTTP verb and prevent the easy mistake of forgetting `method` on a bare `@RequestMapping` (which would then match *all* methods).
+</Callout>
+
+<ProbeNote>The expected insight is that the composed annotations are sugar over `@RequestMapping(method=…)`, all sharing `produces`/`consumes`/`params`. Bonus points for naming the most-specific-pattern rule and the 405/415 responses that flow from method and media-type mismatches.</ProbeNote>

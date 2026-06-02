@@ -1,0 +1,31 @@
+PostgreSQL lets you push logic **into the database** as functions, procedures, and triggers — code that runs next to the data, inside the same transaction, in a language of your choice. Used well it's powerful (atomic multi-step operations, server-side validation, reusable computed columns); used badly it's invisible business logic that no application developer can see, test, or migrate.
+
+The first distinction to nail is **function vs procedure**. A function returns a value, is invoked inside a SQL statement (`SELECT f()`), and is bound by the calling transaction — it *cannot* issue `COMMIT`. A procedure (added in PG11) is invoked with `CALL`, can return nothing, and can manage transactions: it may `COMMIT` and `ROLLBACK` mid-body, which makes it the right tool for batch loops and maintenance jobs.
+
+Both can be written in several **languages**. `SQL` (the cleanest, inlinable, since PG14 with a real parser-checked body), `PL/pgSQL` (the procedural default, with loops, exceptions, cursors), the *untrusted* `plpython3u`, and the `PL/V8` JavaScript extension.
+
+```sql
+CREATE FUNCTION area(r double precision)
+RETURNS double precision
+LANGUAGE sql IMMUTABLE
+RETURN pi() * r * r;
+
+CREATE PROCEDURE purge_old(batch int)
+LANGUAGE plpgsql AS $$
+BEGIN
+  LOOP
+    DELETE FROM events WHERE id IN
+      (SELECT id FROM events WHERE ts < now() - interval '90 days' LIMIT batch);
+    EXIT WHEN NOT FOUND;
+    COMMIT;            -- only legal inside a procedure
+  END LOOP;
+END $$;
+```
+
+Two more pillars decide whether server-side code is safe and fast. **Volatility** (`IMMUTABLE`/`STABLE`/`VOLATILE`) tells the planner whether it can constant-fold a call, use it in an index, or must re-evaluate it per row — get it wrong and you get either wrong results or a missed index. **Triggers** (`BEFORE`/`AFTER`/`INSTEAD OF`, row- vs statement-level) automate side effects on DML, and `SECURITY DEFINER` lets a function run with its owner's privileges — handy and dangerous in equal measure.
+
+<Callout kind="tip" title="The interview hook">
+The senior framing is restraint: "Functions and triggers move logic into the database. I reach for them when correctness *requires* atomicity or server-side enforcement — and I avoid hiding business rules in triggers, because that's logic the app team can't see, test, or migrate." Know the mechanics cold, then show judgement about *when not* to use them.
+</Callout>
+
+The questions below cover function vs procedure, the languages, volatility and the planner, every trigger flavor, when triggers backfire, `RETURNS TABLE` vs `SETOF`, and the `SECURITY DEFINER` search_path hardening trap.

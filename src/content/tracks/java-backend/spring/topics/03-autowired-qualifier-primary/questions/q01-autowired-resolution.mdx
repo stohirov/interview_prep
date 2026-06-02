@@ -1,0 +1,38 @@
+**`@Autowired` resolves by type first, and only disambiguates by qualifier, primary, and finally name when more than one candidate matches.** The single most common mistake is saying "it injects by name" — by name is the *last* fallback, not the default.
+
+## The resolution algorithm, in order
+
+**1. Match by type.** Spring takes the declared type of the injection point (field, constructor parameter, or setter argument) and collects every bean assignable to it. This includes subclasses and implementations of an interface. If exactly one matches, it's injected — done.
+
+**2. Narrow by `@Qualifier`.** If the injection point carries `@Qualifier("name")` (or a custom qualifier annotation), only candidates whose qualifier matches survive. This is the *explicit* mechanism and it wins over everything else below.
+
+**3. Narrow by `@Primary`.** Among the type-matched candidates, if exactly one is annotated `@Primary`, it's chosen. `@Primary` is a *default*, so any `@Qualifier` overrides it.
+
+**4. Fall back to the field/parameter name.** If still ambiguous, Spring checks whether one candidate's bean name equals the injection point's name:
+
+```java
+@Autowired
+private PaymentGateway stripeGateway;  // matches the bean named "stripeGateway"
+```
+
+This is why renaming a field can silently change which bean you get — a subtle footgun, and the reason `@Qualifier` is preferred for clarity.
+
+**5. Still ambiguous → fail.** If two or more candidates survive, the container throws `NoUniqueBeanDefinitionException` at startup. Zero candidates on a mandatory dependency → `NoSuchBeanDefinitionException`.
+
+## Where qualifiers come from
+
+A bean's qualifier name defaults to its bean name, but `@Qualifier` on the *definition* can give it an explicit one:
+
+```java
+@Bean @Qualifier("fast")
+PaymentGateway stripe() { return new StripeGateway(); }
+
+@Service
+class Checkout {
+    Checkout(@Qualifier("fast") PaymentGateway gw) { ... }
+}
+```
+
+The key mental model: **type is the primary key; qualifier/primary/name are tie-breakers applied in that fixed order.** Resolution is fully deterministic — there's no "Spring picks one randomly."
+
+<ProbeNote>The interviewer wants the *ordering*: type → qualifier → primary → name. Strong answers stress that by-name is the last resort (and a hidden coupling to field names), and that ambiguity is a fail-fast startup error, not a silent random pick.</ProbeNote>

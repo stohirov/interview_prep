@@ -1,0 +1,47 @@
+**An `HttpMessageConverter` is the component that turns Java objects into HTTP bodies and back — it's the engine behind `@RequestBody` and `@ResponseBody`.** Every time Spring deserializes a JSON payload into a DTO or serializes your return value into the response, a converter did the work.
+
+## The contract
+
+The interface has two directions, each gated by a media-type check:
+
+```java
+public interface HttpMessageConverter<T> {
+    boolean canRead(Class<?> clazz, MediaType mediaType);   // body -> object
+    boolean canWrite(Class<?> clazz, MediaType mediaType);  // object -> body
+    List<MediaType> getSupportedMediaTypes();
+    T read(Class<? extends T> clazz, HttpInputMessage in);
+    void write(T t, MediaType contentType, HttpOutputMessage out);
+}
+```
+
+`RequestResponseBodyMethodProcessor` (the argument resolver / return-value handler for `@RequestBody`/`@ResponseBody`) iterates the registered converters and uses the first whose `canRead`/`canWrite` matches the target type and the negotiated media type.
+
+## The defaults Boot registers
+
+With `spring-boot-starter-web` you get, among others: `MappingJackson2HttpMessageConverter` (JSON), `StringHttpMessageConverter`, `ByteArrayHttpMessageConverter`, `ResourceHttpMessageConverter`, form converters, and — if `jackson-dataformat-xml` is present — `MappingJackson2XmlHttpMessageConverter`. This is why JSON "just works" and why adding the XML module is all it takes to support XML.
+
+## Registering a custom converter
+
+Use `WebMvcConfigurer`. Prefer `extendMessageConverters` (keeps defaults) over `configureMessageConverters` (replaces them):
+
+```java
+@Configuration
+class ConverterConfig implements WebMvcConfigurer {
+    @Override
+    public void extendMessageConverters(List<HttpMessageConverter<?>> converters) {
+        converters.add(0, new ProtobufHttpMessageConverter()); // index 0 = highest priority
+    }
+}
+```
+
+Ordering matters: converters are tried in list order, so inserting at index 0 gives yours priority for the media types it claims.
+
+## Customizing, not replacing
+
+Often you don't need a new converter — you need to tune Jackson. Define an `ObjectMapper` bean or a `Jackson2ObjectMapperBuilderCustomizer`, and Boot wires it into the existing JSON converter (e.g. snake_case, ignore-unknown, custom date format). That's lighter than writing a converter from scratch.
+
+<Callout kind="tip" title="Tune Jackson before writing a converter">
+Most "custom serialization" needs are a Jackson configuration (`ObjectMapper`/module/`@JsonFormat`), not a new `HttpMessageConverter`. Write a converter only for a genuinely different wire format — protobuf, CSV, a binary protocol.
+</Callout>
+
+<ProbeNote>Examiners want `HttpMessageConverter` named as the read/write engine for `@RequestBody`/`@ResponseBody`, with Jackson as the default JSON converter. The differentiator is registering via `extendMessageConverters` (additive) with explicit ordering, and knowing Jackson tuning usually beats writing a converter.</ProbeNote>

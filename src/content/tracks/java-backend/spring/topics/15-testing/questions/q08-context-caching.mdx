@@ -1,0 +1,43 @@
+**Spring's `TestContext` framework caches each unique `ApplicationContext` and reuses it across every test class with the same configuration — so in a well-designed suite the context starts a handful of times, not once per class.** Understanding this cache is the difference between a 30-second suite and a 10-minute one.
+
+## How the cache works
+
+The cache key is the *configuration*: which classes/locations, active profiles, properties, the set of `@MockitoBean`s, web environment, initializers, and so on. If two test classes resolve to the same key, the second reuses the first's context — no second startup. Change *any* keyed attribute and you get a **different key → a new context built and cached** (the default cache holds up to 32 contexts, LRU-evicted).
+
+The practical implication: **minimize distinct configurations.** A suite where every test uses the same base `@SpringBootTest` setup builds one context; a suite where each class tweaks properties or mocks different beans fragments the cache and rebuilds repeatedly.
+
+```java
+// These two classes SHARE one cached context (identical config):
+@SpringBootTest class OrderFlowTest { }
+@SpringBootTest class PaymentFlowTest { }
+
+// This one gets its OWN context (different mock set changes the key):
+@SpringBootTest class RefundTest {
+    @MockitoBean FraudCheck fraud;
+}
+```
+
+## @DirtiesContext — the cache buster
+
+`@DirtiesContext` tells Spring the context is now *polluted* and must be **closed and rebuilt** for the next test. You apply it (per class or per method) when a test mutates shared singleton state in a way later tests can't tolerate — a modified bean, a cache you can't reset, a started scheduler.
+
+```java
+@DirtiesContext(methodMode = MethodMode.AFTER_METHOD)
+@Test void mutatesSingletonState() { /* forces a fresh context after */ }
+```
+
+The cost is real: every `@DirtiesContext` discards a cached context and pays full startup again, and can knock *other* tests' shared context out of the cache. Treat it as a last resort.
+
+## Prefer cleanup over rebuild
+
+Most "I need `@DirtiesContext`" situations are better solved by **resetting state** instead of trashing the context:
+
+- Reset mocks with `Mockito.reset(...)` or rely on `@MockitoBean`'s per-method reset.
+- Roll back DB changes with `@Transactional` (as `@DataJpaTest` does) or use Testcontainers with per-test cleanup.
+- Clear caches/in-memory state in an `@AfterEach`.
+
+<Callout kind="tip" title="Design for cache reuse">
+Standardize on one or two base test configurations, push shared setup into a `@TestConfiguration` or base class, and keep `@MockitoBean` sets consistent. Fewer distinct keys = more cache hits = faster suite.
+</Callout>
+
+<ProbeNote>The probe: do you know the context is cached by configuration and that `@DirtiesContext` forces an expensive rebuild? Senior signal is treating cache reuse as a *design goal* — fewer distinct configs — and preferring state-reset (transactions, mock reset) over `@DirtiesContext`.</ProbeNote>

@@ -1,0 +1,48 @@
+**A many-to-many relationship is modeled with a third table — the junction (a.k.a. join, bridge, or associative) table — because a relational column can hold only one foreign key, and M:N needs many on both sides.** A student takes many courses; a course has many students. Neither table can store the link directly, so you factor the relationship into its own table whose rows *are* the pairings.
+
+## The canonical shape
+
+```sql
+CREATE TABLE students (id bigserial PRIMARY KEY, name text NOT NULL);
+CREATE TABLE courses  (id bigserial PRIMARY KEY, title text NOT NULL);
+
+CREATE TABLE enrollments (
+  student_id bigint NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  course_id  bigint NOT NULL REFERENCES courses(id)  ON DELETE CASCADE,
+  PRIMARY KEY (student_id, course_id)
+);
+```
+
+Three details matter and interviewers look for all three:
+
+**1. The composite primary key `(student_id, course_id)`** enforces uniqueness — a student can't enroll in the same course twice — and doubles as the index for queries filtering by `student_id`.
+
+**2. A second index for the reverse direction.** The composite PK serves lookups by `student_id` (the leading column). To efficiently answer "who's in this course?" you need an index leading with `course_id`:
+
+```sql
+CREATE INDEX ON enrollments (course_id, student_id);
+```
+
+**3. `ON DELETE CASCADE`** so deleting a student or course cleans up its enrollment rows automatically instead of leaving orphans or failing the delete.
+
+## When the junction carries data
+
+The junction table is the natural home for attributes *of the relationship itself* — facts that belong to neither parent alone:
+
+```sql
+CREATE TABLE enrollments (
+  student_id  bigint NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  course_id   bigint NOT NULL REFERENCES courses(id)  ON DELETE CASCADE,
+  enrolled_at timestamptz NOT NULL DEFAULT now(),
+  grade       text,
+  PRIMARY KEY (student_id, course_id)
+);
+```
+
+Once a junction table has its own attributes (and especially if it's referenced by *other* tables), many teams give it a surrogate `id bigserial PRIMARY KEY` and demote the pair to a `UNIQUE (student_id, course_id)` constraint — handy when the relationship becomes an entity in its own right (e.g., an enrollment that has line items).
+
+## ORM note
+
+In JPA this is `@ManyToMany` with `@JoinTable` for the plain case, but the moment the join carries columns you must promote it to a real entity with two `@ManyToOne` sides — a frequent source of "where did my extra column go" bugs.
+
+<ProbeNote>The expected answer is "junction table with a composite PK." The signals that separate strong candidates: knowing you need a *second* index for the reverse lookup, putting relationship attributes on the junction, and recognizing when to promote it to a full entity with a surrogate key.</ProbeNote>

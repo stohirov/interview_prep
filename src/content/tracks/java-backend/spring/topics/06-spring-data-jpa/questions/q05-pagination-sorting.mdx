@@ -1,0 +1,48 @@
+**Add a `Pageable` parameter to a repository method and Spring Data handles the `LIMIT`/`OFFSET`, the `ORDER BY`, and a second `COUNT` query — returning a `Page` that carries the data plus pagination metadata.** You never write the slicing logic yourself.
+
+## The basics
+
+```java
+Page<User> findByStatus(Status status, Pageable pageable);
+
+var pageable = PageRequest.of(0, 20, Sort.by("createdAt").descending());
+Page<User> page = repo.findByStatus(ACTIVE, pageable);
+
+page.getContent();        // List<User> for this page
+page.getTotalElements();  // total rows across all pages
+page.getTotalPages();
+page.hasNext();
+```
+
+`PageRequest.of(page, size, sort)` builds a `Pageable` — `page` is **zero-based**. Spring turns it into `LIMIT 20 OFFSET 0 ORDER BY created_at DESC` and runs an extra `SELECT count(*)` so `getTotalElements()` works.
+
+## Page vs Slice vs List
+
+The return type controls the cost:
+
+```text
+Page<T>   → data + total count (runs the extra COUNT query)
+Slice<T>  → data + "is there a next page?" (NO count query — fetches size+1 rows)
+List<T>   → just the rows, no metadata
+```
+
+Use **`Slice`** for infinite-scroll UIs where you only need "more?" — it skips the expensive `COUNT`. Use **`Page`** when you must show "page 3 of 47."
+
+## Sort on its own
+
+If you only need ordering, take a `Sort`:
+
+```java
+List<User> findByStatus(Status status, Sort sort);
+repo.findByStatus(ACTIVE, Sort.by(Sort.Order.asc("name"), Sort.Order.desc("createdAt")));
+```
+
+## Spring MVC integration
+
+A controller method can accept `Pageable` directly; `PageableHandlerMethodArgumentResolver` binds `?page=2&size=20&sort=createdAt,desc` from the request automatically.
+
+<Callout kind="warn" title="OFFSET pagination degrades — and don't sort on unindexed columns">
+`OFFSET 100000` still scans and discards 100k rows, so deep pages get slow; for large datasets prefer **keyset (seek) pagination** (`WHERE created_at < :last ORDER BY created_at DESC LIMIT 20`). Also: every `Sort` property must map to an indexed column, or you'll get a filesort. And `Sort` does **not** sanitise — never feed user input straight into `Sort.by(...)` for a native query (injection risk).
+</Callout>
+
+<ProbeNote>They want: `Pageable`/`PageRequest`, zero-based pages, `Page` runs an extra `COUNT` while `Slice` doesn't, and `Sort` for ordering-only. Strong answers raise the deep-`OFFSET` problem and keyset pagination, plus the MVC `Pageable` argument resolver.</ProbeNote>

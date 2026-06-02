@@ -1,0 +1,48 @@
+**`DISTINCT ON (expr)` is a PostgreSQL extension that keeps the *first* row for each distinct value of `expr`, as determined by `ORDER BY` — the most concise way to write "the latest/best row per group."** Standard `DISTINCT` dedups whole rows; `DISTINCT ON` dedups by a chosen key and lets you pick *which* row survives.
+
+## The canonical use: latest row per group
+
+"Most recent order per customer":
+
+```sql
+SELECT DISTINCT ON (customer_id)
+  customer_id, order_id, created_at, amount
+FROM orders
+ORDER BY customer_id, created_at DESC;
+```
+
+For each `customer_id`, PostgreSQL keeps the first row after sorting — and because we sort `created_at DESC` within each customer, "first" means "newest." Clean, single-pass, no subquery.
+
+## The iron rule: ORDER BY must lead with the DISTINCT ON keys
+
+The leftmost `ORDER BY` columns **must match** the `DISTINCT ON` expressions, then you add the tiebreaker that decides which row wins:
+
+```text
+DISTINCT ON (customer_id)            -- the group key
+ORDER BY customer_id, created_at DESC -- key first, then "which row"
+```
+
+Omit or reorder this and PostgreSQL either errors or returns an arbitrary row per group.
+
+## Versus the alternatives
+
+```sql
+-- ROW_NUMBER equivalent (more portable, more verbose)
+SELECT * FROM (
+  SELECT *, ROW_NUMBER() OVER (
+    PARTITION BY customer_id ORDER BY created_at DESC) AS rn
+  FROM orders
+) t WHERE rn = 1;
+```
+
+<Callout kind="info" title="DISTINCT ON vs ROW_NUMBER">
+`DISTINCT ON` is shorter and often **faster** for "one row per group" — with an index on `(customer_id, created_at DESC)` it can read the first row of each group and skip the rest. `ROW_NUMBER` is **portable** (standard SQL) and more flexible when you need top-*N* (N > 1) or the rank value itself. For exactly N = 1, prefer `DISTINCT ON` on PostgreSQL.
+</Callout>
+
+<Callout kind="warn" title="Non-standard and order-sensitive">
+`DISTINCT ON` exists only in PostgreSQL — don't reach for it if portability matters. And without a fully deterministic `ORDER BY` (matching keys + tiebreaker), the surviving row is undefined.
+</Callout>
+
+A second common use is deduplication: `SELECT DISTINCT ON (email) * FROM users ORDER BY email, id` keeps one canonical row per email.
+
+<ProbeNote>They want: `DISTINCT ON (key)` keeps the first row per key per `ORDER BY`, used for "latest per group," and the hard requirement that `ORDER BY` start with the same keys. Strong candidates compare it to the `ROW_NUMBER ... WHERE rn = 1` pattern (more portable, handles N > 1) and flag that it's PostgreSQL-specific.</ProbeNote>

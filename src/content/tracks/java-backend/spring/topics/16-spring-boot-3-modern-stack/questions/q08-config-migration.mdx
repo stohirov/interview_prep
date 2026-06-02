@@ -1,0 +1,44 @@
+**Boot 2.4 reworked config loading and Boot 3 carries it forward: `spring.config.import` is now the explicit, ordered way to pull in extra config — including config trees, Vault, and Consul — replacing the old implicit `bootstrap.yml` and ad-hoc property sources.** It makes "where does this property come from" deterministic.
+
+## `spring.config.import`
+
+You declare additional config sources directly, and they're imported *in order, after* the file that declares them:
+
+```yaml
+spring:
+  config:
+    import:
+      - optional:file:./local.yml          # optional: don't fail if missing
+      - configtree:/etc/config/            # a directory tree of values
+      - vault://secret/myapp                # Spring Cloud Vault
+      - consul:                             # Spring Cloud Consul
+```
+
+The `optional:` prefix means a missing source is skipped rather than failing startup. Crucially, this replaced the old **bootstrap context**: Spring Cloud config servers, Vault, and Consul used to load via a separate `bootstrap.yml` phase; now they're ordinary imports in `application.yml`, so there's one loading model instead of two.
+
+## Config trees
+
+A **config tree** maps a *directory* to properties: each file's name is the key and its contents are the value. This is exactly how Kubernetes and Docker mount secrets and config maps — as files:
+
+```text
+/etc/config/
+├── spring.datasource.username   -> file contents "appuser"
+└── spring.datasource.password   -> file contents "s3cr3t"
+```
+
+```yaml
+spring.config.import: "configtree:/etc/config/"
+```
+
+Now `spring.datasource.password` resolves from the mounted file — no env-var indirection, and secrets never sit in `application.yml`.
+
+## Other migration notes
+
+- **Profile-specific docs** in a single file use `---` separators with `spring.config.activate.on-profile` (the old `spring.profiles` key was removed).
+- Profile-specific files **cannot** themselves declare `spring.profiles.active`/`group` — that's only valid in the main document.
+
+<Callout kind="info" title="Why this is cleaner">
+One ordered import list beats an implicit bootstrap phase plus scattered conventions: you can read top to bottom and know precedence. And `configtree` makes Boot a first-class citizen in Kubernetes, consuming mounted secrets directly instead of templating them into properties.
+</Callout>
+
+<ProbeNote>The signal here: you know `spring.config.import` is the *unified, ordered* mechanism that retired `bootstrap.yml` for Vault/Consul/config-server, and you can explain **config trees** mapping a directory of files to properties (the k8s/Docker secret pattern). Bonus points for the `optional:` prefix and the `spring.config.activate.on-profile` rename.</ProbeNote>

@@ -1,0 +1,29 @@
+**Spring Modulith uses events as the *sanctioned* way for modules to talk: a module publishes a domain event, another module's listener reacts, and neither imports the other's internals.** It takes the in-process event mechanism and adds reliability so that "loose coupling between modules" doesn't mean "lost work on crash."
+
+## The architectural idea
+
+A modular monolith splits one application into modules (top-level packages) with enforced boundaries — module A may not reach into module B's internal classes. Direct service calls across modules would re-create the coupling. So Modulith's convention is: **modules collaborate by publishing and consuming application events.** The `OrderManagement` module publishes `OrderCompleted`; the `Inventory` module listens. Order code never references inventory code.
+
+```java
+@ApplicationModuleListener
+void on(OrderCompleted event) {
+    inventory.decrement(event.orderId());
+}
+```
+
+`@ApplicationModuleListener` is Modulith's composed annotation. It's effectively `@TransactionalEventListener(phase = AFTER_COMMIT)` + `@Async` + `@Transactional` — so the listener runs **after the publisher commits, on its own thread, in its own new transaction**. That's the safe default for cross-module reactions.
+
+## The reliability piece: the event publication registry
+
+Plain Spring events are lost if the JVM dies between publish and handling. Modulith fixes this with an **event publication registry**, backed by a database table (`EVENT_PUBLICATION`). When an event is published to a transactional listener, Modulith records an entry *in the same transaction as the publisher*. When the listener completes successfully, the entry is marked completed. The result is **at-least-once delivery across modules**:
+
+- If the process crashes after commit but before the listener finishes, the entry stays *incomplete*.
+- On restart (or via a republish), Modulith re-delivers incomplete publications, so the consuming module eventually processes them.
+
+This turns in-JVM events into something durable enough for module-to-module communication without standing up Kafka — the persistence is local, transactional, and replayed on startup.
+
+## Why it matters
+
+Because handlers can re-run after a crash, they must be **idempotent** — at-least-once means a listener may see the same event twice. And because each listener gets its own transaction, a failure in one module doesn't roll back the publisher. It's the gentle on-ramp from a monolith toward services: keep the events the same, and later swap the in-process registry for a real broker when a module is extracted.
+
+<ProbeNote>Hit three things: events are the *intended* inter-module channel (boundaries stay enforced), `@ApplicationModuleListener` = async + after-commit + new transaction, and the **event publication registry** persists events in the publisher's transaction for at-least-once redelivery on crash. Noting that listeners must be idempotent shows you understand at-least-once.</ProbeNote>

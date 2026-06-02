@@ -1,0 +1,34 @@
+Spring's `@Autowired` is **dependency resolution by type first**: the container looks at the declared type of the field, constructor parameter, or setter argument and finds a matching bean. If exactly one candidate matches, it's injected and you're done. The interesting cases — and the interview questions — all live at the edges: *zero* candidates, *many* candidates, and *collections* of candidates.
+
+When more than one bean of the required type exists, by-type resolution is ambiguous, and Spring narrows the choice with a defined precedence:
+
+```text
+1. match by type           -> set of candidate beans
+2. narrow by @Qualifier    -> explicit, wins over @Primary
+3. narrow by @Primary      -> one bean marked as the default
+4. fall back to bean name   -> field/parameter name must equal a bean name
+```
+
+If after all that there's still more than one candidate, the container throws `NoUniqueBeanDefinitionException` at startup. If there are *zero* candidates and the dependency is mandatory, it throws `NoSuchBeanDefinitionException`. Both are container-creation failures — you want them, because they fail fast.
+
+```java
+@Service
+public class CheckoutService {
+    private final PaymentGateway gateway;
+
+    // single constructor -> @Autowired is optional since Spring 4.3
+    public CheckoutService(@Qualifier("stripe") PaymentGateway gateway) {
+        this.gateway = gateway;
+    }
+}
+```
+
+Two knobs control multiplicity. `@Primary` declares *one* default bean for a type, so unqualified injection points resolve cleanly; `@Qualifier` lets a specific injection point pick a *named* candidate, overriding `@Primary`. They answer different questions: "who's the default?" vs "I want this exact one."
+
+Optionality is a separate axis: `@Autowired(required = false)`, `Optional<T>`, `@Nullable`, and `ObjectProvider<T>` all say "it's fine if this bean is missing," each with different ergonomics. And you can inject *all* beans of a type as a `List<T>` or a `Map<String, T>` keyed by bean name.
+
+<Callout kind="tip" title="The interview hook">
+Say the precedence out loud: "`@Autowired` matches by type, then narrows by `@Qualifier`, then by `@Primary`, then falls back to the bean name — and if it's still ambiguous I get `NoUniqueBeanDefinitionException` at startup." That one sentence shows you understand the whole resolution algorithm, not just the happy path.
+</Callout>
+
+The questions below walk the full algorithm: name vs qualifier vs primary, optional injection, the ambiguity exception, collection injection, constructor injection rules, circular dependencies, and why `ObjectProvider<T>` is the modern answer for optional and lazy dependencies.

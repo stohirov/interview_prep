@@ -1,0 +1,38 @@
+**Testcontainers runs the *real* dependency — actual PostgreSQL, Kafka, Redis — in a throwaway Docker container for the lifetime of your test, eliminating the fidelity gap that in-memory substitutes leave behind.** It's the modern standard because "tests passed against H2, broke against Postgres in prod" is a real and common failure, and Testcontainers makes it impossible.
+
+## The problem it solves
+
+The old approach was H2 (or HSQLDB) as a stand-in for your production database. It's fast, but it **lies**: H2 doesn't support Postgres's JSONB, arrays, `ON CONFLICT` upserts, full-text search, partial indexes, or the exact locking and isolation semantics. You write SQL that passes the test and fails in production, or you avoid Postgres-specific features to keep H2 happy — degrading your real code to fit your fake database. Testcontainers removes the compromise: you test against the *same engine and version* you deploy.
+
+## How it works
+
+It starts a Docker container from an image, waits for a readiness signal, exposes a **random host port** (so parallel runs and CI don't collide), and tears it down afterward. JUnit 5 integration is declarative:
+
+```java
+@SpringBootTest
+@Testcontainers
+class OrderRepositoryIT {
+
+    @Container
+    @ServiceConnection
+    static PostgreSQLContainer<?> postgres =
+        new PostgreSQLContainer<>("postgres:16");
+
+    @Autowired OrderRepository repo;
+}
+```
+
+The `static` container is **shared across all methods in the class** (started once), whereas a non-static `@Container` restarts per method — almost always you want `static` for speed.
+
+## Wiring it to Spring
+
+The container exposes a random JDBC URL, so you can't hardcode `spring.datasource.url`. Two mechanisms bridge it (covered in detail in the next question):
+
+- **`@ServiceConnection`** (Boot 3.1+) — Spring recognizes the container type and auto-wires the URL, username, and password. Zero boilerplate; the preferred path today.
+- **`@DynamicPropertySource`** — a static method that registers properties from the container at runtime. The general-purpose fallback for anything `@ServiceConnection` doesn't natively support.
+
+## The trade-off
+
+Testcontainers needs **Docker available** (locally and in CI) and adds container startup time (seconds). Mitigate it: share `static` containers, reuse a singleton container across test classes, and keep these as integration tests (`*IT`) run separately from fast unit tests. The fidelity is worth it for anything touching real DB behaviour.
+
+<ProbeNote>The interviewer wants the *why*: the H2 fidelity gap and "test against what you ship." Strong answers mention `static` containers for reuse, the random-port collision-avoidance, the Docker/CI requirement, and `@ServiceConnection` as the modern wiring over manual `@DynamicPropertySource`.</ProbeNote>

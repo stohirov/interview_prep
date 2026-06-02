@@ -1,0 +1,44 @@
+**Spring AOP and AspectJ share *syntax* — the `@Aspect`, `@Around`, `execution(...)` annotations — but are completely different mechanisms.** Spring AOP is a lightweight, *proxy-based, runtime* framework that intercepts method calls on Spring beans. AspectJ is a full AOP language with its own *bytecode weaver* that can instrument almost anything. Confusing them is a classic interview trap, because Spring AOP *reuses AspectJ's pointcut grammar* without being AspectJ.
+
+## The core differences
+
+| | Spring AOP | AspectJ |
+|---|---|---|
+| Mechanism | Dynamic proxies (JDK/CGLIB) | Bytecode weaving |
+| When | Runtime, at bean creation | Compile-time (CTW) or load-time (LTW) |
+| Joinpoints | Method execution only | Methods, constructors, field get/set, static init, … |
+| Scope | Spring-managed beans only | Any object, any class |
+| Self-invocation | Bypassed (proxy not involved) | Caught (woven into the code itself) |
+| Setup | Zero — built into Spring | Needs `ajc` compiler or a weaving agent |
+| Performance | Slight per-call proxy overhead | Near-native; cost paid once at weave time |
+
+## Why proxy-based AOP is limited
+
+A proxy wraps the target object from the *outside*. It can only see calls that arrive *through* it — i.e. external method invocations on Spring beans. It cannot intercept:
+
+- A method calling another method on `this` (self-invocation).
+- `private`, `final`, or `static` methods.
+- Field reads/writes.
+- Objects you created with `new` instead of getting from the container.
+
+```java
+@Service
+class OrderService {
+    @Transactional
+    public void save() { ... }
+
+    public void process() {
+        save();   // self-call: Spring AOP misses the @Transactional entirely
+    }
+}
+```
+
+With AspectJ, the advice is *woven into the bytecode of `save()` itself*, so it fires no matter how the method is reached — even via `this.save()`.
+
+## When to use which
+
+Use **Spring AOP** for the 95% case: transactions, security, caching, logging on your service layer. It's zero-config and good enough.
+
+Reach for **AspectJ** when you need what proxies can't give: intercepting field access, advising non-Spring objects (e.g. domain entities created with `new`), catching self-invocation, or advising `final`/`private` methods. Enable it via load-time weaving (`@EnableLoadTimeWeaving` + agent) or compile-time weaving with the AspectJ compiler.
+
+<ProbeNote>Make the distinction sharp: *proxy = runtime, outside-in, method-only, beans-only* vs *weaving = bytecode, any joinpoint, any object*. The killer detail that proves you understand it: Spring AOP **uses AspectJ's pointcut syntax but is not AspectJ**, and self-invocation is the practical line between them.</ProbeNote>

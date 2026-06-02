@@ -1,0 +1,45 @@
+**`WHERE` filters individual rows *before* grouping; `HAVING` filters whole groups *after* aggregation.** They sit on opposite sides of `GROUP BY` in the logical processing order, which is the entire reason they're not interchangeable.
+
+## The mechanical difference
+
+```sql
+SELECT customer_id, COUNT(*) AS order_count, SUM(total) AS revenue
+FROM orders
+WHERE status = 'completed'          -- row filter: runs first, per-row
+GROUP BY customer_id
+HAVING SUM(total) > 1000;           -- group filter: runs after aggregation
+```
+
+`WHERE status = 'completed'` discards individual orders *before* they're ever grouped — so cancelled orders never contribute to any sum. `HAVING SUM(total) > 1000` then inspects each *aggregated group* and keeps only the high-revenue customers. Because `WHERE` runs first, it shrinks the input the aggregates see; `HAVING` can only react to the aggregates after they're computed.
+
+## Why you can't swap them
+
+A `WHERE` clause cannot reference an aggregate, because aggregates don't exist yet at the row-filtering stage:
+
+```sql
+-- ERROR: aggregate functions are not allowed in WHERE
+SELECT customer_id FROM orders WHERE SUM(total) > 1000 GROUP BY customer_id;
+```
+
+Conversely, `HAVING` *can* reference non-aggregated columns (if they're in `GROUP BY`) and aggregates alike — but using it for a plain row condition is a mistake:
+
+```sql
+-- works, but wrong: HAVING is applied after a needless full aggregation
+... GROUP BY customer_id HAVING status = 'completed';   -- (only valid if status is grouped)
+```
+
+## The performance point
+
+Push every condition you *can* into `WHERE`. Filtering rows before grouping means fewer rows to sort/hash and aggregate, and it lets indexes on the filtered columns help. Conditions left in `HAVING` force PostgreSQL to aggregate rows it will only throw away. Rule of thumb: **`HAVING` should contain only conditions on aggregate results**; everything else belongs in `WHERE`.
+
+## Edge case: HAVING without GROUP BY
+
+`HAVING` is legal without `GROUP BY` — the whole table is one implicit group:
+
+```sql
+SELECT COUNT(*) FROM orders HAVING COUNT(*) > 100;   -- returns the count, or no row at all
+```
+
+This returns a single row only if the table-wide aggregate passes the condition, which is occasionally useful as a guard.
+
+<ProbeNote>The interviewer is testing that you tie WHERE/HAVING to the logical query order (WHERE before GROUP BY, HAVING after) and the consequence: WHERE can't see aggregates, HAVING can. The senior signal is the performance instinct — push filters into WHERE so aggregation processes fewer rows.</ProbeNote>

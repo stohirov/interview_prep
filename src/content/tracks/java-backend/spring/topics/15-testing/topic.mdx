@@ -1,0 +1,23 @@
+**Testing in Spring Boot is a pyramid, and the whole skill is picking the right layer for what you're verifying.** At the bottom are plain **unit tests** — no Spring at all, just Mockito `@Mock` and the class under test. In the middle are **slice tests** that boot a *focused* subset of the context (`@WebMvcTest`, `@DataJpaTest`, `@JsonTest`, `@RestClientTest`) so you exercise one layer with real Spring wiring but without paying for the whole app. At the top are **integration tests** with `@SpringBootTest`, which loads the entire `ApplicationContext` end-to-end, optionally with a real port and a real database via Testcontainers.
+
+The cost gradient is steep. A unit test runs in microseconds; a slice test starts a partial context in tens to hundreds of milliseconds; a full `@SpringBootTest` can take seconds. So the rule of thumb is: push verification *down* the pyramid until it can't go lower. Test a controller's request mapping and validation with `@WebMvcTest`; test a JPQL query with `@DataJpaTest`; reserve `@SpringBootTest` for "does the whole thing wire together and talk to a real DB."
+
+Two themes run through everything below. First, **context caching**: Spring's `TestContext` framework caches each unique context configuration and reuses it across test classes — which is why minimizing distinct configurations (and avoiding `@DirtiesContext`) keeps suites fast. Second, **fidelity vs speed**: H2 is fast but lies about Postgres behaviour; Testcontainers gives you the real engine at the cost of Docker startup.
+
+```java
+@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
+@AutoConfigureMockMvc
+class OrderApiTest { /* full context, real port available */ }
+
+@WebMvcTest(OrderController.class)
+class OrderControllerTest { /* MVC layer only, services @MockitoBean'd */ }
+
+@DataJpaTest
+class OrderRepositoryTest { /* JPA + DataSource, @Transactional rollback */ }
+```
+
+<Callout kind="tip" title="The interview hook">
+Say it as a decision tree: "No Spring? Unit test. One layer with real Spring wiring? A slice. The whole app with a real DB? `@SpringBootTest` plus Testcontainers. I default to the cheapest layer that proves what I need, and I treat context caching as a feature I design *for* — so I keep configurations few and avoid `@DirtiesContext`."
+</Callout>
+
+The questions below cover each layer, the three test clients, mocking beans vs plain Mockito, Testcontainers and how to wire it, security filters in slices, context reuse, and why tests go flaky.

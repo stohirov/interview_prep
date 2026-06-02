@@ -1,0 +1,33 @@
+**Spring gives you three ways to hook init/destroy — lifecycle interfaces, JSR-250 annotations, and XML/`@Bean` config — and they all run, in a defined order, if you declare more than one. The senior answer is knowing the trade-off (chiefly: how tightly each couples your code to Spring) and defaulting to annotations.** This is a "show judgment" question, not a trivia question.
+
+## The three mechanisms
+
+**Lifecycle interfaces** — `InitializingBean.afterPropertiesSet()` and `DisposableBean.destroy()`. They work and need no annotation processing, but they **couple your domain class directly to Spring's API** — your business object now `implements` a framework interface. Generally discouraged in application code; fine in framework/library code that's already Spring-aware.
+
+**Annotations** — `@PostConstruct` / `@PreDestroy` (JSR-250, `jakarta.annotation.*` on Boot 3). Concise, declarative, and only a *standard* annotation touches your class — no Spring type in the signature. **This is the recommended default for code you own.**
+
+**XML or `@Bean(initMethod=..., destroyMethod=...)`** — the method lives on a plain POJO with **zero Spring references at all**; the wiring lives in config. This is the only option when you **can't modify the class** — e.g. a third-party type you want Spring to initialize/close. (`@Bean(destroyMethod="close")` is even inferred automatically for `AutoCloseable`.)
+
+## When all three are present, order is fixed
+
+For init: **`@PostConstruct` → `afterPropertiesSet()` → init-method**. For destroy: **`@PreDestroy` → `destroy()` → destroy-method**. They don't conflict; they chain.
+
+```java
+@Bean(initMethod = "open", destroyMethod = "close")  // third-party POJO, no Spring imports
+ThirdPartyClient client() { return new ThirdPartyClient(); }
+```
+
+## How to choose
+
+| Situation | Use |
+|---|---|
+| Your own class, modern Spring | `@PostConstruct` / `@PreDestroy` (annotations) |
+| Class you can't edit (3rd-party) | `@Bean(initMethod/destroyMethod)` or XML |
+| Framework/library code already tied to Spring | `InitializingBean` / `DisposableBean` |
+| Pre-annotation legacy / config-driven shops | XML init/destroy-method |
+
+<Callout kind="tip" title="Default to annotations, fall back to @Bean methods">
+Reach for `@PostConstruct`/`@PreDestroy` first — least ceremony, weakest coupling. Drop to `@Bean(initMethod=..., destroyMethod=...)` only when you can't touch the class. Avoid `InitializingBean`/`DisposableBean` in domain code precisely because they bind it to Spring.
+</Callout>
+
+<ProbeNote>The interviewer wants a *decision rule*, not a list. The winning answer: "annotations by default for code I own, `@Bean` init/destroy-method for third-party classes I can't annotate, and I avoid the interfaces because they couple my beans to Spring — and all three fire in a fixed order if combined."</ProbeNote>

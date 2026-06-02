@@ -1,0 +1,29 @@
+**Reactive Streams is a tiny four-interface specification for asynchronous stream processing with non-blocking backpressure — it's the contract every reactive library (Reactor, RxJava, Akka Streams) implements so they interoperate.** It lives in `java.util.concurrent.Flow` (JDK 9+) and as the standalone `org.reactivestreams` package Reactor uses.
+
+## The four interfaces
+
+**`Publisher<T>`** — a source of a potentially unbounded number of elements. It has one method, `subscribe(Subscriber)`. It does nothing until a subscriber arrives.
+
+**`Subscriber<T>`** — the consumer, with four callbacks: `onSubscribe(Subscription)`, `onNext(T)`, `onError(Throwable)`, `onComplete()`. The protocol is strict: `onSubscribe` exactly once, then zero-or-more `onNext`, then a *single* terminal signal — `onError` or `onComplete`, never both.
+
+**`Subscription`** — the link between the two, and where backpressure lives. It has `request(long n)` (the subscriber demands up to `n` more elements) and `cancel()`. Crucially, the publisher must not emit more than the total requested.
+
+**`Processor<T, R>`** — both a `Subscriber<T>` and a `Publisher<R>`, i.e. a transformation stage. You rarely implement one directly; Reactor's `Sinks` and operators cover the need.
+
+## The handshake
+
+```text
+Subscriber.subscribe(pub)
+  -> pub calls subscriber.onSubscribe(subscription)
+       -> subscriber calls subscription.request(n)   // demand!
+            -> pub calls onNext(e1), onNext(e2), ... up to n
+                 -> ... onComplete() / onError(t)
+```
+
+The key insight: **the subscriber pulls by signalling demand**, and the publisher pushes only within that demand. This is what makes it backpressure-aware rather than a naive observer pattern that would flood a slow consumer.
+
+## Why you don't implement these by hand
+
+The raw spec is hard to implement correctly (the rules around concurrency, demand accounting, and serialised signals are subtle). In practice you use `Flux`/`Mono`, which *are* `Publisher`s, and operators that *are* the `Subscriber`/`Subscription` plumbing. You write `flux.map(...).subscribe(...)`; Reactor wires the contract for you.
+
+<ProbeNote>They want the four interfaces, the strict signal ordering (one terminal signal), and — the differentiator — that `request(n)` on `Subscription` *is* backpressure. Mentioning that you'd never hand-roll a `Publisher` shows production sense.</ProbeNote>

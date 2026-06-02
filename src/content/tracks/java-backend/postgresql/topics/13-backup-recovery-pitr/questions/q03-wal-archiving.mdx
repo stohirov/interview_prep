@@ -1,0 +1,42 @@
+**WAL archiving is the mechanism that ships each completed write-ahead-log segment somewhere safe, so you have a continuous record to replay during PITR.** `archive_command` runs on the live server to *save* segments; `restore_command` runs during recovery to *fetch* them back.
+
+## archive_command — the save side
+
+Enable archiving and tell PostgreSQL how to copy a finished 16 MB WAL segment out of `pg_wal/` to durable storage. PostgreSQL substitutes `%p` (the path to the segment) and `%f` (its filename).
+
+```ini
+# postgresql.conf  (requires restart for wal_level)
+wal_level = replica           # 'replica' or 'logical' — not 'minimal'
+archive_mode = on
+archive_command = 'test ! -f /archive/%f && cp %p /archive/%f'
+```
+
+The `test ! -f` guard refuses to overwrite an existing file — important, because a silent overwrite corrupts your archive.
+
+<Callout kind="danger" title="The exit-code contract">
+`archive_command` MUST return **0 only on success**. If it returns non-zero, PostgreSQL keeps the segment and retries it forever — it will **not** recycle `pg_wal`, so a persistently failing archive command fills your disk and eventually halts the database. Never `rm` or fake success.
+</Callout>
+
+## restore_command — the fetch side
+
+During recovery, PostgreSQL calls `restore_command` to pull each segment back from the archive. As of PostgreSQL 12 it lives in `postgresql.conf`, paired with a `recovery.signal` file — there is no `recovery.conf` anymore.
+
+```ini
+# postgresql.conf on the recovering server
+restore_command = 'cp /archive/%f %p'
+```
+
+It's the mirror image of `archive_command`: `%f` is the segment PostgreSQL wants, `%p` is where to place it.
+
+## Why a plain cp is the junior answer
+
+`cp` to a local directory is fine for a demo and dangerous in production: no compression, no checksums, no off-host durability, no retention/expiry, and no parallelism. Two robust alternatives:
+
+- **`archive_command` to remote/object storage** via a real tool (rsync over SSH, `aws s3 cp`, etc.).
+- Better, hand archiving to **pgBackRest / WAL-G / Barman**, which manage compression, encryption, integrity checks, retention, and parallel transfer for you.
+
+```ini
+archive_command = 'pgbackrest --stanza=main archive-push %p'
+```
+
+<ProbeNote>The load-bearing facts: `archive_command` saves, `restore_command` restores; both use `%p`/`%f`; a non-zero exit makes PostgreSQL retry and stop recycling WAL (disk-full risk). Knowing that a bare `cp` lacks durability/retention — and that pgBackRest/WAL-G exist to fix that — shows production maturity.</ProbeNote>

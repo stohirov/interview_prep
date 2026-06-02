@@ -1,0 +1,49 @@
+**Three clients exist because they drive your app at three different levels — a mock servlet, a fluent reactive client, and a real HTTP socket.** Picking wrong means either slow tests or a fidelity gap.
+
+## MockMvc — mock servlet, no real port
+
+`MockMvc` invokes the `DispatcherServlet` directly with mock `HttpServletRequest`/`Response` objects. **No socket is opened, no port is bound, nothing is serialized over the wire.** It's fast and it's the natural client for `@WebMvcTest` (and `@SpringBootTest(webEnvironment = MOCK)` with `@AutoConfigureMockMvc`).
+
+```java
+mvc.perform(post("/orders").contentType(APPLICATION_JSON).content(body))
+   .andExpect(status().isCreated())
+   .andExpect(jsonPath("$.id").exists());
+```
+
+Because it's a mock, it tests your Spring MVC stack (mapping, filters, advice) but *not* the actual HTTP transport, connection handling, or a real client library.
+
+## TestRestTemplate — real HTTP, blocking
+
+A lenient, test-friendly wrapper around `RestTemplate` that makes **real HTTP calls** to a running server. Use it with `@SpringBootTest(webEnvironment = RANDOM_PORT)`: the embedded server is up, and `TestRestTemplate` hits it over the loopback socket.
+
+```java
+@SpringBootTest(webEnvironment = RANDOM_PORT)
+class OrderApiTest {
+    @Autowired TestRestTemplate rest;
+    @Test void creates() {
+        var resp = rest.postForEntity("/orders", new OrderDto(), OrderDto.class);
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    }
+}
+```
+
+Highest fidelity (real serialization, real status line), but slowest and blocking. It won't follow redirects or throw on 4xx/5xx by default — convenient for asserting error responses.
+
+## WebTestClient — fluent, works both ways
+
+The modern, reactive-style client with a fluent assertion API. Despite living in WebFlux, it works in **two modes**: bound to a real `RANDOM_PORT` server (real HTTP), *or* bound directly to MockMvc / the application context (no socket, like `MockMvc` but with a nicer API). That dual nature makes it the recommended client for new code, MVC or reactive.
+
+```java
+client.post().uri("/orders").bodyValue(dto)
+      .exchange()
+      .expectStatus().isCreated()
+      .expectBody().jsonPath("$.id").exists();
+```
+
+## Choosing
+
+- **MockMvc** — controller slice tests; fast, no transport.
+- **WebTestClient** — default for new tests; fluent API; reactive apps; can run mocked *or* over a real port.
+- **TestRestTemplate** — when you specifically want a blocking, real-HTTP round trip in a full `@SpringBootTest`.
+
+<ProbeNote>The interviewer is checking you know MockMvc never opens a socket (so it can't catch transport bugs) while TestRestTemplate does, and that WebTestClient spans both worlds. Saying "WebTestClient can bind to MockMvc *or* a live port" signals you've actually used it beyond WebFlux.</ProbeNote>

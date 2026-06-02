@@ -1,0 +1,45 @@
+**A composite (multicolumn) index sorts rows by several columns *in order* — first by column 1, then by column 2 within each value of column 1, and so on.** That nested ordering is the source of the **left-prefix rule**: the index can serve a query only if the query constrains a *leading prefix* of the column list. Get the order right and one index covers several query shapes; get it wrong and it sits unused.
+
+```sql
+CREATE INDEX ON orders (customer_id, status, created_at);
+```
+
+Think of it like sorting by last name, then first name, then date of birth. You can find "all Smiths" or "all Smith, John" efficiently, but you **cannot** efficiently find "everyone born on a given date" — that column is only ordered *within* a fixed last+first name.
+
+## The left-prefix rule
+
+The index `(a, b, c)` can be used for predicates on a leading prefix:
+
+```sql
+WHERE a = 1                          -- yes (prefix: a)
+WHERE a = 1 AND b = 'paid'           -- yes (prefix: a, b)
+WHERE a = 1 AND b = 'paid' AND c > … -- yes (full key)
+WHERE b = 'paid'                      -- NO usable seek: skips column a
+WHERE a = 1 AND c > '2024-01-01'      -- partial: seeks on a, then filters c
+                                      --          (b is skipped, so c isn't a seek)
+```
+
+The subtle middle case: a query on `a` and `c` *can* use the index — it seeks on `a` and then scans, applying `c` as a filter — but because `b` is skipped it can't use `c` to *narrow the seek*. The index is only fully effective when every column up to the last one you constrain is itself equality-constrained.
+
+## A second rule: equality before range
+
+Put equality columns before the range/sort column. Once the scan hits an inequality (`>`, `<`, `BETWEEN`) or starts producing ordered output, later columns can't be used to seek.
+
+```sql
+-- good: equality on customer_id, then ordered range on created_at
+CREATE INDEX ON orders (customer_id, created_at);
+SELECT * FROM orders
+WHERE customer_id = 42 ORDER BY created_at DESC LIMIT 10;  -- no sort node
+```
+
+## Practical column ordering
+
+1. Columns used with **equality** first.
+2. Then the column used for **range** or **`ORDER BY`**.
+3. Order remaining equality columns by selectivity / how often they're queried alone.
+
+<Callout kind="info" title="Don't blindly add one index per column">
+A single well-ordered composite index frequently replaces several single-column ones. But it only helps the queries whose predicates form a left prefix — so design it around your actual `WHERE`/`ORDER BY` patterns, not column count.
+</Callout>
+
+<ProbeNote>The probe is whether you truly understand the left-prefix rule — especially the trap that `WHERE b = …` alone can't seek `(a, b)`, and that a skipped middle column downgrades later columns to filters. Adding "equality columns before the range column" shows you can order an index, not just recite the rule.</ProbeNote>

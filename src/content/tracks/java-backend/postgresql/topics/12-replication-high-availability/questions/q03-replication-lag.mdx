@@ -1,0 +1,46 @@
+**Replication lag is how far a standby trails the primary, and you monitor it on the primary through `pg_stat_replication`.** The key realization is that lag has *stages* — there isn't one number — because WAL travels through several steps on the standby before a change becomes visible.
+
+## The view to know
+
+```sql
+SELECT client_addr, state,
+       sent_lsn, write_lsn, flush_lsn, replay_lsn,
+       write_lag, flush_lag, replay_lag
+FROM pg_stat_replication;
+```
+
+Each standby is one row. The LSN columns are positions in the WAL byte stream, and they map to the pipeline:
+
+- **`sent_lsn`** — WAL the primary has sent.
+- **`write_lsn`** — WAL the standby has written to its OS.
+- **`flush_lsn`** — WAL the standby has fsynced to disk (durable on the standby).
+- **`replay_lsn`** — WAL the standby has actually *applied* — the point at which a query on the standby would see the change.
+
+The gap between `sent_lsn` and `replay_lsn` is your real read-lag.
+
+## Measuring lag two ways
+
+**In bytes** (how much WAL the standby is behind) — useful for spotting a standby falling off entirely:
+
+```sql
+SELECT client_addr,
+       pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn) AS replay_lag_bytes
+FROM pg_stat_replication;
+```
+
+**In time** — the `write_lag`, `flush_lag`, `replay_lag` interval columns give the round-trip delay directly. On the **standby itself**, when the primary is idle and no new WAL arrives, byte-lag reads zero misleadingly; use the timestamp of the last replayed transaction:
+
+```sql
+-- run on the standby
+SELECT now() - pg_last_xact_replay_timestamp() AS replay_delay;
+```
+
+## What causes lag and what to do
+
+The usual culprits: a write-heavy primary outpacing the standby, slow standby disk, network saturation, or a long-running query on the standby blocking WAL replay (conflict with `hot_standby_feedback`). Alert on **`replay_lag`** (that's what affects readers) and on **byte-lag growth** (a standby silently falling behind risks needing a full rebuild).
+
+<Callout kind="warn" title="replay_lag is the one that matters for readers">
+A standby can have received and flushed WAL (`flush_lsn` current) but not yet replayed it. If you route reads to that standby, they see stale data based on **`replay_lsn`**, not `flush_lsn` — so `replay_lag` is the figure that governs read consistency.
+</Callout>
+
+<ProbeNote>Strong answers query `pg_stat_replication` on the **primary** and distinguish write/flush/replay LSN stages, calling out `replay_lag` as the figure that affects read consistency. Knowing the standby-side `pg_last_xact_replay_timestamp()` trick for an idle primary is a senior tell.</ProbeNote>
