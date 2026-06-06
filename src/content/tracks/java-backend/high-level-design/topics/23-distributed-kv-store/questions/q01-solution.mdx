@@ -1,0 +1,111 @@
+## 1. Functional requirements
+
+- `get(key)` and `put(key, value)` — a simple key-value contract.
+- **Always writable**: accept writes even during node failures / partitions.
+- **Tunable consistency**: callers choose per-operation `R`/`W`.
+- **Horizontally scalable**: add/remove nodes with minimal data movement.
+- Out of scope (state it): range scans, secondary indexes, transactions — this is a Dynamo-style store, not a relational DB.
+
+## 2. Non-functional requirements
+
+- **Scale:** **petabytes** across thousands of commodity nodes.
+- **Availability:** "always-on" for writes — target 99.99%+ (AP under CAP).
+- **Latency:** single-digit-ms p99 for `get`/`put`.
+- **Durability:** survive node, rack, and datacenter failures (replication factor N ≥ 3).
+- **Consistency:** **eventual**, tunable toward strong via `R + W > N`.
+
+## 3. Capacity estimation
+
+- Storage: say 1 PB logical × replication **N=3** = **~3 PB** raw. At ~10 TB/node usable → **~300 nodes** minimum (more for headroom/hotspots).
+- Throughput: e.g. 1M ops/s; with N=3 and W=2, each write fans out to 3 nodes → **~3M internal write messages/s** spread across the ring.
+- Membership: gossip is O(1) bandwidth per node per round (talks to a few peers), so it scales to thousands of nodes without a central coordinator.
+- Anti-entropy: Merkle-tree comparison transfers ~log(range) hashes, not full data, so divergence checks stay cheap even at PB scale.
+
+## 4. High-level architecture
+
+<Mermaid caption="Dynamo-style ring — any node coordinates, replicates to the next N on the ring">{`graph LR
+    C[Client] --> COORD[Coordinator Node - any node]
+    COORD --> RING[Consistent Hash Ring]
+    RING --> N1[(Replica 1)]
+    RING --> N2[(Replica 2)]
+    RING --> N3[(Replica 3)]
+    N1 -.gossip.- N2
+    N2 -.gossip.- N3
+    N1 -.Merkle anti-entropy.- N2
+    COORD -.hinted handoff.-> NH[(Temp Replica)]`}</Mermaid>
+
+## 5. API design
+
+```
+PUT /kv/{key}
+  Headers: W: 2                      # required write acks
+  Body:    { "value": "...", "context": "<vector-clock token>" }
+  200:     { "context": "<new vector-clock token>" }
+
+GET /kv/{key}
+  Headers: R: 2                      # required read acks
+  200:     { "value": "...", "context": "..." }       # one version, or
+  300:     { "versions": [ ... ] }   # siblings: concurrent writes to reconcile
+```
+
+The opaque **`context`** is the vector clock — clients pass it back on the next write so the system can causally order updates. Concurrent (conflicting) writes return **siblings** for the app to merge.
+
+## 6. Data model
+
+```sql
+-- Logical per-node storage (in practice an LSM engine like RocksDB, not SQL):
+CREATE TABLE kv (
+  key          BYTEA,
+  value        BYTEA,
+  vector_clock BYTEA,                 -- {nodeId -> counter} for conflict detection
+  PRIMARY KEY (key)
+);
+
+-- Ring / token assignment (each physical node owns many virtual nodes / tokens):
+CREATE TABLE ring_tokens (
+  token        BIGINT PRIMARY KEY,    -- position on the hash ring
+  node_id      TEXT NOT NULL          -- physical node owning this vnode
+);
+-- A key maps to hash(key) -> the next T tokens clockwise -> the N owning nodes.
+```
+
+## 7. Detailed component design
+
+**Partitioning — consistent hashing + virtual nodes.** Hash the key onto a ring; the key is owned by the next node clockwise, and replicated to the following **N** nodes. Plain consistent hashing causes uneven load and large data moves when a node joins/leaves, so each physical node owns many **virtual nodes** (tokens) scattered around the ring. This spreads load evenly and means adding a node only steals small slices from many peers. (See the replication & partitioning topic.)
+
+**Quorum replication (N/R/W).** Each write must be acked by **W** of the N replicas; each read must gather **R**. **`R + W > N` guarantees read/write sets overlap** → reads see the latest write (strong-ish consistency). Lowering R or W trades consistency for latency/availability. (See CAP/PACELC for the underlying trade-off.)
+
+**Conflict detection — vector clocks.** Because any replica can accept a write, two clients may update the same key concurrently. A **vector clock** `{node → counter}` lets the system tell *causally ordered* updates (keep the newer) from *concurrent* ones (keep both as siblings). Resolution is **last-write-wins** (simple, can lose data) or **app-level merge** (e.g., union a shopping cart).
+
+**Read repair & anti-entropy.** On a read, if replicas disagree, the coordinator returns the freshest and **writes it back** to the stale ones (**read repair**). For replicas that *aren't* being read, **Merkle trees** per key-range let two replicas compare a small number of hashes to pinpoint diverged ranges and sync only those — cheap **anti-entropy**.
+
+**Membership & failure — gossip + hinted handoff.** Nodes **gossip** membership and liveness (no central coordinator), so the ring view converges in O(log n) rounds. When a target replica is down, a **sloppy quorum** writes to the *next healthy* node with a **hint**; that node holds the data and replays it (**hinted handoff**) when the owner recovers — keeping writes available through failures.
+
+## 8. Scaling considerations
+
+- **Add nodes by adding tokens** — virtual nodes make rebalancing incremental and even.
+- **No single coordinator** — any node can coordinate a request; gossip avoids a membership bottleneck.
+- **LSM storage engine** per node (RocksDB) for write-heavy workloads.
+- **Multi-datacenter** — place replicas across DCs; tune R/W for local-quorum reads.
+- **Hot keys** — virtual nodes help, but a truly hot key may need app-side caching or splitting.
+
+## 9. Trade-offs and alternatives
+
+- **AP vs CP (the core choice)** — Dynamo picks availability + eventual consistency; if you need strong consistency / transactions, a CP store (Spanner, a relational DB, or a Raft-based KV) is the alternative. Name the trade.
+- **Vector clocks vs last-write-wins timestamps** — vector clocks detect concurrency correctly but grow and push merge complexity to the client; LWW is simple but silently drops conflicting writes.
+- **Sloppy quorum vs strict quorum** — sloppy keeps writes available during failures at the cost of temporary inconsistency.
+- **When NOT to use this** — for modest scale or relational needs, Postgres is simpler and stronger; don't reach for Dynamo's complexity without the scale to justify it (EU/regional answer).
+
+## 10. Common follow-up questions
+
+- What happens during a **network partition**? → both sides stay writable; vector clocks + read repair + Merkle anti-entropy reconcile when it heals.
+- How do you detect a node **failure**? → gossip-based failure detection (phi-accrual style), not a central monitor.
+- How is **`R + W > N`** strong consistency *not quite* strong? → it bounds staleness but concurrent writes still produce siblings.
+- How do you **rebalance** when a node joins? → it takes ownership of a set of vnodes; data streams from the previous owners.
+- How do you bound **vector clock growth**? → truncate oldest entries with timestamps (Dynamo's pragmatic compromise).
+
+## 11. What interviewers are really probing
+
+<ProbeNote>
+**All styles:** that you understand *why* each Dynamo mechanism exists — that consistent hashing, quorums, vector clocks, read repair, Merkle trees, gossip, and hinted handoff all serve the single goal of "always writable, eventually consistent." **FAANG:** depth and correctness on every primitive, especially `R + W > N`, vector-clock conflict detection, and partition behavior. **EU/contracting:** judgment about *when* AP is worth its complexity vs a relational DB. **Regional:** clear explanation of key→node mapping, replication, and the quorum math with a defensible diagram. The classic failure is claiming `R + W > N` gives *strong* consistency while ignoring that concurrent writes still create siblings that something must resolve.
+</ProbeNote>

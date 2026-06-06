@@ -1,0 +1,44 @@
+**Problem.** Compute `a + b` **without using the `+` or `-` operators.** Use bit operations only.
+
+## The insight — split into sum-without-carry and carry
+
+Binary addition decomposes into two parts:
+
+- **Sum without carry:** `a ^ b` — XOR adds bit-by-bit but ignores carries (`1 + 1 = 0` with carry lost).
+- **Carry:** `(a & b) << 1` — a carry is generated exactly where both bits are `1`, and it propagates to the next-higher position (hence the left shift).
+
+Add the partial sum to the carry, repeating until the carry becomes zero:
+
+```java
+int getSum(int a, int b) {
+    while (b != 0) {
+        int carry = (a & b) << 1;   // where both bits are 1, carry left
+        a = a ^ b;                  // add without carrying
+        b = carry;                  // fold the carry back in and repeat
+    }
+    return a;
+}
+```
+
+When `b` (the carry) reaches `0`, `a` holds the full sum.
+
+## Walkthrough — 3 + 5
+
+```
+a = 011 (3), b = 101 (5)
+carry = (011 & 101) << 1 = 001 << 1 = 010 ;  a = 011 ^ 101 = 110 ;  b = 010
+carry = (110 & 010) << 1 = 010 << 1 = 100 ;  a = 110 ^ 010 = 100 ;  b = 100
+carry = (100 & 100) << 1 = 100 << 1 = 1000;  a = 100 ^ 100 = 000 ;  b = 1000
+carry = (000 & 1000)<< 1 = 0          ;       a = 000 ^ 1000 = 1000;  b = 0
+-> a = 1000 = 8
+```
+
+## Subtraction and negatives
+
+To subtract, add the two's complement: `a - b == getSum(a, getSum(~b, 1))`. The loop already handles **negative operands** correctly because Java's `int` is two's complement and `<<` / `^` / `&` operate on the raw bit patterns — no special case needed. The carry is guaranteed to terminate within 32 iterations.
+
+<ComplexityTable rows={[
+  {op: "Bitwise carry loop", best: "O(1)", average: "O(1)", worst: "O(32)", note: "≤ 32 carry-propagation steps; O(1) space"},
+]} />
+
+<ProbeNote>The core decomposition — "XOR is the carry-less sum, `(a & b) << 1` is the carry, loop until no carry" — is what's being tested. Be ready to hand-trace a small example and to explain that two's complement makes negative numbers work without extra logic. The recursive form `getSum(a^b, (a&b)<<1)` is equivalent if they prefer recursion.</ProbeNote>

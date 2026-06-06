@@ -1,0 +1,47 @@
+**Problem.** Design a structure that supports `addNum(int)` to ingest values from a stream and `findMedian()` to return the running median of all values seen so far.
+
+## Brute force — O(n) insert or O(n) query
+
+Keep a sorted list: insert is O(n) (shifting on insertion), query O(1). Or keep an unsorted list: insert O(1), but `findMedian` sorts at O(n log n). Either way one operation is linear — too slow when both are called repeatedly on a long stream.
+
+## Optimal (two heaps) — O(log n) add, O(1) median
+
+Split the data at the median into two balanced heaps:
+
+- a **max-heap `lo`** for the smaller half — root = largest small value,
+- a **min-heap `hi`** for the larger half — root = smallest large value.
+
+Keep two invariants: **ordering** (every `lo` ≤ every `hi`) and **balance** (`|lo| − |hi| ≤ 1`, with `lo` holding the extra on odd counts). The median is then `lo`'s root (odd) or the average of both roots (even).
+
+```java
+class MedianFinder {
+    private final PriorityQueue<Integer> lo = new PriorityQueue<>(Comparator.reverseOrder()); // max-heap
+    private final PriorityQueue<Integer> hi = new PriorityQueue<>();                           // min-heap
+
+    public void addNum(int num) {
+        lo.offer(num);            // 1. always push to the smaller half first
+        hi.offer(lo.poll());      // 2. funnel lo's max into hi -> restores ordering
+        if (hi.size() > lo.size())
+            lo.offer(hi.poll());  // 3. rebalance so lo >= hi in size
+    }
+
+    public double findMedian() {
+        return lo.size() > hi.size()
+            ? lo.peek()                          // odd count: extra lives in lo
+            : (lo.peek() + hi.peek()) / 2.0;     // even count: average the two roots
+    }
+}
+```
+
+The add-funnel-rebalance sequence maintains both invariants without any comparison logic of your own: pushing to `lo` then moving its max to `hi` guarantees ordering; the size check restores balance. `addNum` is two or three O(log n) heap ops; `findMedian` is O(1).
+
+<ComplexityTable rows={[
+  {op: "addNum", best: "O(log n)", average: "O(log n)", worst: "O(log n)", note: "two/three heap offers/polls"},
+  {op: "findMedian", best: "O(1)", average: "O(1)", worst: "O(1)", note: "peek one or both roots"},
+]} />
+
+<Callout kind="warn" title="Two correctness traps">
+Use `/ 2.0`, not `/ 2` — integer division truncates the even-count median. And if values are near `Integer.MAX_VALUE`, sum into a `long` before halving to avoid overflow: `((long) lo.peek() + hi.peek()) / 2.0`.
+</Callout>
+
+<ProbeNote>Name both heaps (max-heap below, min-heap above) and both invariants (ordering + balance), then show the three-line add that maintains them. State O(log n) add / O(1) query. The classic slips: integer-division median and forgetting to rebalance after the funnel step, which lets one heap drift two ahead.</ProbeNote>

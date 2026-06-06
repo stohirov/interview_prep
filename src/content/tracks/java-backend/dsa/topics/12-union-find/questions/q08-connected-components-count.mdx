@@ -1,0 +1,44 @@
+**Problem.** Given `n` nodes labeled `0..n-1` and a list of undirected `edges`, return the number of **connected components**. The cleanest framing: start with `n` isolated nodes and merge them — every edge that joins two *separate* groups reduces the component count by one.
+
+## Brute force — DFS/BFS, O(V + E)
+
+Iterate over unvisited nodes; flood-fill each component with DFS, incrementing a counter per new flood. This is asymptotically optimal too. Union-find is preferred when edges arrive **incrementally** or you also need on-the-fly connectivity queries.
+
+## Optimal — union-find, O((V + E) · α(n)) time, O(V) space
+
+Begin with `count = n`. Each successful `union` (the two endpoints were in different sets) merges two components into one, so decrement. Edges within an already-merged component do nothing.
+
+```java
+public int countComponents(int n, int[][] edges) {
+    int[] parent = new int[n];
+    for (int i = 0; i < n; i++) parent[i] = i;
+    int count = n;                                  // n singletons to start
+
+    for (int[] e : edges) {
+        int ra = find(parent, e[0]), rb = find(parent, e[1]);
+        if (ra != rb) {                             // a real merge
+            parent[rb] = ra;
+            count--;
+        }
+    }
+    return count;
+}
+
+private int find(int[] parent, int x) {
+    while (parent[x] != x) {
+        parent[x] = parent[parent[x]];              // path halving
+        x = parent[x];
+    }
+    return x;
+}
+```
+
+The invariant is exact at every step: `count` always equals the number of disjoint sets, because it starts at `n` and drops by one on each genuine merge. No final pass to count roots is needed.
+
+## DSU vs DFS here
+
+Both are O(V + E). Choose **DSU** when this is one query in a stream of edge insertions, or part of a larger problem (Kruskal, dynamic connectivity). Choose **DFS** if the graph is static and you also want to *enumerate* each component's members or paths.
+
+<ProbeNote>
+The decrement-on-merge invariant is the whole trick: "start at n, subtract one per real union." Be ready to contrast with DFS — same complexity, but DSU wins for incremental/online edge insertion while DFS wins when you need the component contents themselves.
+</ProbeNote>

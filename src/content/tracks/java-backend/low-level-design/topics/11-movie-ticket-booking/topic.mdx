@@ -1,0 +1,18 @@
+The **movie ticket booking system** (BookMyShow, Fandango, AMC) is the LLD problem that lives or dies on **one concurrency question: what happens when two users try to book the same seat at the same instant?** Everything else — cities, cinemas, shows, pricing — is conventional modeling. Interviewers ask it precisely because the seat-contention problem is where junior answers fall apart and senior answers shine.
+
+## What the interviewer is testing
+
+- Do you immediately identify the **double-booking race** as the crux, and can you discuss **optimistic vs pessimistic locking** and a **seat-hold TTL** as concrete solutions?
+- Can you model the hierarchy cleanly — a `Movie` plays in many `Cinema`s across `City`s; each `Cinema` has `CinemaHall`s; a `Show` is a movie in a hall at a time; a `Show` has its own `Seat` instances with status?
+- Do you separate **pricing** (early-bird, weekend, premium-seat) behind a Strategy, **booking lifecycle** behind a State machine, and **payment** behind a Factory?
+- Do you handle the **hold-then-confirm** flow: a seat is locked for ~15 minutes while the user pays, then either confirmed or auto-released?
+
+## How to frame it
+
+Clarify scope: search shows by city/movie, view a seat map for a show, select seats, hold them, pay, confirm. State the non-functional priority loudly — **a seat must never be sold twice**, and held-but-unpaid seats must auto-expire so inventory isn't leaked.
+
+<Callout kind="warn" title="The double-booking race is the whole interview">
+Two users both see seat A12 as free and both click "book." A naive `if (seat.isFree()) seat.book()` has a check-then-act race: both pass the check, both book. You must serialize the transition — pessimistic row lock (`SELECT ... FOR UPDATE`), optimistic version check (CAS on a `version` column, retry on conflict), or an in-memory atomic seat-hold with a TTL. Pick one and defend it.
+</Callout>
+
+Then drive the flow: **search → pick show → reserve seats (atomic hold with TTL) → create pending booking → pay → confirm (or expire and release).** The worked solution below follows the full 9-section structure and goes deep on locking in section 7.

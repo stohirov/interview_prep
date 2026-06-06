@@ -1,0 +1,46 @@
+`n & (n - 1)` **clears the lowest set bit** of `n`. It's one of the most useful bit identities in interviews.
+
+## Why it works
+
+Subtracting `1` flips the lowest set bit to `0` and turns every `0` *below* it into `1`. ANDing with the original `n` keeps the high bits unchanged but zeroes out that lowest set bit and everything below it (which were just flipped).
+
+```
+n     = 0b10110100   (180)
+n - 1 = 0b10110011   (179)   // lowest set bit flipped, lower zeros became ones
+n&(n-1)= 0b10110000   (176)   // lowest set bit cleared
+```
+
+## Use 1 — counting set bits (Brian Kernighan's algorithm)
+
+Repeatedly clearing the lowest set bit loops exactly **once per set bit**, instead of 32 times per number:
+
+```java
+int countBits(int n) {
+    int count = 0;
+    while (n != 0) {
+        n &= (n - 1);   // drop the lowest set bit
+        count++;
+    }
+    return count;
+}
+```
+
+For sparse numbers this is far cheaper than scanning all 32 positions. (In production, `Integer.bitCount` is a single CPU instruction and beats both.)
+
+## Use 2 — power-of-two test
+
+A power of two has exactly one set bit, so clearing it yields zero:
+
+```java
+boolean isPowerOfTwo(int n) {
+    return n > 0 && (n & (n - 1)) == 0;
+}
+```
+
+The `n > 0` guard matters: `0 & -1 == 0` would otherwise report `0` as a power of two, and negative numbers must be excluded.
+
+## Related identity: `n & (-n)`
+
+While `n & (n - 1)` *clears* the lowest set bit, `n & (-n)` **isolates** it (returns a value with only that bit set). That one powers Fenwick (binary indexed) trees.
+
+<ProbeNote>Know all three uses: counting bits in O(set bits), the power-of-two check (with the `n > 0` guard), and the sibling `n & (-n)` for isolating the lowest bit. Interviewers love asking you to *derive* why `n & (n-1)` clears the lowest bit — walk through the borrow-on-subtract on a concrete byte like `0b10110100`.</ProbeNote>

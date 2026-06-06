@@ -1,0 +1,148 @@
+## 1. Functional requirements
+
+- Browse and stream **content**: question banks, explanations, and lecture videos.
+- Start, pause/resume, and submit an **exam session** with a server-enforced timer.
+- **Score** objective questions instantly; queue subjective answers for async grading.
+- Show a **leaderboard** (per exam, per cohort) and a student's rank in near-real-time.
+- **Payments**: purchase premium courses / mock-test bundles; gate access by entitlement.
+- **Anti-cheat**: server-authoritative time, shuffled question order, suspicious-activity signals.
+
+Out of scope (state it): authoring tools, content moderation, and human-grader workflow internals.
+
+## 2. Non-functional requirements
+
+- **Scale:** 1M registered students; **100K concurrent at peak** (scheduled mock tests).
+- **Submit burst:** up to ~100K submits clustered in the final minute of a timed mock.
+- **Latency:** answer-save p99 < 100 ms; objective score p99 < 300 ms; video start < 1 s via CDN.
+- **Consistency:** scoring and payments must be **exactly-once / idempotent** — never double-score, never double-charge.
+- **Durability:** an in-progress session must survive a browser refresh or app-node crash.
+- **Availability:** 99.9%+; content reads stay up even if the scoring tier degrades.
+
+## 3. Capacity estimation
+
+- **Concurrent sessions:** 100K. A 90-minute exam with ~60 questions → answers saved roughly every 30 s.
+- **Answer-save QPS:** 100K sessions / 30 s ≈ **~3.3K writes/s** steady (×3 peak ≈ 10K/s).
+- **Submit burst:** 100K submits in ~60 s ≈ **~1.7K submits/s**, each triggering a score + leaderboard update.
+- **Content reads:** assume 5× the concurrency browsing questions ≈ 500K req/s — **but** these are static and served from CDN/cache, so origin sees under 1%.
+- **Session state size:** ~60 answers × ~200 B ≈ **~12 KB/session** × 100K ≈ **~1.2 GB** live in Redis — trivial; fits in memory.
+- **Video:** 100K concurrent × ~3 Mbps ≈ **~300 Gbps** egress → must be CDN-offloaded; origin only serves cache fills.
+
+The takeaway: the *content* problem is a CDN/cache problem, the *session* problem is an in-memory-state + burst problem. They scale independently.
+
+## 4. High-level architecture
+
+<Mermaid caption="Exam-prep platform — content served from CDN, sessions held in Redis, scoring and leaderboard updated off a queue">{`graph LR
+    U[Student client] --> CDN[CDN edge]
+    U --> LB[Load Balancer / API Gateway]
+    CDN -->|cache miss| OBJ[(Object store - videos, media)]
+    LB --> CSVC[Content Service]
+    LB --> SSVC[Session Service - Spring Boot]
+    LB --> PSVC[Payment Service]
+    CSVC --> CDB[(Content DB - read replicas)]
+    SSVC --> RS[(Redis - live session state)]
+    SSVC -->|snapshot| SDB[(Session / Result DB - Postgres)]
+    SSVC -->|submit event| MQ[(Kafka)]
+    MQ --> SCORE[Scoring workers]
+    MQ --> GRADE[Async grading queue]
+    SCORE --> SDB
+    SCORE --> LBRD[(Redis sorted set - leaderboard)]
+    PSVC -->|webhook| PG[Payment gateway]
+    PSVC --> EDB[(Entitlement DB)]
+    SSVC -.proctor signals.-> MQ`}</Mermaid>
+
+## 5. API design
+
+```
+POST /api/v1/exams/{examId}/sessions
+  -> 201 { "sessionId": "...", "endsAt": "2026-06-07T10:30:00Z", "questionOrder": [...] }
+
+PUT  /api/v1/sessions/{sessionId}/answers
+  Header: Idempotency-Key: <uuid>
+  Body:   { "questionId": "q42", "choice": "B", "clientTs": 1717... }
+  -> 200 { "saved": true }                 // server validates endsAt not passed
+
+POST /api/v1/sessions/{sessionId}/submit
+  Header: Idempotency-Key: <uuid>
+  -> 202 { "status": "SCORING" }           // async; or 200 with score for objective-only
+
+GET  /api/v1/sessions/{sessionId}/result   -> 200 { "score": 78, "rank": 1422, "breakdown": [...] }
+GET  /api/v1/exams/{examId}/leaderboard?top=100&around=me
+POST /api/v1/payments/checkout             // returns gateway redirect / client secret
+POST /api/v1/payments/webhook              // gateway -> us; idempotent on event id
+```
+
+Submit and answer-save are **idempotent** via the `Idempotency-Key`: a retried submit returns the original result instead of re-scoring.
+
+## 6. Data model
+
+```sql
+CREATE TABLE exam_session (
+  id            UUID PRIMARY KEY,
+  student_id    BIGINT NOT NULL,
+  exam_id       BIGINT NOT NULL,
+  started_at    TIMESTAMPTZ NOT NULL,
+  ends_at       TIMESTAMPTZ NOT NULL,        -- server-authoritative timer
+  status        TEXT NOT NULL,               -- IN_PROGRESS | SUBMITTED | SCORED
+  submit_key    UUID UNIQUE                   -- idempotency for submit
+);
+
+CREATE TABLE session_answer (
+  session_id    UUID REFERENCES exam_session(id),
+  question_id   BIGINT NOT NULL,
+  choice        TEXT,
+  answered_at   TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (session_id, question_id)       -- last-write-wins per question
+);
+
+CREATE TABLE result (
+  session_id    UUID PRIMARY KEY REFERENCES exam_session(id),
+  score         INT NOT NULL,
+  scored_at     TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE entitlement (                     -- what a student has paid for
+  student_id    BIGINT, product_id BIGINT, granted_at TIMESTAMPTZ,
+  PRIMARY KEY (student_id, product_id)
+);
+-- Correct-answer keys live in a separate, access-controlled store, never shipped to the client.
+-- Leaderboard is a Redis ZSET keyed by exam_id; the DB result table is the source of truth.
+```
+
+## 7. Detailed component design
+
+- **Session Service.** Live state (answers so far, server clock) lives in **Redis**, written on every save; a periodic snapshot (every N saves or M seconds) and the final submit are persisted to Postgres so a node or Redis-replica failure loses at most one snapshot interval. The **timer is server-side**: `ends_at` is set at start, and saves/submit after it are rejected — the client clock is never trusted.
+- **Scoring.** On submit, the service writes status and emits one event to Kafka. **Objective** questions are scored synchronously by comparing against the answer-key store (cached) and can return inline; **subjective** answers go to an async grading queue. Scoring is **idempotent** on `submit_key`, so a duplicated event or a worker retry never double-counts.
+- **Leaderboard.** Each scored result does `ZADD exam:{id} score student` into a Redis **sorted set**; rank is an `O(log n)` `ZREVRANK`. "Players around me" is a `ZREVRANGE` window. Postgres holds the durable truth; the ZSET is a rebuildable index.
+- **Payments.** Checkout is delegated to a gateway (Stripe/Click/Payme-style); we never touch raw card data. Entitlement is granted only on a **webhook** confirmation, deduplicated on the gateway event id — so a replayed webhook grants access exactly once. The hot content read path checks `entitlement`, which is cached.
+- **Anti-cheat.** Question order is shuffled per session; tab-focus loss, copy events, and (if proctored) webcam frames are streamed as **off-path signals** to Kafka for later analysis, never blocking the answer-save path.
+
+## 8. Scaling considerations
+
+- **Content via CDN.** Videos and static question media are served from the CDN/object store; origin sees only cache fills, turning 300 Gbps egress into a non-event for our servers.
+- **Stateless app tier.** Session/Content/Payment services scale horizontally behind the LB; all session state lives in Redis, so any node can serve any request (sticky sessions optional, not required).
+- **Thundering herd at start/submit.** Pre-warm caches before a scheduled mock; absorb submit bursts through Kafka so scoring workers drain at their own pace while the user gets an immediate `202 SCORING`.
+- **Redis scaling.** Shard session state by `sessionId`; leaderboard ZSETs are per-exam, so they shard naturally by exam.
+- **DB.** Read replicas for content; partition `session_answer`/`result` by exam or time.
+
+## 9. Trade-offs and alternatives
+
+- **Sync vs async scoring.** Sync gives instant feedback but couples request latency to a burst; async (queue) smooths the herd at the cost of a brief "scoring…" state. Objective-only exams can stay sync; mixed exams go async.
+- **Redis sorted set vs approximate leaderboard.** A ZSET is exact and simple to millions of entries; at tens of millions or many concurrent exams, an **approximate/bucketed** rank (percentile bands) trades precision for cost.
+- **Session in Redis vs sticky-session in app memory.** Redis is the robust choice (survives node death); in-memory is cheaper but loses the crash-survival requirement — call this out.
+- **Postgres + Redis vs a managed NoSQL.** For 1M students Postgres + Redis + CDN is correct and operationally simple (EU/regional answer); a wide-column store helps only if result/answer volume explodes (FAANG answer).
+
+## 10. Common follow-up questions
+
+- "Student's laptop dies mid-exam — what happens?" → resume from the last Redis snapshot; server timer kept running, so remaining time is honoured.
+- "Two submits race (double-click / retry)." → idempotent on `submit_key`; second returns the first result.
+- "How do you stop answer-key leakage?" → keys live server-side only, never sent to the client; scoring happens on the server.
+- "Live leaderboard for 100K viewers." → read the ZSET from a cache/replica; push updates via SSE/WebSocket fan-out, not per-click DB hits.
+- "Payment succeeded but webhook was lost." → reconcile via gateway polling + idempotent grant; entitlement is eventually consistent, never double-granted.
+
+## 11. What interviewers are really probing
+
+<ProbeNote>
+**All styles:** that you split the read-heavy *content/CDN* problem from the stateful *session/scoring* problem and scaled them independently, and that you made submit and payment **idempotent**. **FAANG:** depth on the submit thundering-herd (queue-buffered scoring), leaderboard at scale (ZSET vs approximate), and crash-surviving session state. **EU / contracting:** a pragmatic Postgres + Redis + CDN stack, a payments flow that never double-charges, and cost-aware choices. **Regional (EPAM / Uzum):** a clean Spring contract, a sane schema, a real payment-gateway integration, and a diagram you can defend. The classic failure mode is treating the platform as one uniform service — putting video bytes, live session state, and leaderboard reads through the same tier — instead of separating CDN content from stateful sessions from off-path scoring.
+
+If you have built a real exam-prep or testing system, anchor this answer in it — describe the actual session-timeout, scoring, or anti-cheat decisions you made and why. Personalize from your own experience rather than inventing specifics.
+</ProbeNote>

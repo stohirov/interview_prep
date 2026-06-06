@@ -1,0 +1,202 @@
+## 1. Functional requirements
+
+- Send a notification to a user over a **channel**: Email, SMS, Push, In-App.
+- Content comes from a **Template** keyed by event type, rendered with per-user variables.
+- A user has **preferences**: which channels they opt into, and channel priority for fallback.
+- **Retry** transient failures with backoff; on exhaustion, **fall back** to the next channel.
+- Respect **per-channel rate limits** (provider quotas) and user **quiet hours**.
+- Record delivery outcome for **analytics** (sent / delivered / failed).
+
+## 2. Non-functional requirements
+
+- **Extensible** — adding a channel must not touch the service or other channels (Open/Closed).
+- **Resilient** — one provider outage or one bad recipient must not fail the batch.
+- **Async & decoupled** — the caller returns immediately; delivery happens on workers.
+- **Observable** — every attempt is recorded; failures land in a dead-letter queue, not `/dev/null`.
+
+## 3. Core entities
+
+| Entity | Responsibility |
+| --- | --- |
+| `NotificationService` | Entry point; orchestrates routing, rate limit, retry, fallback. |
+| `Notification` | Abstract base; holds recipient + rendered content; subtypes per channel. |
+| `Channel` | Strategy: actually delivers via a provider (SMTP, SMS gateway, FCM). |
+| `NotificationFactory` | Factory: builds the right `Notification`/`Channel` from a `ChannelType`. |
+| `Template` | Stored content with placeholders; renders to text per user. |
+| `User` | Recipient + contact details + `Preferences`. |
+| `RetryPolicy` | Decides whether/when to retry (max attempts, backoff). |
+| `ChannelHandler` | Chain node: tries its channel, else passes to the next (fallback). |
+
+## 4. Class diagram
+
+<Mermaid caption="Notification system class model">{`classDiagram
+    class NotificationService {
+      -NotificationFactory factory
+      -RateLimiter limiter
+      +notify(User, Event)
+    }
+    class Notification {
+      <<abstract>>
+      -String recipient
+      -String body
+      +send()
+    }
+    class Channel {
+      <<interface>>
+      +deliver(Notification) boolean
+    }
+    class NotificationFactory {
+      +create(ChannelType, User, String) Notification
+    }
+    class Template {
+      -String body
+      +render(Map) String
+    }
+    class RetryPolicy {
+      -int maxAttempts
+      +nextDelay(int) Duration
+    }
+    class ChannelHandler {
+      -Channel channel
+      -ChannelHandler next
+      +handle(Notification) boolean
+    }
+    NotificationService o-- NotificationFactory
+    NotificationService o-- ChannelHandler
+    NotificationService ..> RetryPolicy
+    NotificationService ..> Template
+    Notification <|-- EmailNotification
+    Notification <|-- SmsNotification
+    Notification <|-- PushNotification
+    Notification ..> Channel
+    ChannelHandler o-- Channel
+    ChannelHandler o-- ChannelHandler`}</Mermaid>
+
+## 5. Key interfaces and classes
+
+```java
+enum ChannelType { EMAIL, SMS, PUSH, IN_APP }
+
+interface Channel { boolean deliver(Notification n); }   // Strategy: one provider call
+
+// Template Method: the send pipeline is fixed; subclasses fill the channel step.
+abstract class Notification {
+    protected final String recipient;
+    protected final String body;
+    protected Notification(String recipient, String body) {
+        this.recipient = recipient; this.body = body;
+    }
+    // template method — same skeleton for every channel
+    public final boolean send(Channel channel) {
+        if (!validate()) return false;
+        boolean ok = channel.deliver(this);
+        record(ok);
+        return ok;
+    }
+    protected abstract boolean validate();   // e.g. email regex vs E.164 phone
+    protected void record(boolean ok) { /* emit delivery metric */ }
+}
+
+final class EmailNotification extends Notification {
+    EmailNotification(String to, String body) { super(to, body); }
+    protected boolean validate() { return recipient.contains("@"); }
+}
+```
+
+```java
+final class NotificationFactory {                 // Factory: hide the switch in one place
+    Notification create(ChannelType type, String recipient, String body) {
+        return switch (type) {
+            case EMAIL  -> new EmailNotification(recipient, body);
+            case SMS    -> new SmsNotification(recipient, body);
+            case PUSH   -> new PushNotification(recipient, body);
+            case IN_APP -> new InAppNotification(recipient, body);
+        };
+    }
+}
+
+interface RetryPolicy { Optional<Duration> nextDelay(int attempt); }
+
+final class ExponentialBackoff implements RetryPolicy {
+    private final int max; private final Duration base;
+    ExponentialBackoff(int max, Duration base) { this.max = max; this.base = base; }
+    public Optional<Duration> nextDelay(int attempt) {
+        if (attempt >= max) return Optional.empty();              // exhausted
+        long millis = (long) (base.toMillis() * Math.pow(2, attempt));
+        long jitter = ThreadLocalRandom.current().nextLong(millis / 2 + 1);  // avoid thundering herd
+        return Optional.of(Duration.ofMillis(millis + jitter));
+    }
+}
+```
+
+```java
+// Chain of Responsibility: try this channel (with retry); on failure, pass to the next.
+final class ChannelHandler {
+    private final Channel channel;
+    private final RetryPolicy retry;
+    private final ChannelHandler next;          // push -> email -> sms
+
+    ChannelHandler(Channel channel, RetryPolicy retry, ChannelHandler next) {
+        this.channel = channel; this.retry = retry; this.next = next;
+    }
+    boolean handle(Notification n) {
+        for (int attempt = 0; ; attempt++) {
+            if (n.send(channel)) return true;
+            Optional<Duration> delay = retry.nextDelay(attempt);
+            if (delay.isEmpty()) break;                     // this channel exhausted
+            sleep(delay.get());
+        }
+        if (next != null) return next.handle(n);            // fall back
+        deadLetter(n);                                       // DLQ: nobody could deliver
+        return false;
+    }
+}
+```
+
+```java
+final class NotificationService {                 // Observer: subscribers react to events
+    private final NotificationFactory factory;
+    private final Map<ChannelType, RateLimiter> limiters;   // per-channel quota
+
+    void notify(User user, Event event) {
+        String body = TemplateStore.forEvent(event.type()).render(user.vars());
+        for (ChannelType ch : user.prefs().orderedChannels()) {       // routing by preference
+            if (user.prefs().inQuietHours()) continue;
+            if (!limiters.get(ch).tryAcquire()) continue;             // throttled -> next channel
+            Notification n = factory.create(ch, user.contact(ch), body);
+            // build the fallback chain from the user's remaining channels, then fire async
+        }
+    }
+}
+```
+
+## 6. Design patterns used
+
+- **Factory** — `NotificationFactory` builds the channel-specific `Notification`; the service never branches on `ChannelType`. New channel = new subtype + one switch arm.
+- **Strategy** — `Channel` is the interchangeable delivery behavior (SMTP vs Twilio vs FCM); `RetryPolicy` is a pluggable retry strategy.
+- **Template Method** — `Notification.send()` fixes the validate → deliver → record skeleton; subclasses override only `validate()` (and channel-specific bits).
+- **Chain of Responsibility** — `ChannelHandler` implements channel fallback push → email → SMS, each link retrying before delegating.
+- **Observer** — `NotificationService` is itself the reaction side of a pub/sub: domain events ("order shipped") trigger notifications; analytics/audit subscribers observe delivery outcomes.
+
+## 7. Trade-offs and alternatives
+
+- **Sync vs async delivery.** Inline `deliver()` is simple but couples the caller to provider latency and outages. Production pushes a message onto a queue (Kafka/SQS) and lets workers deliver; the LLD here keeps the seam (factory + chain) so swapping in a queue is a localized change. Note this explicitly — it is the bridge to the HLD topic.
+- **Retry placement.** Retrying inside the same channel risks hammering a down provider; pair backoff **with jitter** and a circuit breaker. Show the jitter — interviewers look for the thundering-herd awareness.
+- **Fallback vs duplicate.** Fallback (push *then* email) avoids spamming the user but adds latency. Some events (OTP) want fail-fast on one channel; others (critical alerts) want fan-out to *all* channels. Make this a per-event policy, not a global one.
+- **Rate limiting granularity.** Per-channel global limits protect the provider; per-user limits protect the user from spam. You usually need both.
+
+## 8. Common follow-up questions
+
+- **Per-channel rate limiting** — a `RateLimiter` (token bucket) per `ChannelType`; throttled events defer or skip to the next channel. Links to the rate-limiter LLD topic.
+- **User preferences & quiet hours** — `Preferences` holds opted-in channels, priority order, and a quiet-hours window the service honors.
+- **Batching** — coalesce many notifications to one user/channel into a digest; a `BatchingAppender`-style buffer flushed on size or time.
+- **Retry with exponential backoff** — shown via `ExponentialBackoff` with jitter and a max-attempts cap.
+- **Dead-letter queue** — when every channel is exhausted, the notification goes to a DLQ for inspection/replay rather than being dropped.
+- **Delivery analytics** — record sent/delivered/failed/opened per channel; the `record()` hook in the Template Method is the emission point.
+- **Idempotency** — dedupe on an event id so a retry of the *whole* pipeline doesn't double-send.
+
+## 9. What interviewers are really probing
+
+<ProbeNote>
+That you kill the `switch (channel)` ladder with abstraction and can name the four orthogonal axes — content (Template), transport (Channel/Strategy + Factory), routing (preferences + Chain of Responsibility fallback), and failure handling (RetryPolicy + DLQ). The senior signals are: retry **with jitter** and a circuit breaker (not a naive loop), an explicit queue/async boundary that bridges to the HLD design, and treating fan-out-to-all vs fallback as a per-event policy. Forgetting the DLQ — silently dropping undeliverable messages — is the classic miss.
+</ProbeNote>

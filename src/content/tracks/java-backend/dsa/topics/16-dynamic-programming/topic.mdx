@@ -1,0 +1,32 @@
+**Dynamic programming** (DP) is brute-force recursion with a memory. When a recursive solution recomputes the same subproblems over and over, DP caches each answer and reuses it, collapsing exponential work into polynomial. It is the highest-leverage senior interview topic because the same handful of patterns reappears across dozens of problems.
+
+## The two preconditions
+
+DP applies only when a problem has **both**:
+
+- **Overlapping subproblems** — the recursion tree revisits identical sub-instances (naive Fibonacci recomputes `fib(3)` exponentially many times). If every subproblem is unique, caching buys nothing — that is divide-and-conquer (merge sort), not DP.
+- **Optimal substructure** — an optimal answer is built from optimal answers to subproblems. This is what lets you write a recurrence at all.
+
+## Top-down vs bottom-up
+
+There are two ways to fill the cache:
+
+- **Top-down memoization** — write the natural recursion, then add a cache (`Integer[] memo` or `Map<State,Integer>`) keyed by state. Only the states you actually reach get computed. Easy to derive, but carries recursion-stack overhead and risks `StackOverflowError`.
+- **Bottom-up tabulation** — define `int[] dp`, seed the base cases, and iterate in an order that guarantees dependencies are ready before you read them. No recursion, often faster, and it unlocks space optimization.
+
+## Finding the state
+
+The whole game is identifying the **state**: the minimal set of variables that fully describes a subproblem. Then write the **transition** (recurrence) relating a state to smaller ones, pin the **base cases**, and choose an **iteration order**. Index `i`, remaining capacity, position in two strings — these are the usual suspects.
+
+## Space optimization with rolling arrays
+
+If `dp[i]` depends only on the previous row or last few cells, you do not need the full table. A **rolling array** keeps just those rows, dropping O(n) or O(n·m) space to O(n) or O(1). Fibonacci needs two scalars; 0/1 knapsack collapses a 2D table to one 1D array iterated right-to-left.
+
+<Callout kind="tip" title="The DP categories">
+- **Linear** — 1D state over an array: climbing stairs, house robber, max product subarray.
+- **Grid** — 2D state, often on strings: LCS, edit distance, unique paths.
+- **Interval** — `dp[i][j]` over a range, filled by length: palindromic substrings, matrix-chain.
+- **Knapsack** — choose items under a capacity: 0/1, unbounded, coin change, subset-sum.
+</Callout>
+
+Java idioms recur throughout: `int[] dp = new int[n + 1]`, `Integer[] memo` (null means "not computed"), `Arrays.fill(dp, -1)` to seed sentinels, and `Map<String,Integer>` when the state does not index cleanly into an array.

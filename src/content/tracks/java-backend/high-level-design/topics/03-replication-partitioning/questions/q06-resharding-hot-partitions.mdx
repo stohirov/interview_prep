@@ -1,0 +1,53 @@
+## Resharding without downtime, and handling hot partitions
+
+Two operational realities turn partitioning from a one-time decision into an ongoing concern: you eventually need **more capacity** (resharding), and load is rarely perfectly even (**hot partitions**). Senior interviews probe both because they're where partitioning meets production.
+
+### Resharding without downtime
+
+Resharding is moving data when you add or remove nodes, or change the partition scheme. Done naively (take the system down, repartition, bring it back) it means an outage. Done right, it's online.
+
+**Key design choice: more partitions than nodes.** A widely used trick (Cassandra, Elasticsearch, Kafka) is to create a **fixed, large number of logical partitions up front** — far more than nodes — and assign multiple partitions per node. Scaling then means *reassigning whole partitions* to new nodes, never re-hashing individual keys. With consistent hashing's virtual nodes you get the same effect: adding a node steals scattered arcs rather than splitting ranges.
+
+The online migration flow:
+
+<Mermaid caption="Online resharding: dual-write, backfill, verify, cut over">{`graph LR
+    A[1. Add new shard,<br/>assign key ranges] --> B[2. Dual-write:<br/>writes go to old + new]
+    B --> C[3. Backfill:<br/>copy historical data]
+    C --> D[4. Verify:<br/>compare old vs new]
+    D --> E[5. Cut over reads<br/>to new shard]
+    E --> F[6. Stop writing old,<br/>decommission]`}</Mermaid>
+
+- **Dual-write** the moving keys to both old and new shards so neither falls behind during the copy.
+- **Backfill** historical data in the background, throttled to protect live traffic.
+- **Verify** with checksums / row counts before trusting the new shard.
+- **Cut over** reads, then drain and remove the old location. Keep the ability to **roll back** until cutover is confirmed.
+
+Managed stores (DynamoDB, Vitess, CockroachDB) automate most of this — splitting and migrating partitions transparently. Naming that you'd prefer a store that reshards automatically is a valid pragmatic (EU/contracting) answer.
+
+### Hot partitions
+
+A **hot partition** is one shard receiving disproportionate traffic — a thundering-herd key. Causes: a celebrity user, a viral item, a monotonic key on range sharding, or a low-cardinality partition key.
+
+**Detection:** per-partition metrics — QPS, latency, CPU, and throttle/error rate per shard. A single shard's p99 climbing while others idle is the signature. DynamoDB surfaces this as throttled partitions; you can also log access counts per key.
+
+**Mitigations:**
+
+| Technique | What it does | When |
+|---|---|---|
+| **Better partition key** | Pick a higher-cardinality key so load spreads | Design time; the real fix |
+| **Key salting** | Append a random/bucketed suffix → one logical key becomes K physical keys | Write-hot single key |
+| **Caching** | Absorb reads to the hot key in Redis/CDN before they hit the shard | Read-hot key (very common) |
+| **Split the hot partition** | Give the hot range its own shard(s) | Range-shard hot spot |
+| **Request coalescing** | Collapse many concurrent reads of the same key into one | Read stampede |
+
+<Callout kind="warn" title="Salting trades writes for reads">
+Salting a hot *write* key (e.g., `key#0..key#9` across 10 shards) spreads the writes, but now every *read* must scatter-gather across all 10 salt buckets and merge. Only salt when writes are the bottleneck; for read-hot keys, a cache is simpler and cheaper.
+</Callout>
+
+<Callout kind="tip" title="Read-hot vs write-hot need different fixes">
+The most common hot partition is **read-hot** (a celebrity profile, a viral post) — solve it with a cache/CDN, not by resharding. **Write-hot** keys (a global counter, a monotonic ID) need salting, sharded counters, or a different key. Diagnose which kind you have before reaching for a fix.
+</Callout>
+
+<ProbeNote>
+For resharding, the interviewer wants "no downtime" mechanics: dual-write + backfill + verify + cut over, and ideally the "many-more-partitions-than-nodes" design that makes scaling a reassignment rather than a rehash. For hot partitions, they want detection (per-shard metrics) plus the right mitigation for the *kind* of heat — cache for read-hot, salting/sharded-counter for write-hot — and recognizing that a better partition key is the root-cause fix.
+</ProbeNote>

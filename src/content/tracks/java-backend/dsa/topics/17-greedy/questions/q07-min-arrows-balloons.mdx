@@ -1,0 +1,41 @@
+**Problem.** Each balloon is an interval `[start, end]` on the x-axis. An arrow shot at `x` bursts every balloon whose interval contains `x`. Return the **minimum number of arrows** to burst all balloons.
+
+## Greedy idea — sort by end, shoot at the earliest end
+
+This is the activity-selection pattern. Sort balloons by their **end** coordinate. Shoot the first arrow at the end of the earliest-finishing balloon — that arrow bursts every balloon that overlaps that point. Skip all balloons it covers, then repeat for the next uncovered balloon.
+
+Shooting at the *earliest end* is the safe greedy choice: it's the rightmost point still inside the first balloon, so it bursts the maximum number of subsequent overlapping balloons without leaving the first one un-burst.
+
+```java
+int findMinArrowShots(int[][] points) {
+    if (points.length == 0) return 0;
+
+    // Sort by end coordinate. Use comparator (not subtraction) to avoid int overflow.
+    Arrays.sort(points, (a, b) -> Integer.compare(a[1], b[1]));
+
+    int arrows = 1;
+    int arrowX = points[0][1];          // shoot at the first balloon's end
+
+    for (int[] p : points) {
+        if (p[0] > arrowX) {            // this balloon starts after the arrow -> not burst
+            arrows++;
+            arrowX = p[1];              // new arrow at this balloon's end
+        }
+    }
+    return arrows;
+}
+```
+
+## Why `Integer.compare`, not `a[1] - b[1]`
+
+Coordinates can be near `Integer.MIN_VALUE`/`MAX_VALUE`; the subtraction `a[1] - b[1]` can overflow and corrupt the sort order. `Integer.compare` is overflow-safe. This is a favorite interviewer gotcha.
+
+## Why `>` and not `>=`
+
+A balloon that merely *touches* the arrow position (`p[0] == arrowX`) is still burst — intervals are inclusive — so only `p[0] > arrowX` requires a new arrow.
+
+<ComplexityTable rows={[
+  {op: "Sort + sweep", best: "O(n log n)", average: "O(n log n)", worst: "O(n log n)", note: "sort dominates; sweep is O(n), O(1) extra"},
+]} />
+
+<ProbeNote>This is the same skeleton as Non-overlapping Intervals — sort by end, greedily extend. The two traps: overflow in the comparator (use `Integer.compare`), and the inclusive-endpoint case (`>` vs `>=`). Be ready to justify "shoot at the earliest end" with an exchange argument: any optimal first arrow can be moved to the earliest end without bursting fewer balloons.</ProbeNote>

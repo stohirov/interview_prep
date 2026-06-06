@@ -1,0 +1,70 @@
+**Problem.** Traverse a binary tree in **level order** — visit all nodes at depth 0, then all at depth 1, and so on, left to right.
+
+## The idea
+
+Depth-first traversals dive down a path; level order is **breadth-first**, fanning out one rank at a time. The tool for "process in the order you discovered them" is a **FIFO queue**. Seed it with the root; repeatedly dequeue a node, emit it, and enqueue its children. Because children are enqueued behind everything at the current level, the queue naturally surfaces nodes in level order.
+
+<Diagram caption="Queue state advancing level by level">{`
+        1
+       / \\
+      2   3
+     /   / \\
+    4   5   6
+
+queue: [1]          -> emit 1, enqueue 2,3
+queue: [2,3]        -> emit 2,3, enqueue 4 (under 2), 5,6 (under 3)
+queue: [4,5,6]      -> emit 4,5,6
+`}</Diagram>
+
+## Flat level order — O(n) time, O(n) space
+
+If you just need every node in level order (no per-level grouping), one loop suffices:
+
+```java
+List<Integer> levelOrderFlat(TreeNode root) {
+    List<Integer> out = new ArrayList<>();
+    if (root == null) return out;
+    Queue<TreeNode> q = new ArrayDeque<>();
+    q.offer(root);
+    while (!q.isEmpty()) {
+        TreeNode n = q.poll();
+        out.add(n.val);
+        if (n.left  != null) q.offer(n.left);
+        if (n.right != null) q.offer(n.right);
+    }
+    return out;
+}
+```
+
+## Grouped by level — the level-size trick
+
+Most interview variants (level grouping, right-side view, zigzag) need to know *where each level ends*. The clean technique: at the top of each iteration, snapshot `q.size()` — that is exactly the count of nodes on the current level — and drain precisely that many before moving on.
+
+```java
+List<List<Integer>> levelOrder(TreeNode root) {
+    List<List<Integer>> out = new ArrayList<>();
+    if (root == null) return out;
+    Queue<TreeNode> q = new ArrayDeque<>();
+    q.offer(root);
+    while (!q.isEmpty()) {
+        int levelSize = q.size();              // freeze before adding children
+        List<Integer> level = new ArrayList<>(levelSize);
+        for (int i = 0; i < levelSize; i++) {
+            TreeNode n = q.poll();
+            level.add(n.val);
+            if (n.left  != null) q.offer(n.left);
+            if (n.right != null) q.offer(n.right);
+        }
+        out.add(level);
+    }
+    return out;
+}
+```
+
+Each node is enqueued and dequeued once — **O(n) time**. The queue holds at most one full level, which for a complete tree is up to n/2 nodes — **O(n) space** in the worst case.
+
+<ComplexityTable rows={[
+  {op: "Level order (BFS)", best: "O(n)", average: "O(n)", worst: "O(n)", note: "O(w) space, w = max width (up to n/2)"},
+]} />
+
+<ProbeNote>The `levelSize = q.size()` snapshot is the load-bearing idea — it lets one queue serve every "by level" variant. Use `ArrayDeque` (not `LinkedList`) for the queue, and never `add()`/`remove()` which throw on capacity; `offer`/`poll` return null instead. Watch the null-root edge case.</ProbeNote>

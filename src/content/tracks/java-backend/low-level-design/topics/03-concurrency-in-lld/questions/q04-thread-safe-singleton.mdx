@@ -1,0 +1,98 @@
+"Make this Singleton thread-safe" is one of the most common concurrency follow-ups in an LLD round — a `ParkingLot`, `Logger`, or config registry is often a Singleton, and the naive lazy version is broken under concurrency. Know the five idioms, their trade-offs, and which to recommend.
+
+## The broken baseline
+
+```java
+class Lot {
+    private static Lot instance;
+    static Lot get() {
+        if (instance == null)        // T1 and T2 both see null...
+            instance = new Lot();    // ...and both construct -> two instances
+        return instance;
+    }
+}
+```
+
+The check-then-act race again: two threads can each create an instance.
+
+## 1. Eager initialization
+
+Create it at class-load time. Simple and thread-safe (the classloader guarantees it), but you pay the construction cost even if it's never used.
+
+```java
+class Lot {
+    private static final Lot INSTANCE = new Lot();   // built eagerly
+    private Lot() {}
+    static Lot get() { return INSTANCE; }
+}
+```
+
+## 2. Synchronized accessor
+
+Lazy and correct, but **every** call acquires the lock — a bottleneck on a hot path even though the lock only matters on the first call.
+
+```java
+static synchronized Lot get() {
+    if (instance == null) instance = new Lot();
+    return instance;
+}
+```
+
+## 3. Double-checked locking (with volatile)
+
+Lazy *and* fast: lock only on the first construction, lock-free afterward. The `volatile` is **not optional** — without it, another thread can see a non-null but partially-constructed object due to instruction reordering.
+
+```java
+class Lot {
+    private static volatile Lot instance;          // volatile is REQUIRED
+    private Lot() {}
+    static Lot get() {
+        if (instance == null) {                    // 1st check (no lock)
+            synchronized (Lot.class) {
+                if (instance == null)              // 2nd check (locked)
+                    instance = new Lot();
+            }
+        }
+        return instance;
+    }
+}
+```
+
+<Callout kind="warn" title="The volatile is the whole point of this question">
+Interviewers ask for double-checked locking specifically to see if you know *why* `volatile` is needed. `instance = new Lot()` is not atomic — it allocates, constructs, then assigns the reference, and those steps can reorder. Without `volatile`, a second thread can read the reference after assignment but before construction finishes, and use a half-built object. Saying this unprompted is the senior signal.
+</Callout>
+
+## 4. Bill Pugh / initialization-on-demand holder
+
+The idiom most engineers recommend: lazy, thread-safe, and **lock-free** — with no `volatile` or `synchronized`. The holder class isn't loaded until `get()` first touches it, and class initialization is guaranteed thread-safe by the JVM.
+
+```java
+class Lot {
+    private Lot() {}
+    private static class Holder { static final Lot INSTANCE = new Lot(); }
+    static Lot get() { return Holder.INSTANCE; }   // lazy + safe + no locks
+}
+```
+
+## 5. Enum singleton
+
+The simplest fully-correct option (Effective Java's recommendation). Thread-safe by construction and immune to reflection and serialization attacks that can break the others.
+
+```java
+enum Lot {
+    INSTANCE;
+    // fields and methods here
+}
+```
+
+## Which to use
+
+<Diagram caption="Decision guide">{`Need serialization-/reflection-proof + simplest .... ENUM
+Want lazy, lock-free, idiomatic ..................... BILL PUGH HOLDER
+Asked to demonstrate concurrency knowledge ......... DOUBLE-CHECKED (volatile)
+Cheap to construct, always used .................... EAGER
+Avoid in production ................................. SYNCHRONIZED ACCESSOR (slow)`}</Diagram>
+
+<ProbeNote>
+Tagged a trick because the obvious double-checked-locking answer is a trap if you omit `volatile`. The strongest answer: recommend the **enum** or **Bill Pugh holder** as the clean default, then demonstrate you understand double-checked locking and *why the `volatile` matters*. Bonus seniority: note that Singletons are global state that hurt testability, so you'd prefer dependency injection where the container manages the single instance.
+</ProbeNote>

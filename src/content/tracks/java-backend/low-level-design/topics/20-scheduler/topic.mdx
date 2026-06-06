@@ -1,0 +1,18 @@
+A **task scheduler** (or stopwatch) runs work at a chosen time or interval: a one-shot delay, a fixed-rate repeat, or a cron expression. It is the in-process cousin of `ScheduledExecutorService`, and interviewers use it to see whether you can compose several behavioral patterns cleanly — a **Command** for the unit of work, a **Strategy** for the scheduling policy, and an **Observer** for clock ticks — around a correct time-ordered data structure.
+
+The data-structure choice is half the answer: ready tasks live in a **min-heap (priority queue) keyed by next-run time**, and a worker pops the earliest task, runs it, and (if recurring) reschedules it. Get that loop right and the patterns fall into place.
+
+## What the interviewer is testing
+
+- Do you model the unit of work as a **Command** (`Runnable`/`Task`) so the scheduler is decoupled from what it runs?
+- Can you pick the right structure — a **priority queue by next-run time** — instead of scanning a list every tick?
+- Do you understand the policy axis (**FIFO vs priority vs cron**) and put it behind a **Strategy**?
+- Can you reason about the hard parts: a task that **overruns** its interval, **missed runs** after a pause, and thread-safety of the queue?
+
+## How to frame it
+
+Start by **clarifying scope**: one-shot vs recurring vs cron, single-threaded vs a worker pool, what happens when a run overlaps the next due time, and whether missed runs (during downtime) must be caught up. State that the **distributed** scheduler — leader election, sharding, persistence — is an HLD concern.
+
+Then drive the design: a `Clock` (injectable for testability) drives a loop; `ScheduledTask` wraps a `Task` (Command) plus its next-run time and recurrence; the `Scheduler` holds a `PriorityQueue<ScheduledTask>` and a worker that sleeps until the head's time, runs it, and reschedules recurring tasks via a `SchedulingStrategy`. **Tick listeners** (Observer) get notified each tick for stopwatch/UI use.
+
+The senior signals are: injecting `Clock` so time is testable, choosing fixed-**rate** vs fixed-**delay** deliberately for overruns, and defining a catch-up policy for missed runs rather than silently dropping them.

@@ -1,0 +1,54 @@
+## Multi-leader and leaderless (Dynamo-style) replication
+
+When single-leader replication's single write node becomes the bottleneck — or when you need write availability across regions, or writes to continue during a partition — you move to one of two models that accept multiple write entry points.
+
+### Multi-leader replication
+
+Multiple nodes accept writes and replicate to each other. The classic use case is **multi-datacenter**: each region has its own leader, so writes are fast and local, and a region can keep accepting writes even if the link between regions drops.
+
+<Mermaid caption="Multi-leader: each region has a leader; leaders replicate to each other asynchronously">{`graph LR
+    subgraph DC1[Region A]
+      L1[(Leader A)]
+    end
+    subgraph DC2[Region B]
+      L2[(Leader B)]
+    end
+    L1 <-->|async bidirectional replication| L2
+    CA[Clients A] --> L1
+    CB[Clients B] --> L2`}</Mermaid>
+
+**The cost is write conflicts.** The same record can be edited concurrently in two regions. Resolution strategies:
+
+- **Last-write-wins (LWW)** — keep the write with the highest timestamp. Simple, but silently *discards* the loser; risks clock-skew anomalies.
+- **Conflict-free replicated data types (CRDTs)** — data structures (counters, sets) that merge deterministically without losing updates.
+- **Application-defined merge** — surface the conflict and let app logic (or the user) resolve it, as in Git or collaborative editors.
+
+Multi-leader is powerful but operationally tricky; avoid it unless you genuinely need multi-region writes or offline clients.
+
+### Leaderless replication (Dynamo-style)
+
+No node is special. The **client (or a coordinator) writes to all N replicas and reads from several**, using **quorums (W + R > N)** to guarantee freshness. This is the model of DynamoDB, Cassandra, and Riak — the lineage of Amazon's Dynamo paper.
+
+Because writes can land on different subsets of replicas (especially during failures), the store needs active **anti-entropy** mechanisms to keep replicas converging:
+
+- **Read repair.** On a read, the coordinator compares the values returned by the R replicas; if some are stale, it writes the freshest value back to the laggards *during the read*. Fixes frequently-read keys for free.
+- **Anti-entropy / background repair.** A periodic background process compares replicas and reconciles differences for keys that are rarely or never read (read repair alone would never touch them). Implemented efficiently with **Merkle trees** so only divergent ranges are exchanged.
+- **Hinted handoff.** If a target replica is down at write time, a healthy node stores a "hint" and forwards the write once the target recovers — keeping writes available during transient failures ("sloppy quorum").
+
+<Callout kind="info" title="Quorum is the consistency dial">
+Leaderless stores expose W and R per request. W+R>N gives you read-your-writes-grade consistency; W=R=1 gives maximum availability and eventual consistency. Concurrent writes still need conflict resolution (version vectors / LWW). This is exactly the quorum mechanism covered in the CAP/PACELC topic.
+</Callout>
+
+### Comparison
+
+| | Multi-leader | Leaderless |
+|---|---|---|
+| Write entry points | A few leaders | Any replica |
+| Primary use case | Multi-region / offline writes | High availability, horizontal scale |
+| Conflict handling | LWW / CRDT / app merge | Versioning + read repair + anti-entropy |
+| Consistency | Eventual (async between leaders) | Tunable via W/R quorums |
+| Examples | CouchDB, multi-region MySQL, BDR | DynamoDB, Cassandra, Riak |
+
+<ProbeNote>
+The interviewer wants you to distinguish the two clearly: multi-leader = a few designated write nodes that must reconcile conflicts (name LWW/CRDT); leaderless = any-replica writes with quorum-tuned consistency. The senior depth is naming the convergence machinery — read repair, anti-entropy with Merkle trees, and hinted handoff — and tying it back to W+R>N.
+</ProbeNote>

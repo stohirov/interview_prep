@@ -1,4 +1,5 @@
 import { type ReactNode } from 'react';
+import { Mermaid } from './Mermaid';
 
 type CalloutKind = 'info' | 'warn' | 'tip' | 'danger';
 
@@ -91,4 +92,5 @@ export const mdxComponents = {
   ProbeNote,
   ComplexityTable,
   Diagram,
+  Mermaid,
 };

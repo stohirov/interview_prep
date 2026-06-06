@@ -1,0 +1,32 @@
+The **two-pointer** pattern uses two indices that move through a sequence under some rule, replacing a nested loop with a single linear pass. It turns many O(n²) brute forces into **O(n)** time and **O(1)** space.
+
+## The two flavors
+
+**Opposite ends (converging).** Start `left = 0`, `right = n - 1`, and move them toward each other based on a comparison. This is the go-to for **sorted** arrays and symmetric problems:
+
+- Pair sum on a sorted array — if `a[left] + a[right] < target`, increase the sum by `left++`; if too big, `right--`. O(n) instead of O(n²) or O(n log n).
+- Palindrome check — compare ends, walk inward.
+- Trapping rain water, container-with-most-water — the shorter side limits the answer, so advance it.
+
+**Same direction (fast/slow).** Both start at the front; one races ahead while the other marks a boundary. This drives **in-place filtering and compaction**:
+
+- Remove duplicates from a sorted array — slow pointer marks the write position, fast pointer scans.
+- Move zeros, partition — overwrite in place, no extra array.
+- Cycle detection (Floyd's) is the linked-list cousin of the same idea.
+
+## When does it apply?
+
+<Callout kind="tip" title="Recognition signals">
+Reach for two pointers when: the array is **sorted** (or you can sort it cheaply) and you're searching for a pair/triplet meeting a condition; you need an **in-place** result with O(1) extra space; or the problem is symmetric (palindrome, mirror). The invariant is the heart of it — articulate *why* moving a given pointer can never skip the answer.
+</Callout>
+
+## Why it's correct
+
+For converging pointers on sorted data, the correctness argument is **monotonicity**: when the current pair is too small, the only way to grow the sum is to raise the left value — every other left choice with this right is also too small, so we lose nothing by discarding them. Each step eliminates a whole row/column of the implicit pair matrix, so we touch each element at most once: O(n).
+
+<Diagram caption="Converging pointers on a sorted array, target = 9">{`index   0   1   2   3   4
+value   1   3   4   6   8
+        ^               ^      1+8=9  -> found
+        L               R`}</Diagram>
+
+<ProbeNote>Interviewers want you to name *which* flavor (converging vs fast/slow) and to state the invariant out loud. The classic mistake is reaching for two pointers on **unsorted** data where the monotonicity argument doesn't hold — then a hash map (O(n) time, O(n) space) is usually the right tool instead. Be ready to justify the sort cost if you sort first.</ProbeNote>

@@ -1,0 +1,34 @@
+## Thundering herd / cache stampede — detection and mitigation
+
+A **cache stampede** (thundering herd) happens when a popular cached key expires or is evicted and, in the brief window before it is repopulated, *every* concurrent request misses simultaneously and hammers the backend at once. A key serving 50K reads/s that takes 200 ms to recompute means ~10,000 requests pile onto the database in that gap — often enough to overload it, slow the recompute further, and cascade into an outage. The danger is that synchronized expiry turns a 99% hit rate into a 0% hit rate instantly.
+
+<Mermaid caption="A hot key expires; all in-flight requests miss and stampede the DB">{`graph LR
+    R1[Req 1] --> X{Cache: expired}
+    R2[Req 2] --> X
+    R3[Req N] --> X
+    X -->|all miss| DB[(Database)]
+    DB -->|overload| DB`}</Mermaid>
+
+### Where it bites
+
+- A widely-shared key with a **fixed TTL** set at the same instant for many entries (e.g., a daily refresh) — all expire together.
+- A **cold start** or cache flush where many hot keys are empty at once.
+- An eviction of a hot key under memory pressure during peak traffic.
+
+### The three mitigations
+
+**1. Jittered (randomized) TTL.** The simplest fix for synchronized expiry: instead of a fixed `TTL = 3600s`, use `TTL = 3600 ± rand(0, 600)`. This spreads expirations over a window so keys don't all fall off the cliff together. Always jitter TTLs when many entries are created in the same batch.
+
+**2. Request coalescing (single-flight / lock).** On a miss, only **one** request is allowed to recompute the value; the rest **wait** for that result instead of all hitting the DB. Implementations:
+- A per-key **mutex / distributed lock** (e.g., Redis `SET key lock NX PX 5000`) — the lock winner recomputes and repopulates; others retry the cache after a short backoff or block.
+- In-process **single-flight** (Caffeine's `get(key, loader)` and Go's `singleflight`) collapse concurrent loads of the same key into one backend call per node.
+
+**3. Probabilistic early expiration (XFetch).** Rather than waiting for the TTL to hit zero, each reader probabilistically decides to recompute *early*, with the probability rising as expiry approaches. One unlucky-but-early request refreshes the value while the key is still live and serving everyone else — so the herd never sees an empty key. The canonical formula recomputes when `now - delta * beta * log(rand()) >= expiry`, where `delta` is the recompute cost and `beta` tunes eagerness.
+
+### Combine them
+
+In production these layer: **jitter** TTLs to avoid synchronized expiry, use **single-flight/locks** so a miss never fans out, and add **probabilistic early refresh** for the hottest keys so they refresh ahead of expiry. A defensive extra is **serving stale-while-revalidate** — return the old value to readers while one request refreshes in the background, so a miss never blocks a user.
+
+<ProbeNote>
+The interviewer wants you to recognize that synchronized expiry of a hot key is the failure mode, and to name more than just "raise the TTL." The three keywords that land it: **jittered TTL**, **request coalescing / single-flight**, and **probabilistic early expiration**. Mentioning stale-while-revalidate is a strong bonus.
+</ProbeNote>

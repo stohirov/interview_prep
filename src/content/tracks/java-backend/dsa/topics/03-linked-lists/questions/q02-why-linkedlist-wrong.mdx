@@ -1,0 +1,21 @@
+This is a classic trick question. The name `LinkedList` promises "fast inserts and deletes," and the textbook Big-O table seems to agree — so candidates reach for it. In practice it is **almost always the wrong choice**, and the reasons are about hardware, not asymptotics.
+
+## Why the Big-O table lies
+
+`LinkedList.add(i, x)` is advertised as O(1) *given a reference to the node*. But you rarely have that reference — you have an index. Getting to index `i` is **O(n)** because the list must be traversed pointer by pointer. So the "fast insert" almost never materializes; you pay the O(n) walk first.
+
+## The real killer: cache locality
+
+`ArrayList` stores elements in one contiguous block, so iterating streams sequential memory the CPU prefetcher loves. `LinkedList` scatters nodes across the heap; every `next` is a potential **cache miss**. Each node also carries object-header + two-pointer overhead (~24 bytes on a 64-bit JVM beyond the payload). The result: `ArrayList` beats `LinkedList` on iteration, random access, and even on many mid-list insertions, despite the array shift, because shifting contiguous memory is far cheaper than chasing pointers.
+
+<Callout kind="warn" title="The honest rule">
+`ArrayList` is the default. The only time `LinkedList` plausibly wins is a queue/deque where you only touch the ends — and even there **`ArrayDeque`** is faster (array-backed, no per-node allocation). So `LinkedList` ends up with essentially no niche where it is the best tool.
+</Callout>
+
+## What to say instead
+
+"Use `ArrayList` for lists, `ArrayDeque` for stacks/queues/deques. `LinkedList` exists mainly for historical reasons and as the reference doubly-linked implementation; I would not reach for it in production code."
+
+<ProbeNote>
+The trap is answering "LinkedList, because O(1) inserts." The senior answer flips it: cite cache locality, the O(n) index-to-node walk, per-node memory overhead, and name `ArrayDeque` as the real replacement. Mentioning that even Joshua Bloch (its author) has said he never uses it lands well.
+</ProbeNote>

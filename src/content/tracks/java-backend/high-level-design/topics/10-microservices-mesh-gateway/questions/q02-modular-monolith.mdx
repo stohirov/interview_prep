@@ -1,0 +1,45 @@
+## Modular monolith vs. microservices — when to choose each
+
+The modular monolith is the architecture most teams *should* reach for before microservices, and naming it unprompted is one of the strongest senior signals in this topic. It captures the main *internal* benefit of microservices — clear, enforced boundaries between bounded contexts — without paying the distributed-systems tax.
+
+### What a modular monolith is
+
+A single deployable unit (one process, typically one database) internally divided into **modules** with **enforced boundaries**: a module exposes a narrow public API and hides its internals, and the build *fails* if another module reaches across the boundary into private code. Modules communicate through explicit in-process contracts — direct calls or an in-process event bus — not by sharing each other's tables.
+
+**Spring Modulith** is the concrete tooling in the Java/Spring world. It lets you declare module boundaries, verifies them at test/build time (so violations can't sneak in), and supports in-process domain events between modules — even publishing them through an outbox so the move to messaging later is incremental. The point: you get microservices-style modularity *enforced by the compiler/tests* rather than only by network boundaries.
+
+### The comparison
+
+| Dimension | Modular monolith | Microservices |
+|---|---|---|
+| Deployment | One unit — deploy together | Independent per service |
+| Inter-module calls | In-process — fast, reliable | Network — slow, partial failure |
+| Transactions | Local ACID across modules | Saga / eventual consistency |
+| Boundaries enforced by | Compiler / build (Spring Modulith) | Network + separate repos |
+| Scaling | Whole app scales together | Per-service, independent |
+| Operational overhead | Low — one thing to run | High — mesh, discovery, tracing |
+| Refactoring boundaries | Cheap — it's all one codebase | Expensive — cross-repo, cross-team |
+| Team autonomy | Limited — shared deploy pipeline | High — own the service end-to-end |
+
+### When to choose each
+
+**Choose a modular monolith when:**
+
+- The team is small-to-medium, or the product/domain boundaries are still moving. Refactoring a module boundary is a refactor; refactoring a *service* boundary is a migration.
+- You want cross-context business operations to stay within a single ACID transaction.
+- Operational simplicity matters more than independent scaling — one thing to deploy, monitor, and debug.
+- You suspect you *will* need microservices eventually: a well-modularized monolith with clean boundaries is the ideal starting point to extract services from later.
+
+**Choose microservices when:**
+
+- Multiple teams need to deploy independently without coordinating releases (the deployment-coupling pain is real and recurring).
+- Specific components have genuinely different scaling profiles (one is CPU-bound and bursty, the rest steady).
+- Independent fault isolation or technology heterogeneity is a hard requirement.
+
+<Callout kind="info" title="The migration path goes one way more easily">
+A clean modular monolith makes extracting a service straightforward: a module already has a narrow public API, so you replace in-process calls with network calls and split its data out. Going the *other* direction — re-merging tangled microservices back into a monolith — is painful. Start modular-but-together; extract when a boundary has proven stable and a concrete need appears.
+</Callout>
+
+<ProbeNote>
+The interviewer wants you to treat the modular monolith as a first-class option, not a consolation prize — and to articulate that enforced boundaries (Spring Modulith) give you the modularity benefit without the network tax. Strong signal: framing it as the natural starting point that keeps the option to extract services open, and noting that boundary refactoring is cheap in-process and expensive across the wire.
+</ProbeNote>

@@ -1,0 +1,53 @@
+## Round-robin vs least-connection vs weighted vs consistent hashing vs IP-hash
+
+The algorithm decides *which* backend gets the next request. The right choice depends on whether backends are uniform, whether requests are uniform, and whether you care about **affinity** (the same key reaching the same backend).
+
+### Round-robin
+
+Hand requests to backends in rotation: 1, 2, 3, 1, 2, 3… Simple, stateless, and fair **when backends and requests are uniform**. It breaks down when request cost varies wildly — a backend can get stuck with several heavy requests in a row while others idle, because round-robin counts requests, not work.
+
+### Weighted round-robin
+
+Assign each backend a weight and rotate proportionally — a box with twice the CPU gets twice the share. The standard way to run a **heterogeneous fleet** (mixed instance sizes) or to **gradually shift traffic** during a canary/blue-green rollout (start the new version at weight 1, ramp up).
+
+### Least-connections
+
+Send the next request to the backend with the **fewest active connections**. This adapts to **variable request durations** — a backend tied up with long-running requests naturally receives fewer new ones. Far better than round-robin when latency per request is uneven (e.g. some endpoints stream, some are quick). A **weighted least-connections** variant accounts for backend capacity too.
+
+### IP-hash
+
+Hash the **client IP** to a backend, so a given client consistently reaches the same server. A crude form of **session stickiness** without cookies — but distribution is uneven (clients behind a corporate NAT or mobile carrier all hash together), and the mapping reshuffles when the pool size changes.
+
+### Consistent hashing
+
+Hash a **request key** (user ID, cache key, shard key) onto a ring and route to the next backend clockwise, ideally with **virtual nodes** for even spread. The defining property: when a backend is added or removed, only **~1/N of keys** remap — the rest keep hitting the same server.
+
+This is what you use for **cache-aware routing**: route each cache key to the same node so its cache stays warm and you don't duplicate hot entries across the fleet (the pattern behind sharded caches and Maglev-style LBs). With plain hashing (`key % N`), changing `N` reshuffles **almost every** key, cold-flushing every cache at once.
+
+<Mermaid caption="Consistent hashing keeps most keys on the same node when the pool changes">{`graph LR
+    K1[key A] --> N1[Node 1]
+    K2[key B] --> N2[Node 2]
+    K3[key C] --> N3[Node 3]
+    K4[key D] --> N1
+    R["Remove Node 2 -> only its keys move<br/>(here key B); A, C, D stay put"]`}</Mermaid>
+
+### Choosing
+
+| Algorithm | Use when | Watch out for |
+| --- | --- | --- |
+| Round-robin | uniform backends + uniform requests | uneven request cost piles up |
+| Weighted RR | mixed instance sizes, canary ramps | must tune weights |
+| Least-connections | variable request durations | needs connection-count state |
+| IP-hash | cheap stickiness, no cookies | uneven (NAT), reshuffles on pool change |
+| Consistent hashing | cache affinity / sharding | needs virtual nodes for even spread |
+
+### Decision rule
+
+- Stateless, uniform workload → **round-robin** (or weighted for mixed hardware).
+- Variable request times → **least-connections**.
+- Need the same key on the same node (cache warmth, shard routing) → **consistent hashing**.
+- Need quick affinity without app changes → **IP-hash**, accepting its skew.
+
+<ProbeNote>
+The high-value signal is **consistent hashing**: explain that it keeps ~1/N of keys remapping (vs nearly all under `key % N`), and that this is what gives you cache-aware routing without cold-flushing every cache when a node joins or leaves. Also know that least-connections beats round-robin under uneven request durations.
+</ProbeNote>

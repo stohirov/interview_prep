@@ -1,0 +1,55 @@
+## Distributed tracing — trace propagation, spans, sampling, OpenTelemetry
+
+In a monolith, a stack trace tells you where a request spent its time. In microservices, one user request fans out across many services and processes, and no single stack trace spans them. **Distributed tracing** reconstructs that whole journey, and explaining its moving parts — spans, context propagation, sampling, OpenTelemetry — is a core senior-observability signal.
+
+### Traces and spans
+
+- A **span** is a single unit of work: one operation in one service (an HTTP handler, a DB query, an RPC call). It records a name, a start and end time (so, a duration), attributes (tags), events, and a status.
+- A **trace** is the **tree of spans** for one request. Each trace has a unique **trace ID** shared by every span; each span has its own **span ID** and a **parent span ID**, which is how the tree is reconstructed. The first span is the **root span**.
+
+Rendered as a waterfall, a trace immediately shows *where the time went* — which service, which call, and whether work happened in parallel or in series.
+
+<Mermaid caption="One trace, a tree of parent/child spans across services">{`graph TB
+    A["span: GET /checkout (gateway)<br/>traceId=abc"] --> B["span: order-service.create"]
+    B --> C["span: inventory.reserve"]
+    B --> D["span: payment.charge"]
+    D --> E["span: db INSERT payment"]`}</Mermaid>
+
+### Context propagation — how the trace ID crosses the network
+
+The thing that makes it *distributed* is **context propagation**: when service A calls service B, it must pass the **trace context** (trace ID, parent span ID, sampling decision) so B's spans join the same trace instead of starting a new one.
+
+This travels in **request headers**. The vendor-neutral standard is **W3C Trace Context** — the `traceparent` header (and `tracestate`):
+
+```text
+traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+             │  └ trace-id (16 bytes) ──────────┘ └ parent span ┘ └ flags (sampled)
+             version
+```
+
+Each service reads the incoming `traceparent`, creates its child spans under that trace, and injects an updated `traceparent` into any outgoing calls (HTTP, gRPC, and via message headers for async/queue hops). In-process, the context rides along the thread / async context so child spans nest correctly. Lose propagation at any hop and the trace **breaks** into disconnected fragments — a common bug, especially across async/queue boundaries and thread pools.
+
+### Sampling — controlling the cost
+
+Tracing every request at full fidelity is expensive (storage, network, latency overhead). **Sampling** decides which traces to keep:
+
+- **Head-based sampling** — the decision is made at the **start** of the trace (at the root) and propagated via the sampled flag, so the whole trace is consistently kept or dropped. Cheap and simple (e.g., keep 1%), but it's blind — it might drop the rare slow/errored trace you actually wanted.
+- **Tail-based sampling** — buffer spans and decide **after** the trace completes, so you can keep **all errors and slow traces** and sample the boring fast ones. Far more useful, but requires buffering complete traces (more infrastructure and memory, typically in a collector).
+
+A common production setup: tail-based sampling that keeps 100% of errors and high-latency traces plus a small percentage of normal ones.
+
+### OpenTelemetry — the standard
+
+**OpenTelemetry (OTel)** is the vendor-neutral CNCF standard that unifies instrumentation:
+
+- A single set of **SDKs and auto-instrumentation** (for common frameworks/clients) emits spans, metrics, and logs.
+- The **OTLP** wire protocol and the **OTel Collector** receive, process (including tail sampling), and **export** telemetry to any backend (Jaeger, Tempo, Zipkin, Datadog, etc.) — so you instrument once and aren't locked to a vendor.
+- It standardizes context propagation on W3C Trace Context.
+
+<Callout kind="warn" title="Propagation is the part that actually breaks">
+Spans and backends are the easy part; **keeping the context unbroken** is where real systems fail. Watch the boundaries: async work and thread pools (the context must be carried across), message queues (inject `traceparent` into message headers, extract on the consumer), and third-party clients that don't propagate. A trace that "stops" at a service usually means propagation was dropped there, not that the service did nothing.
+</Callout>
+
+<ProbeNote>
+The interviewer wants the vocabulary used correctly: a **trace** is a tree of **spans** tied by a shared **trace ID**, **context propagation** carries that ID across hops (W3C `traceparent` in headers), **sampling** (head vs tail) controls cost, and **OpenTelemetry** is the vendor-neutral standard. The strongest signals: tail-based sampling to always keep errors/slow traces, and awareness that propagation breaks at async/queue/thread-pool boundaries.
+</ProbeNote>

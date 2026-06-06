@@ -1,0 +1,50 @@
+A **trie** (prefix tree) is a tree where each *edge* is labeled with a character and each *path from the root* spells a prefix. Words sharing a prefix share the path that spells it, so the trie is organized around prefixes rather than whole keys. That is its superpower: it answers "which keys start with this prefix?" in time proportional to the prefix length, independent of how many keys are stored.
+
+## Node structure
+
+A node holds links to child nodes (one per possible next character) and a flag marking whether a word *ends* here:
+
+```java
+class TrieNode {
+    Map<Character, TrieNode> children = new HashMap<>(); // or TrieNode[26] for lowercase a–z
+    boolean isWord = false;
+}
+```
+
+The choice of children container is the central trade-off:
+
+- **Array `TrieNode[R]`** (R = alphabet size, e.g. 26) — O(1) child access, but every node pays for R slots even if it uses one. Fast, memory-hungry, best for small fixed alphabets.
+- **HashMap** — pays only for children that exist, handles any alphabet (Unicode), at the cost of hashing overhead per step.
+
+## The three operations
+
+For a key of length `L`:
+
+- **insert** — walk character by character, creating missing child nodes, then set `isWord` on the final node. **O(L)**.
+- **search** — walk the path; the key is present only if the path exists **and** the final node has `isWord = true`. **O(L)**.
+- **startsWith** — identical to search but you skip the `isWord` check — you only need the path to exist. **O(L)**.
+
+Crucially, all three are **independent of `n`**, the number of stored words.
+
+<Diagram caption="Trie holding cat, car, card, dog. Shared prefix 'ca' is stored once; ● marks a word end.">{`        (root)
+        /     \\
+       c       d
+       |       |
+       a       o
+      / \\      |
+     t   r     g●
+    (●)  (●)
+          |
+          d●`}</Diagram>
+
+## Space and time trade-offs
+
+A trie buys prefix power with memory. Worst case it stores **O(total characters across all keys)** nodes, and each node carries a children container — with the array layout that is R pointers per node, which can dwarf a hash set of the same words (see q02). When you never need prefixes, a `HashSet<String>` is simpler and lighter.
+
+## Applications
+
+Autocomplete and type-ahead, spell-checkers and dictionaries, IP routing (longest-prefix match), word games / board search (Word Search II), and as the backbone of more compact variants (radix/Patricia tries, ternary search tries) that squeeze out single-child chains.
+
+<Callout kind="info" title="No trie in the JDK">
+Java has no built-in trie — you implement one with a `TrieNode` class. Reach for it specifically when **prefix** queries matter; for plain membership a `HashSet<String>` is faster to write and usually smaller.
+</Callout>

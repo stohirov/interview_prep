@@ -1,0 +1,47 @@
+**Best, average, and worst case** describe an algorithm's cost over *different inputs of the same size* `n`. Worst case bounds the slowest run, best case the fastest, and average case the expected cost over some input distribution. They are orthogonal to Big-O notation — you can give a tight Θ bound on each separately. **QuickSort** is the textbook example where all three diverge.
+
+## QuickSort recap
+
+QuickSort picks a **pivot**, partitions the array into elements less than and greater than the pivot, then recurses on each side. The cost is dominated by how *balanced* the partition is — which depends entirely on pivot choice.
+
+## Best case — Θ(n log n)
+
+The pivot lands at (or near) the **median** every time, splitting the array into two halves. The recursion tree has depth `log n`, and each level does `O(n)` partitioning work:
+
+```
+T(n) = 2·T(n/2) + O(n)  →  Θ(n log n)
+```
+
+## Average case — Θ(n log n)
+
+Over random inputs (or with a randomized pivot), partitions are *good enough* on average — even a consistent 1:9 split still yields logarithmic depth (`log_{10/9} n`). The expected work remains Θ(n log n), with a modest constant. This is why QuickSort is the practical default despite its worse worst case.
+
+## Worst case — Θ(n²)
+
+The pivot is consistently the **smallest or largest** element, so each partition peels off just one element. The recursion degenerates into `n` levels of `O(n)` work:
+
+```
+T(n) = T(n-1) + O(n)  →  Θ(n²)
+```
+
+The classic trigger: choosing the **first or last element** as pivot on an **already-sorted (or reverse-sorted) array**. Every partition is maximally lopsided.
+
+```java
+// Naive last-element pivot — O(n²) on sorted input
+int partition(int[] a, int lo, int hi) {
+    int pivot = a[hi];               // adversarial choice on sorted data
+    int i = lo - 1;
+    for (int j = lo; j < hi; j++)
+        if (a[j] < pivot) { i++; swap(a, i, j); }
+    swap(a, i + 1, hi);
+    return i + 1;
+}
+```
+
+## The fix
+
+**Randomized pivots** or **median-of-three** (median of first/middle/last) make the worst case astronomically unlikely on real inputs without changing the average. Production sorts go further: Java's dual-pivot QuickSort for primitives detects pathological patterns and uses careful pivot selection, while object sorts use Timsort (Θ(n log n) worst case) entirely.
+
+<ProbeNote>
+The interviewer wants you to connect *why* the worst case happens (lopsided partitions from a bad pivot on sorted data) to *the mitigation* (randomization / median-of-three). Mentioning that sorted input is the common real-world trigger shows you've been burned by it.
+</ProbeNote>

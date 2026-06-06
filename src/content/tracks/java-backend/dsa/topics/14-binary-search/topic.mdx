@@ -1,0 +1,40 @@
+**Binary search** halves a sorted search space each step, finding an element (or a boundary) in **O(log n)**. It is deceptively hard to write correctly — the four classic bugs below have shipped in real standard libraries — and its most powerful form, *binary search on the answer*, doesn't search an array at all.
+
+## The canonical loop
+
+```java
+int binarySearch(int[] a, int target) {
+    int lo = 0, hi = a.length - 1;          // inclusive bounds
+    while (lo <= hi) {                       // <=, because lo == hi is a valid candidate
+        int mid = lo + (hi - lo) / 2;        // overflow-safe midpoint
+        if (a[mid] == target) return mid;
+        else if (a[mid] < target) lo = mid + 1;   // strictly move past mid
+        else hi = mid - 1;
+    }
+    return -1;
+}
+```
+
+## The four bugs
+
+1. **Overflow in the midpoint.** `(lo + hi) / 2` overflows `int` when `lo + hi > 2³¹ − 1`. Use `lo + (hi - lo) / 2`. This exact bug lived in `java.util.Arrays.binarySearch` until 2006.
+2. **Wrong loop condition.** With inclusive `hi`, the guard must be `lo <= hi`; using `lo < hi` skips the final single-element check. (With an exclusive `hi = length`, you'd use `lo < hi` instead — pick one convention and keep it consistent.)
+3. **Not shrinking the range** — assigning `lo = mid` or `hi = mid` instead of `mid + 1` / `mid - 1` can leave the range unchanged and loop forever. Move strictly past `mid`.
+4. **Wrong boundary on duplicates.** Plain search returns *any* match; first/last-occurrence variants must keep searching after a hit instead of returning early.
+
+<Callout kind="warn" title="Overflow-safe midpoint">
+Always write `mid = lo + (hi - lo) / 2`. It's algebraically equal to `(lo + hi) / 2` but never overflows, because `hi - lo` fits in range whenever `lo` and `hi` individually do.
+</Callout>
+
+## Binary search on the answer (parametric search)
+
+The deeper pattern: you're not searching an array, you're searching a **range of candidate answers** for the boundary of a monotonic predicate. If `feasible(x)` is *false* for all small `x` and *true* for all large `x` (or vice versa) — a monotone `F F F T T T` step — binary search finds the threshold in O(log(range) × cost(feasible)).
+
+<Diagram caption="Monotonic predicate: binary search finds the F→T boundary.">{`candidate:   1   2   3   4   5   6   7   8
+feasible?    F   F   F   T   T   T   T   T
+                         ^
+                  first feasible answer`}</Diagram>
+
+This unlocks problems with no array to search at all: Koko Eating Bananas (search the eating speed), Capacity to Ship Packages (search the ship capacity), and Split Array Largest Sum. The move is: define a monotonic `feasible(x)`, bound `[lo, hi]`, and binary-search the boundary.
+
+The questions below cover both halves — getting the array search exactly right, and recognizing when a problem is secretly a search over the answer space.

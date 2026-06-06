@@ -1,0 +1,53 @@
+**Problem.** Given a binary tree, determine whether it is **height-balanced** — for *every* node, the heights of its left and right subtrees differ by at most 1.
+
+## Brute force — O(n²) time
+
+The naive reading of the definition: for each node, compute the height of both subtrees and check the difference; recurse into the children.
+
+```java
+boolean isBalancedBrute(TreeNode root) {
+    if (root == null) return true;
+    int diff = Math.abs(height(root.left) - height(root.right));
+    return diff <= 1 && isBalancedBrute(root.left) && isBalancedBrute(root.right);
+}
+int height(TreeNode n) {
+    if (n == null) return 0;
+    return 1 + Math.max(height(n.left), height(n.right));
+}
+```
+
+The flaw: `height` re-walks every subtree, and `isBalanced` calls it at every node. On a skewed tree that is O(n) heights × O(n) work = **O(n²)**. We are recomputing the same heights over and over.
+
+## Optimal — O(n) time, O(h) space
+
+The fix is to **compute height and check balance in the same post-order pass**. A node can only know if it is balanced *after* its children report up their heights — so let the recursion return the height, and use a sentinel (`-1`) to mean "a subtree below me is already unbalanced." Once unbalanced, that `-1` short-circuits all the way up.
+
+```java
+boolean isBalanced(TreeNode root) {
+    return height(root) != -1;
+}
+
+// returns subtree height, or -1 if the subtree is unbalanced
+private int height(TreeNode n) {
+    if (n == null) return 0;
+
+    int left = height(n.left);
+    if (left == -1) return -1;            // unbalanced below -> propagate
+
+    int right = height(n.right);
+    if (right == -1) return -1;
+
+    if (Math.abs(left - right) > 1) return -1;   // unbalanced here
+
+    return 1 + Math.max(left, right);     // balanced: report true height
+}
+```
+
+Each node is visited once and does O(1) work — **O(n) time**. Space is the recursion depth, **O(h)**.
+
+<ComplexityTable rows={[
+  {op: "Brute (height per node)", best: "O(n)", average: "O(n log n)", worst: "O(n²)", note: "recomputes heights"},
+  {op: "Bottom-up (single pass)", best: "O(n)", average: "O(n)", worst: "O(n)", note: "height doubles as balance flag"},
+]} />
+
+<ProbeNote>The signal interviewers want: recognizing the O(n²) redundancy and collapsing it by having one function return *both* facts (the height *and*, via the sentinel, whether balance held). This "return extra info up the recursion to avoid recomputation" pattern recurs in diameter and the harder tree problems. Note this is the *height-balanced* definition; "balanced" can also mean weight-balanced or fully complete — confirm which one is meant.</ProbeNote>

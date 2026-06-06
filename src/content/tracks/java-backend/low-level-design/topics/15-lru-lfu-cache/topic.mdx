@@ -1,0 +1,15 @@
+The **LRU / LFU cache** is the canonical "can you actually code a data structure under pressure" problem — asked at Amazon, Google, and Meta. It looks like a LeetCode warm-up, but the senior framing is what separates candidates: the eviction policy is a **Strategy**, the cache is **Decorated** with TTL/stats/persistence, and the whole thing must hit **O(1)** for both `get` and `put`. Getting LRU O(1) is expected; getting LFU O(1) is the discriminator.
+
+## Why O(1) is the whole game
+
+A naive LRU using a single `LinkedList` is O(n) to move an accessed node to the front. The trick is **HashMap + doubly-linked list**: the map gives O(1) lookup to a node, and the DLL gives O(1) splice (unlink + relink) because you already hold the node's neighbors. **Sentinel head/tail** nodes remove every null-check at the boundaries.
+
+LFU is harder. You must evict the *least frequently used* in O(1), and on a tie, the least recently used among them. The structure: a `key → node` map, a `frequency → DLL` map (each list ordered by recency within that frequency), and a **`minFreq` pointer**. On access you move the node from its freq list to the `freq+1` list; on eviction you drop the tail of the `minFreq` list. Maintaining `minFreq` correctly through inserts, bumps, and removals is exactly what interviewers watch you do.
+
+## How to frame it
+
+Clarify first: fixed **capacity**? What's the eviction policy — LRU, LFU, FIFO, random? Is it **thread-safe** (multi-threaded service cache) or single-threaded (per-request)? Any **TTL**? Write semantics — write-through, write-back, or write-around?
+
+Then state the design: a `Cache<K,V>` interface with `get`/`put`, an `EvictionPolicy` Strategy so LRU/LFU/FIFO are interchangeable, and Decorators (`TtlCache`, `StatsCache`) that wrap any cache without touching it. Call out that **Java already gives you an LRU in five lines** via `LinkedHashMap` in access-order mode overriding `removeEldestEntry` — and that you can implement it from scratch when the interviewer wants the internals. (See the Collections module's **LinkedHashMap & LRU Cache** topic for that built-in approach.)
+
+The worked solution gives full O(1) Java for both LRU and LFU, the eviction Strategy seam, and the thread-safety, TTL, and distributed follow-ups.

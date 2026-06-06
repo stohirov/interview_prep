@@ -1,0 +1,96 @@
+Structural patterns answer "how do I compose or wrap objects?" Reach for one when you need to add behavior, bridge incompatible interfaces, control access, simplify a subsystem, or model a part-whole tree. (Full theory: OOP module's *structural patterns* topic.)
+
+## Quick map
+
+| Pattern | LLD trigger phrase | Reach for it when |
+| --- | --- | --- |
+| **Decorator** | "add features *dynamically* without subclass explosion" | Stackable, optional behaviors at runtime |
+| **Adapter** | "make an *existing/3rd-party* class fit our interface" | Incompatible interface you can't change |
+| **Proxy** | "control access — *lazy load, cache, guard, log*" | A stand-in that adds a cross-cutting concern |
+| **Facade** | "give a *simple front* to a messy subsystem" | Many subsystems behind one entry point |
+| **Composite** | "treat *individual and groups uniformly* (tree)" | Part-whole hierarchies (files/folders, menus) |
+
+## Decorator — stackable behavior
+
+The trigger is "coffee + milk + sugar + … any combination." Avoids a class per combination.
+
+```java
+interface Coffee { double cost(); }
+class Espresso implements Coffee { public double cost() { return 2.0; } }
+
+abstract class CoffeeDecorator implements Coffee {
+    protected final Coffee inner;
+    CoffeeDecorator(Coffee c) { this.inner = c; }
+}
+class Milk extends CoffeeDecorator {
+    Milk(Coffee c) { super(c); }
+    public double cost() { return inner.cost() + 0.5; }
+}
+// new Milk(new Espresso())  -> 2.5, wrap as deep as you like
+```
+
+## Adapter — bridge a mismatch
+
+The trigger is "we already have / must use class X but it doesn't fit our interface."
+
+```java
+interface PaymentGateway { void pay(int cents); }
+class StripeApi { void charge(double dollars) { /* 3rd-party */ } }
+
+class StripeAdapter implements PaymentGateway {
+    private final StripeApi stripe = new StripeApi();
+    public void pay(int cents) { stripe.charge(cents / 100.0); }
+}
+```
+
+## Proxy — same interface, controlled access
+
+A proxy implements the *same* interface as the real object and adds a concern — lazy init, caching, access control, logging. (Contrast with Decorator, which adds *behavior*; Proxy adds *control*.)
+
+```java
+class CachingImageProxy implements Image {
+    private final String path; private RealImage real;   // loaded on first use
+    CachingImageProxy(String path) { this.path = path; }
+    public void render() {
+        if (real == null) real = new RealImage(path);     // lazy load
+        real.render();
+    }
+}
+```
+
+## Facade — one simple door
+
+The trigger is "the client shouldn't need to know about the order service, inventory service, and payment service separately."
+
+```java
+class CheckoutFacade {       // hides the subsystem behind one call
+    void placeOrder(Cart cart) {
+        inventory.reserve(cart);
+        payment.charge(cart.total());
+        shipping.schedule(cart);
+    }
+}
+```
+
+## Composite — uniform trees
+
+The canonical trigger is "a folder contains files *and* folders" — the in-memory file system problem.
+
+```java
+interface Node { int size(); }
+class File implements Node { public int size() { return bytes; } }
+class Directory implements Node {
+    private final List<Node> children = new ArrayList<>();
+    public int size() {                       // leaf and composite treated alike
+        return children.stream().mapToInt(Node::size).sum();
+    }
+}
+```
+
+<Callout kind="info" title="Decorator vs Proxy vs Adapter — the one-liners">
+All three wrap an object; the *intent* differs. **Adapter** changes the interface. **Decorator** adds behavior (and is stackable). **Proxy** keeps the same interface but controls access. Interviewers love this distinction — have the three one-liners ready.
+</Callout>
+
+<ProbeNote>
+The structural patterns most likely to show up by name: **Composite** (file system, org chart, menus), **Decorator** (logging/streams, coffee shop), and **Adapter** (integrating a third-party SDK). Recognizing a part-whole hierarchy and naming Composite is a frequent senior signal.
+</ProbeNote>

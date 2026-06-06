@@ -1,0 +1,34 @@
+A **prefix sum** array stores cumulative totals: `pre[i]` is the sum of the first `i` elements. Precompute it once in O(n), and afterward **any range sum is a single subtraction**, answering range queries in **O(1)** instead of O(n) per query.
+
+## The construction
+
+```java
+int[] pre = new int[a.length + 1];   // pre[0] = 0 sentinel
+for (int i = 0; i < a.length; i++)
+    pre[i + 1] = pre[i] + a[i];
+
+// sum of a[i..j] inclusive:
+int rangeSum = pre[j + 1] - pre[i];
+```
+
+The `+1` offset and `pre[0] = 0` sentinel kill the off-by-one edge cases at the array start — a standard trick worth keeping. The identity is `sum(i..j) = pre[j+1] - pre[i]`: subtracting the prefix *before* `i` from the prefix *through* `j` leaves exactly the middle.
+
+<Diagram caption="prefix array: pre[j+1] - pre[i] isolates the range">{`a       2    4    1    7    3
+index   0    1    2    3    4
+pre   0   2    6    7   14   17
+        ^                ^
+        pre[1]=2         pre[4]=14
+sum(a[1..3]) = pre[4] - pre[1] = 14 - 2 = 12   (4+1+7)`}</Diagram>
+
+## When it helps
+
+- **Many range-sum queries** over a static array — build once, answer each in O(1). m queries go from O(n·m) to O(n + m).
+- **Subarray-sum problems** — combined with a hash map of seen prefix sums, "count/find subarrays summing to k" becomes O(n) even with **negative numbers**, where a sliding window fails. The move: a subarray `(i..j)` sums to `k` iff `pre[j+1] - pre[i] = k`, i.e. `pre[i] = pre[j+1] - k` — so look up `pre[j+1] - k` in the map of prefixes seen so far.
+- **2D variants** — a 2D prefix sum answers submatrix-sum queries in O(1) via inclusion-exclusion.
+- **Difference arrays** — the inverse idea: O(1) range *updates*, then one pass to materialize.
+
+<Callout kind="warn" title="Watch the overflow and the sentinel">
+Cumulative sums grow; for large arrays of large ints, prefer `long` to avoid overflow. And always include the `pre[0] = 0` sentinel so ranges starting at index 0 need no special case.
+</Callout>
+
+<ProbeNote>Interviewers want the identity `pre[j+1] - pre[i]` stated cleanly with correct indices, and the insight that prefix-sum **+ hash map** is what beats sliding window when values can be negative. Mention overflow (`long`) and the sentinel. If the array is *mutated* between queries, a plain prefix sum is wrong — that's the cue for a Fenwick/BIT or segment tree (O(log n) update and query).</ProbeNote>

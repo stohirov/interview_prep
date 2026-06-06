@@ -1,0 +1,28 @@
+**Stacks** and **queues** are restricted sequences: they expose only the ends, and that restriction is exactly what makes them useful. A **stack** is **LIFO** (last-in, first-out) — `push`/`pop`/`peek` at one end. A **queue** is **FIFO** (first-in, first-out) — enqueue at the back, dequeue at the front. Both give O(1) operations and model the two most common access patterns in interviews: "undo the most recent thing" and "process in arrival order."
+
+## Where they show up
+
+Stacks back the call stack, expression parsing, DFS, and backtracking. Queues back BFS, scheduling, and producer/consumer buffers. A **deque** (double-ended queue) generalizes both — push/pop at either end — so one structure covers stack *and* queue.
+
+## Monotonic stacks
+
+A **monotonic stack** keeps its elements sorted (increasing or decreasing) as you scan. Before pushing, you pop everything that violates the order. Each element is pushed and popped at most once, so a scan that *looks* nested is actually **O(n)**. This is the trick behind Next Greater Element, Largest Rectangle in Histogram, and stock-span problems — any "find the nearest larger/smaller neighbor" question.
+
+## Circular queues
+
+A fixed-size **circular buffer** (ring buffer) wraps a head and tail index around an array with modular arithmetic, giving O(1) enqueue/dequeue without shifting. It is the standard bounded-queue implementation — `ArrayBlockingQueue` works this way.
+
+## Java mapping
+
+<Callout kind="tip" title="Java standard library mapping">
+- **`ArrayDeque`** — the modern default for *both* stack and queue. Backed by a resizable circular array, no per-node allocation, no synchronization overhead. Use `push`/`pop`/`peek` for a stack, `offer`/`poll`/`peek` for a queue.
+- **`PriorityQueue`** — a binary heap, *not* FIFO; dequeues the min (or a comparator-defined extreme). Reach for it when order is by priority, not arrival.
+- **`ArrayBlockingQueue` / `LinkedBlockingQueue`** — thread-safe bounded/unbounded queues for producer/consumer work.
+</Callout>
+
+<Callout kind="warn" title="Legacy classes to avoid">
+- **`Stack`** extends **`Vector`**, so every operation is synchronized (slow) and it leaks list semantics — you can index into the "middle" of a stack, and its iteration order is the reverse of what you would expect. Use `ArrayDeque` instead.
+- **`LinkedList` as a `Queue`** works but allocates a node per element and trashes cache locality. `ArrayDeque` beats it on essentially every workload.
+</Callout>
+
+The coding problems below — valid parentheses, min-stack, queue-from-stacks, and the monotonic-stack family — are where these patterns become reflexes.

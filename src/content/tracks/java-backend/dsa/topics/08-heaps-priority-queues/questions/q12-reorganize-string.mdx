@@ -1,0 +1,48 @@
+**Problem.** Given a string `s`, rearrange its characters so that **no two adjacent characters are the same**. Return any valid arrangement, or `""` if none exists.
+
+## Feasibility first
+
+A rearrangement is impossible exactly when one character is *too* frequent: if any count exceeds `(n + 1) / 2`, that character can't be spread out enough and two copies must touch. Otherwise a valid arrangement always exists.
+
+## Greedy with a max-heap — O(n log 26) ≈ O(n) time
+
+This is the [Task Scheduler](/) idea with cooldown `n = 1`: never place the same character twice in a row, so **hold the just-used character aside for one step** while you place the next-most-frequent, then return it to the heap.
+
+```java
+String reorganizeString(String s) {
+    int[] counts = new int[26];
+    for (char c : s.toCharArray()) counts[c - 'A']++;
+
+    // max-heap of [remaining count, char], most frequent first
+    PriorityQueue<int[]> heap =
+        new PriorityQueue<>((a, b) -> b[0] - a[0]);
+    for (int i = 0; i < 26; i++) {
+        if (counts[i] > (s.length() + 1) / 2) return "";   // infeasible
+        if (counts[i] > 0) heap.offer(new int[]{counts[i], i});
+    }
+
+    StringBuilder sb = new StringBuilder();
+    int[] prev = null;                       // the char on cooldown (used last step)
+    while (!heap.isEmpty()) {
+        int[] cur = heap.poll();             // most frequent available
+        sb.append((char) ('A' + cur[1]));
+        cur[0]--;
+        if (prev != null && prev[0] > 0) heap.offer(prev);  // cooldown over -> reinsert
+        prev = cur;                          // current goes on cooldown
+    }
+    return sb.toString();
+}
+```
+
+The `prev` slot enforces the one-step gap: a character is unavailable for exactly the interval right after you place it, then it rejoins the heap. Because counts fit in 26 buckets, the heap's `log` factor is a constant — **O(n)** overall.
+
+## Why greedy is safe here
+
+Always placing the *most frequent remaining* character keeps the worst offender from piling up at the end, where it would have no room to separate. With the feasibility check up front, this greedy choice never paints you into a corner.
+
+<ComplexityTable rows={[
+  {op: "Build counts", best: "O(n)", average: "O(n)", worst: "O(n)", note: "single pass"},
+  {op: "Heap reorganize", best: "O(n)", average: "O(n)", worst: "O(n)", note: "heap ≤ 26 entries → constant log factor"},
+]} />
+
+<ProbeNote>Lead with the feasibility test — `maxCount > (n + 1) / 2` ⇒ impossible — then the heap-with-cooldown greedy. The crucial mechanic is the `prev` holdover: re-offer it only *after* placing the next character, and only while its count is still positive. Note this is Task Scheduler with `n = 1`; recognizing the shared pattern is the senior signal.</ProbeNote>

@@ -1,0 +1,37 @@
+**BFS finds the shortest path exactly when every edge has the same weight** — i.e., an unweighted graph (or one where all weights are equal). That is the whole answer; the rest is *why*.
+
+## Why it works
+
+BFS explores in **layers**: all vertices at distance 1 from the source, then all at distance 2, and so on, using a FIFO **queue**. Because layers come out in nondecreasing distance order, the **first time** BFS reaches a vertex, it has done so using the **fewest edges**. With uniform edge weights, "fewest edges" is identical to "lowest total cost," so that first arrival is the shortest path.
+
+You record the distance/parent when you *discover* a node and never revisit it — the `visited` mark is what makes the first arrival final.
+
+## Why it fails on weighted graphs
+
+The layering argument breaks the moment edges have different weights: a path with *more* edges can have a *lower* total cost. BFS, counting edges, would pick the wrong one. That is precisely the gap **Dijkstra** fills — it replaces the plain queue with a **priority queue** keyed on cumulative cost, so the cheapest frontier vertex is finalized first.
+
+<Callout kind="info" title="The 0-1 BFS middle ground">
+If edges are weighted but only ever 0 or 1, you don't need Dijkstra — a **deque** suffices: push 0-weight edges to the front, 1-weight edges to the back. This keeps the frontier sorted in O(V + E) instead of O(E log V).
+</Callout>
+
+## The mark-on-enqueue rule
+
+Mark a vertex visited **when you enqueue it, not when you dequeue it.** If you wait until dequeue, the same vertex can be enqueued by several neighbors before it's processed, bloating the queue and (in some formulations) corrupting distances.
+
+```java
+int shortestPath(Map<Integer,List<Integer>> g, int src, int dst) {
+    Queue<Integer> q = new ArrayDeque<>();
+    Set<Integer> seen = new HashSet<>();
+    q.add(src); seen.add(src);
+    for (int dist = 0; !q.isEmpty(); dist++)
+        for (int i = q.size(); i > 0; i--) {        // drain one level
+            int u = q.poll();
+            if (u == dst) return dist;
+            for (int v : g.getOrDefault(u, List.of()))
+                if (seen.add(v)) q.add(v);           // mark on enqueue
+        }
+    return -1;
+}
+```
+
+<ProbeNote>Say the magic sentence: "BFS gives the shortest path in an *unweighted* graph because it visits vertices in nondecreasing distance order." Be ready to extend: weighted → Dijkstra; weights 0/1 → 0-1 BFS with a deque; negative weights → Bellman-Ford. And know the mark-on-enqueue rule cold.</ProbeNote>

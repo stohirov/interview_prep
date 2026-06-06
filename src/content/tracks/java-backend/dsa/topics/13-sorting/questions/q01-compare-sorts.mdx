@@ -1,0 +1,23 @@
+**Problem.** Compare QuickSort, MergeSort, and HeapSort across time, space, and stability — and say when you'd reach for each.
+
+## The comparison
+
+<ComplexityTable rows={[
+  {op: "QuickSort", best: "O(n log n)", average: "O(n log n)", worst: "O(n²)", note: "in-place O(log n) stack, unstable"},
+  {op: "MergeSort", best: "O(n log n)", average: "O(n log n)", worst: "O(n log n)", note: "O(n) extra space, stable"},
+  {op: "HeapSort", best: "O(n log n)", average: "O(n log n)", worst: "O(n log n)", note: "in-place O(1), unstable"},
+]} />
+
+## How to read the table
+
+**QuickSort** partitions around a pivot and recurses on each side. It's the fastest in practice — tight inner loop, great cache locality, in-place — which is why the JDK uses it for primitives. The catch is the **O(n²) worst case** when pivots are consistently bad (e.g., already-sorted input with a naive first-element pivot). Randomized or median-of-three pivots make that worst case astronomically unlikely.
+
+**MergeSort** splits in half, sorts each, and merges. The merge step gives it a rock-solid **O(n log n) worst case** and **stability**, but it pays **O(n) auxiliary space**. It's the choice when you need stability, predictable bounds, or you're sorting linked lists (merge needs no random access) or external/streamed data.
+
+**HeapSort** builds a max-heap in O(n), then repeatedly extracts the max. It's the only one that is **both O(n log n) worst case and truly in-place O(1)** — making it the safe pick under hard memory limits or where worst-case guarantees matter (it's used as the fallback in **introsort** when quicksort recursion goes too deep). Its weakness is poor cache locality (it jumps all over the array), so its constant factor is the worst of the three.
+
+<Callout kind="tip" title="The one-liner each">
+QuickSort = fastest average, in-place, but O(n²) risk. MergeSort = stable + guaranteed O(n log n), costs O(n) space. HeapSort = in-place + guaranteed O(n log n), but cache-unfriendly.
+</Callout>
+
+<ProbeNote>The trap is claiming QuickSort is "O(n log n)" without the worst-case caveat — say "O(n log n) average, O(n²) worst, mitigated by randomized pivots." Know that real libraries combine them: introsort starts with quicksort and falls back to heapsort on deep recursion to bound the worst case while keeping the fast common path.</ProbeNote>

@@ -1,0 +1,40 @@
+**Problem.** Return the middle node of a linked list in a single pass. For an even-length list, return the **second** of the two middle nodes (the common LeetCode convention).
+
+## Brute force — two passes, O(n) time
+
+Walk the list once to count `n`, then walk again `n/2` steps. Correct, O(n) time, but it traverses the list twice.
+
+## Optimal — slow/fast one pass, O(n) time, O(1) space
+
+Advance `slow` by one and `fast` by two. When `fast` runs off the end, `slow` sits at the middle — it has covered exactly half the distance.
+
+```java
+ListNode middleNode(ListNode head) {
+    ListNode slow = head, fast = head;
+    while (fast != null && fast.next != null) {
+        slow = slow.next;        // +1
+        fast = fast.next.next;   // +2
+    }
+    return slow;
+}
+```
+
+The loop condition controls which middle you land on for even lengths:
+
+- **`fast != null && fast.next != null`** (above) → returns the **second** middle (node 3 of `1 2 3 4`).
+- **`fast.next != null && fast.next.next != null`** → returns the **first** middle (node 2 of `1 2 3 4`).
+
+<Diagram caption="Pointers on 1→2→3→4→5">{`
+start:  slow,fast=1
+step1:  slow=2      fast=3
+step2:  slow=3      fast=5
+        fast.next == null → stop, slow=3 (middle)
+`}</Diagram>
+
+<Callout kind="tip" title="Why this pattern keeps coming up">
+"Slow/fast to find the middle" is the first half of palindrome checking (q11), of sorting a list by merge sort (split at the middle), and of reordering a list. Knowing which middle each loop condition yields is the detail that breaks those harder problems if you get it wrong.
+</Callout>
+
+<ProbeNote>
+Clarify *which* middle the interviewer wants for even lengths before coding — it is a one-character change but a wrong answer otherwise. Mention the one-pass beats the count-then-walk approach not in Big-O but in passes, which matters for streamed or singly-traversable input.
+</ProbeNote>

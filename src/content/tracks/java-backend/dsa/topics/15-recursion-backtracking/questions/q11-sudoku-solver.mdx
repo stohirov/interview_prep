@@ -1,0 +1,50 @@
+**Problem.** Fill a partially completed `9 × 9` Sudoku board so every row, column, and `3 × 3` box contains the digits `1–9` exactly once. A valid puzzle has a unique solution; fill the board in place.
+
+## Brute force
+
+Trying all `9^(empty cells)` digit assignments and validating at the end is utterly infeasible — up to `9⁸¹` boards. The whole problem is constraint propagation through pruning.
+
+## Optimal — constraint-checked backtracking
+
+Walk the cells in order. At each empty cell, try digits `1–9`; place one only if it's valid in its row, column, and box right now; recurse; and if the recursion fails, **erase the digit and try the next** (the unchoose). The first complete fill is the answer.
+
+```java
+void solveSudoku(char[][] board) {
+    solve(board);
+}
+
+boolean solve(char[][] board) {
+    for (int r = 0; r < 9; r++) {
+        for (int c = 0; c < 9; c++) {
+            if (board[r][c] != '.') continue;         // skip givens
+            for (char d = '1'; d <= '9'; d++) {
+                if (!isValid(board, r, c, d)) continue;  // prune invalid digits
+                board[r][c] = d;                      // choose
+                if (solve(board)) return true;        // explore — first success wins
+                board[r][c] = '.';                    // unchoose / backtrack
+            }
+            return false;     // no digit fit this empty cell → dead end
+        }
+    }
+    return true;              // no empty cell remained → solved
+}
+
+boolean isValid(char[][] b, int r, int c, char d) {
+    int br = (r / 3) * 3, bc = (c / 3) * 3;           // top-left of the 3x3 box
+    for (int i = 0; i < 9; i++) {
+        if (b[r][i] == d || b[i][c] == d) return false;          // row, column
+        if (b[br + i / 3][bc + i % 3] == d) return false;        // box
+    }
+    return true;
+}
+```
+
+The crucial control-flow detail: when an empty cell admits **no** digit, `return false` immediately — that unwinds to the previous cell and forces it to try its next option. Returning `true` only when the scan finds no empty cell means the board is complete.
+
+`isValid` is O(1) (a fixed 27 checks). The search is exponential in the number of blanks in the worst case, but constraint pruning makes real puzzles solve instantly. Space is O(1) auxiliary (in-place) plus recursion depth ≤ 81.
+
+<Callout kind="tip" title="Faster: bitmask the constraints">
+Maintaining `int[] rowMask, colMask, boxMask` (bit `d` set = digit used) turns `isValid` into a single bit test and the choose/unchoose into XOR toggles. Same algorithm, much lower constant factor — a good optimization to mention.
+</Callout>
+
+<ProbeNote>The two things to nail: returning `false` from a cell with no valid digit (that triggers the backtrack), and the box-index math `(r/3)*3, (c/3)*3`. Mention the bitmask optimization for O(1) validity, and note that you stop at the first solution because a well-formed Sudoku is unique.</ProbeNote>

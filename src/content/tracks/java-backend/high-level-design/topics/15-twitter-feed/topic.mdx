@@ -1,0 +1,26 @@
+**Design Twitter** (a social feed / news feed) is the canonical "read-heavy at planet scale" interview. With **500M users / 200M DAU**, the home timeline read dominates everything, and the whole interview turns on one question: **when do you assemble a user's timeline — at write time or at read time?** Get the fan-out decision right and you can defend the rest.
+
+## The shape of the problem
+
+A user does two things: **post** a tweet, and **read** their home timeline (a merged, ranked list of tweets from everyone they follow). Posting is cheap; reading is not, because a timeline read potentially touches hundreds of followees. The defining tension is the **fan-out** strategy:
+
+- **Fan-out-on-write (push)** — when you tweet, push the tweet ID into every follower's precomputed timeline. Reads become a single cache lookup (fast), but a post by a celebrity with 100M followers means 100M writes.
+- **Fan-out-on-read (pull)** — store tweets per author; at read time, gather the latest from everyone you follow and merge. Writes are cheap, but reads are expensive and hit many shards.
+- **Hybrid** — push for normal users, pull for celebrities, merge at read time. This is the production answer (it's how real Twitter works).
+
+This is fundamentally a caching and pre-computation problem — see the **caching strategies** topic for the read-through and stampede patterns the timeline cache relies on.
+
+## What the interviewer is probing, by style
+
+- **FAANG** — the **celebrity / hot-user problem** and the hybrid fan-out, plus timeline ranking (chronological vs ML-scored), cache sizing, and how a fan-out worker pool absorbs a viral post without falling behind.
+- **EU / remote contracting** — pragmatism: "start chronological, push fan-out, add a pull path only for the top 0.1% of accounts." Justify the Redis timeline cache on cost and operational simplicity.
+- **Regional (EPAM / Uzum)** — a clean Spring service: a tweet write path, a follow graph, a timeline read endpoint, and a defensible schema and diagram.
+
+## The key decisions
+
+1. **Fan-out strategy** — push, pull, or hybrid. This is the heart of the problem; tie it to follower-count distribution.
+2. **Timeline storage** — per-user precomputed timeline in Redis (list of tweet IDs) vs assembled on read.
+3. **Ranking** — chronological is fine for an interview; mention ML ranking as the evolution.
+4. **Media** — tweets store only IDs/URLs; blobs live in object storage behind a CDN.
+
+The worked solution applies the full 11-section structure and shows all three style angles where they diverge.

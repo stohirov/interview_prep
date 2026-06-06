@@ -1,0 +1,32 @@
+**Problem.** Why does `Arrays.sort` use a Quicksort variant for primitives but Timsort for objects? It looks inconsistent — explain the design.
+
+## The two code paths
+
+```java
+Arrays.sort(int[] a);        // dual-pivot Quicksort
+Arrays.sort(Integer[] a);    // Timsort (adaptive MergeSort)
+Collections.sort(list);      // -> list.sort(c) -> Timsort
+```
+
+The split is not an accident; it falls out of one property: **stability**.
+
+## Stability is meaningless for primitives
+
+A stable sort keeps equal elements in their original relative order. But two `int` values that compare equal are *literally the same value* — `5` and `5` are indistinguishable. Swapping their positions changes nothing observable. So the JDK is free to ignore stability for primitives and pick the algorithm that's simply **fastest**: an in-place, cache-friendly **dual-pivot Quicksort**. No O(n) scratch buffer, no node overhead, tight inner loop.
+
+## Stability is contractual for objects
+
+Two objects that compare equal can still be **distinguishable**. Consider sorting a list of employees first by salary, then by name:
+
+```java
+employees.sort(Comparator.comparing(Employee::name));   // stable
+employees.sort(Comparator.comparing(Employee::salary)); // stable -> ties keep name order
+```
+
+Because each sort is **stable**, the second sort preserves the name ordering within each salary group — giving you a clean multi-key sort for free. If `Arrays.sort(Object[])` used an unstable Quicksort, this idiom would silently break. So for objects the JDK guarantees **Timsort**, an adaptive MergeSort that is stable and O(n log n) worst case — paying the O(n) space cost that stability requires.
+
+<Callout kind="warn" title="The trade you're accepting">
+Object sorting costs O(n) auxiliary memory and boxing overhead precisely to honor the stability contract. Primitive sorting skips both because there's nothing to stabilize.
+</Callout>
+
+<ProbeNote>The crisp answer: "Stability is observable for objects but a no-op for primitives, so the JDK optimizes each path differently — Quicksort for raw speed on primitives, stable Timsort to honor the multi-key-sort contract on objects." If you want primitive *and* stable, box to an `Integer[]`. Bonus: the primitive Quicksort isn't a single algorithm — it's a dual-pivot Quicksort with insertion-sort cutoffs for small/nearly-sorted runs.</ProbeNote>

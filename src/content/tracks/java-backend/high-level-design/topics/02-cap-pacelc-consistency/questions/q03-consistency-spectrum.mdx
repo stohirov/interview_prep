@@ -1,0 +1,42 @@
+## The consistency spectrum — strongest to weakest
+
+"Consistency" is not binary. There is a **spectrum** of guarantees, each weaker (and cheaper / lower-latency / more available) than the last. Senior candidates can name the levels and, crucially, the **practical session guarantees** that sit between "linearizable" and "eventual." **DDIA Chapter 9** treats linearizability and causal consistency in depth; the session guarantees come from the classic Bayou work.
+
+<Diagram caption="The consistency spectrum: stronger = more coordination, higher latency, lower availability">{`
+ STRONGER  (more coordination, higher latency, less available)
+   |
+   |  Linearizable    -- single-copy illusion; reads see latest write, real-time order
+   |  Sequential      -- one global order all clients agree on, not tied to real time
+   |  Causal          -- causally-related ops seen in order; concurrent ops may differ
+   |  Eventual        -- replicas converge "eventually"; no ordering guarantee
+   v
+ WEAKER    (less coordination, lower latency, more available)
+`}</Diagram>
+
+### The four core levels
+
+- **Linearizable (strongest).** The system behaves as if there is a single copy of the data and every operation takes effect atomically at some point between its start and completion. A read is guaranteed to see the most recent committed write, respecting **real-time** order. Requires consensus (Raft/Paxos) or synchronous quorums. Examples: etcd, ZooKeeper, a single-leader DB read from the leader.
+- **Sequential.** All clients see operations in **the same global order**, but that order need not match real time. Two clients agree on the sequence, yet a read may lag a write that "really" happened first. Weaker than linearizable because it drops the real-time constraint.
+- **Causal.** Operations that are **causally related** (a reply after a comment, a write after the read it depends on) are seen in that order by everyone; operations that are **concurrent** may be seen in different orders on different replicas. This is the strongest model that remains **available under partition** — a sweet spot for many systems.
+- **Eventual (weakest).** If writes stop, all replicas **eventually converge** to the same value. No ordering guarantee in the meantime; reads can go backward in time. Cheapest and most available. Default for Dynamo-style stores.
+
+### Practical session guarantees
+
+In practice, fully eventual consistency is jarring for a single user. These intermediate guarantees fix the worst surprises cheaply, usually by routing or tracking a client's own version:
+
+- **Read-your-writes (read-after-write).** After *you* write, *your* subsequent reads see that write. Prevents "I just posted but it's gone." Implemented by routing your reads to the leader/replica that has your write, or by tracking your last-written version.
+- **Monotonic reads.** Successive reads by the same client never go *backward* in time — once you've seen a value, you won't later see an older one. Prevents "the comment count jumps 5 → 7 → 4." Implemented by pinning a client to one replica.
+- **Monotonic writes.** A client's writes are applied in the order it issued them. Prevents your second edit landing before your first.
+- **Writes-follow-reads (causal session).** A write that depends on a value you read is ordered after that value. Ties session guarantees up toward causal consistency.
+
+<Callout kind="tip" title="Map the guarantee to the use case">
+You rarely need linearizability. A social feed needs only **monotonic reads + read-your-writes** to feel correct. A bank balance or a distributed lock needs **linearizability**. A collaborative document is well served by **causal**. Picking the *weakest* model that still feels correct is the senior move — it buys you latency and availability.
+</Callout>
+
+### Why weaker is attractive
+
+Each step down the spectrum removes coordination: fewer round trips, lower tail latency, and continued availability under partition (recall CAP — only causal-and-weaker can stay available). The art is choosing the weakest level your product can tolerate, then adding session guarantees to paper over the user-visible anomalies.
+
+<ProbeNote>
+The interviewer wants more than "strong vs eventual." Naming linearizable → sequential → causal → eventual, and then volunteering read-your-writes and monotonic reads as the cheap fixes for eventual consistency's user-visible anomalies, is exactly the depth that reads as senior. Bonus: noting that causal is the strongest model that stays available under partition.
+</ProbeNote>

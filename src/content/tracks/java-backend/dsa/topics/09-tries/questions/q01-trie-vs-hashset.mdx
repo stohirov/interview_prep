@@ -1,0 +1,24 @@
+A `HashSet<String>` answers "is this exact key present?" in expected O(L) (you still hash all L characters of the key). A **trie** answers that too — but it also answers **prefix** questions a hash set fundamentally cannot, and that is when it wins.
+
+## What a hash set cannot do
+
+A hash set scatters keys across buckets by their full-string hash. Two keys sharing a prefix (`"car"`, `"card"`) land in unrelated buckets, so the structure has **no notion of "starts with."** To answer "which keys begin with `car`?" a hash set must scan **every** key and test each — O(n·L). A trie answers it by walking the `car` path and collecting the subtree below — independent of `n`.
+
+## Where the trie wins
+
+- **Prefix / startsWith queries** — autocomplete, type-ahead, "all words with this prefix." O(prefix length) to locate the branch.
+- **Enumerating keys in sorted order** — a DFS over an array-backed trie visits children in alphabetical order, yielding keys sorted for free.
+- **Longest-prefix match** — IP routing tables, dictionary stemming. A hash set has no way to ask "the longest stored key that is a prefix of this input."
+- **Shared-prefix space savings** — many keys with long common prefixes store that prefix once instead of once per key.
+- **Bounded worst case** — trie lookup is **always** O(L); a hash set degrades toward O(n·L) under heavy collisions or a bad `hashCode()` (mitigated, but not eliminated, by treeification).
+
+## Where the hash set wins
+
+- **Plain membership, no prefixes** — simpler to write, and usually less memory. A trie node carries a children container (up to R pointers each); a hash set stores the strings plus bucket overhead, which is typically smaller unless prefixes are heavily shared.
+- **Whole-key equality is all you need** — no point paying for prefix structure you'll never query.
+
+## The decision rule
+
+Ask: *do I need prefix or ordered queries?* If yes → trie. If it is pure "have I seen this exact string?" → `HashSet<String>`.
+
+<ProbeNote>The crisp answer: a hash set can only do exact-match, a trie adds prefix search, ordered enumeration, and longest-prefix match in O(L)-not-O(n) time. The honest caveat — for plain membership a `HashSet` is simpler and usually smaller, so don't reach for a trie unless prefixes are actually part of the requirement. Naming autocomplete and IP-routing longest-prefix-match as the canonical trie use cases lands it.</ProbeNote>

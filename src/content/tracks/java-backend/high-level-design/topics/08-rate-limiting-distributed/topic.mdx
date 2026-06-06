@@ -1,0 +1,20 @@
+Rate limiting protects a system from abuse, accidental overload, and noisy-neighbor effects by capping how many requests a given client may make in a window. On a single server it is trivial — an in-memory counter does the job. The HLD problem is the **distributed** one: your traffic is spread across dozens of stateless instances behind a load balancer, and the limit must be enforced *globally*, not per instance. That shared-state requirement is what makes the problem interesting and is the focus of this topic.
+
+## Scope: this is the distributed half
+
+The four classic **algorithms** — fixed window, sliding window (log and counter), token bucket, leaky bucket — are covered in depth in the LLD module's *Design a Rate Limiter* topic, including their class-level implementation and Big-O trade-offs. Here we assume you know them and concentrate on what changes when the limiter must run across a fleet: where the counter lives, how to make it atomic, and at which layer of the stack to enforce it.
+
+## The mental model
+
+- **Identity / key.** A limit is always keyed by *something*: per-user (after auth), per-IP (before auth, but fragile behind NAT/proxies — trust `X-Forwarded-For` only from your own edge), per-API-key, or per-tenant. Often layered: a global IP limit to blunt floods plus a finer per-key limit for fairness and billing tiers.
+- **Shared state.** Because any instance may serve any request, the count must live in a store all instances share — almost always **Redis**, hit with an atomic `INCR`/Lua script or a token-bucket script. The alternative, approximate **local limiting** (each instance enforces `limit / N`), avoids the network hop but drifts as instances scale or traffic skews.
+- **Layer.** Limiting can happen at the **edge** (CDN/WAF — Cloudflare, AWS WAF), at the **API gateway** (Kong, NGINX, Spring Cloud Gateway), or **in the application** itself (Bucket4j, Resilience4j). Earlier is cheaper — you reject junk before it consumes resources — but later has richer context (who the user is, which endpoint, what tier).
+- **The response.** A rejected request returns **HTTP 429 Too Many Requests** with a **`Retry-After`** header and usually `X-RateLimit-*` headers so well-behaved clients can back off. This contract is part of good API design, not an afterthought.
+
+## What the questions cover
+
+The questions explain **why shared state makes distributed limiting genuinely hard** (and the accuracy-vs-latency trade-offs), how to build a correct **Redis-based limiter** with `INCR` + `EXPIRE` and why a **Lua script** is needed for atomicity, and how to choose between **edge, gateway, and application** enforcement — including the 429 + `Retry-After` contract clients depend on.
+
+<ProbeNote>
+Interviewers probe whether you realize a per-instance counter does not give a global limit, and whether you reach for an atomic shared store rather than hand-waving "we'll use Redis." Senior signal: discussing the accuracy/latency/availability trade-off and what happens when the limiter store itself is down (fail-open vs fail-closed).
+</ProbeNote>

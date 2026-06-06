@@ -1,0 +1,46 @@
+## The NoSQL families — when to choose each
+
+"NoSQL" is not one thing. It is six different data models, each solving a problem the relational model handles poorly. Naming the family *and the access pattern that justifies it* is the senior signal; saying "use NoSQL for scale" is the junior one.
+
+<Diagram caption="The NoSQL families mapped to their sweet-spot access pattern">{`
+ FAMILY          SHAPE                         WINS WHEN
+ ----------      --------------------------    ------------------------------------
+ Document        nested JSON aggregate         self-contained docs, flexible schema
+ Key-value       opaque value by key           pure lookup, lowest latency/highest QPS
+ Wide-column     rows = wide sparse columns    huge write volume, linear scale-out
+ Graph           nodes + edges                 many-hop relationship traversal
+ Search          inverted index                full-text relevance, fuzzy, facets
+ Time-series     timestamped append log        metrics over time, downsample/retain
+`}</Diagram>
+
+### Document — MongoDB, DynamoDB, Couchbase
+
+Stores self-contained **aggregates** (a whole order with its line items, a user profile) as nested JSON. **Choose it when** the data is hierarchical, read and written as a unit, the schema varies between records, and you rarely join across documents. **Avoid it when** you need multi-document transactions or rich ad-hoc joins — that's a relational job.
+
+### Key-value — Redis, DynamoDB, Memcached
+
+The simplest model: `GET`/`PUT` an opaque value by key, at the lowest latency and highest throughput of any family. **Choose it for** sessions, caches, rate-limit counters, feature flags, leaderboards (Redis sorted sets). **Limitation by design:** you can only query by key — no scans, no secondary filtering (without bolted-on indexes).
+
+### Wide-column — Cassandra, ScyllaDB, HBase, Bigtable
+
+Rows hold a flexible, sparse set of columns; built for **massive write throughput and linear horizontal scale** with tunable (often eventual) consistency and no single point of failure. **Choose it for** write-heavy time-series, event logs, message/feed stores at scale. The catch: you **model the table around the query** up front — get the partition key wrong and you can't re-query cheaply.
+
+### Graph — Neo4j, Amazon Neptune, JanusGraph
+
+First-class **nodes and edges**, traversed efficiently. **Choose it when** relationships are the core query — social graphs, recommendations, fraud-ring detection, permission hierarchies — where equivalent SQL self-joins grow combinatorially with each hop.
+
+### Search — Elasticsearch, OpenSearch, Solr
+
+An **inverted index** for full-text relevance ranking, fuzzy matching, autocomplete, and faceted filtering. Almost always a **secondary, read-optimized index** fed from a system of record (via CDC or dual-write), *not* the source of truth — it can lose data and is eventually consistent.
+
+### Time-series — TimescaleDB, InfluxDB, Prometheus
+
+Optimized for **append-heavy, timestamped** data with automatic downsampling, retention policies, and fast time-range aggregation. **Choose it for** application/infra metrics, IoT sensor data, financial ticks — workloads that are overwhelmingly "write now, query as a range later."
+
+<Callout kind="note" title="Postgres covers a surprising number of these">
+Before adding a new engine, remember Postgres does `jsonb` (document), key-value, full-text search, and — with TimescaleDB — time-series. Reach for a dedicated store when one access pattern *demonstrably* outgrows what Postgres can do.
+</Callout>
+
+<ProbeNote>
+The interviewer is checking that you choose by **data model + access pattern**, not by scale alone. Strong answers pair each family with one concrete use case and one limitation (e.g., "wide-column for write-heavy time-series, but you must model the partition key around the query"). Mention that search/time-series stores are usually fed *from* a relational system of record.
+</ProbeNote>

@@ -1,0 +1,55 @@
+**Problem.** Determine whether a singly linked list reads the same forward and backward, in **O(n) time and O(1) space**.
+
+## Brute force — O(n) time, O(n) space
+
+Copy all values into an `ArrayList`, then two-pointer from both ends. Trivial, but the O(n) array violates the space constraint the question explicitly asks for. A recursive "compare front to back" approach is also O(n) stack space.
+
+## Optimal — find middle, reverse half, compare, O(1) space
+
+Three moves, all O(1) extra space:
+
+1. **Find the middle** with slow/fast pointers (q09).
+2. **Reverse the second half** in place (q05).
+3. **Walk both halves** from the ends toward the middle, comparing values.
+
+```java
+boolean isPalindrome(ListNode head) {
+    if (head == null || head.next == null) return true;
+
+    // 1. find middle: slow ends at the start of the second half
+    ListNode slow = head, fast = head;
+    while (fast != null && fast.next != null) {
+        slow = slow.next;
+        fast = fast.next.next;
+    }
+
+    // 2. reverse the second half (from slow onward)
+    ListNode prev = null, curr = slow;
+    while (curr != null) {
+        ListNode next = curr.next;
+        curr.next = prev;
+        prev = curr;
+        curr = next;
+    }
+
+    // 3. compare first half with reversed second half
+    ListNode left = head, right = prev;     // prev = head of reversed half
+    boolean ok = true;
+    while (right != null) {                 // second half is shorter/equal
+        if (left.val != right.val) { ok = false; break; }
+        left = left.next;
+        right = right.next;
+    }
+    return ok;
+}
+```
+
+For odd length, the middle node belongs to both halves but is never compared against itself in a way that fails — iterating until `right == null` stops before over-walking. We compare until the shorter (reversed) half is exhausted.
+
+<Callout kind="tip" title="Restore the list (production nicety)">
+Reversing the second half **mutates the input**. In an interview, mention that a clean implementation reverses the second half back before returning so the caller's list is left intact — important if the list is shared or concurrent.
+</Callout>
+
+<ProbeNote>
+The O(1)-space constraint is the entire point: the obvious array/stack solution is O(n) space and won't earn the question. Lead with "find middle, reverse second half, compare." Bring up the mutation caveat and offer to restore the list — senior candidates think about side effects on the caller's data.
+</ProbeNote>

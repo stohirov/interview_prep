@@ -1,0 +1,30 @@
+`java.util.Stack` shipped in JDK 1.0 and is considered **legacy** because of two design mistakes that the language never fixed for backward-compatibility reasons.
+
+## It extends Vector
+
+`Stack` **extends `Vector`**, which is wrong on two counts:
+
+- **Synchronized by accident.** Every `Vector` method is `synchronized`, so every `push`/`pop` pays for a lock you almost never want. In single-threaded code that is pure overhead; in concurrent code a coarse method-level lock is rarely the right granularity anyway.
+- **Broken encapsulation.** Inheritance leaks all of `Vector`'s `List` API into the stack. You can call `get(i)`, `add(i, x)`, or `insertElementAt`, reaching into the *middle* of a structure that is supposed to expose only its top. That violates the LIFO contract the abstraction promises.
+
+## The iteration-order trap
+
+`Stack` iterates from the **bottom up** (insertion order, inherited from `Vector`), not top-down in pop order — the opposite of what most people expect. This is a classic interview "gotcha."
+
+```java
+Deque<Integer> stack = new ArrayDeque<>();
+stack.push(1);
+stack.push(2);
+stack.push(3);
+stack.pop();        // 3  (LIFO)
+stack.peek();       // 2
+// Iterates top-first: 2, 1  — matches pop order
+```
+
+## What replaces it
+
+Use **`ArrayDeque` via the `Deque` interface**. It is faster (no synchronization, array-backed so no per-node allocation), it exposes only the deque operations, and its iterator runs in pop order. Program to `Deque<E>` so the implementation stays swappable.
+
+<ProbeNote>
+Be ready to say *both* problems out loud: "synchronized, so slow" and "extends Vector, so it leaks List methods and the LIFO invariant." Many candidates only mention the lock. If pushed on a thread-safe stack, name `ConcurrentLinkedDeque` or a lock-free `Deque` — not `Stack`. Also worth a sentence: `Vector` itself is legacy for the same `synchronized`-everything reason, superseded by `ArrayList`.
+</ProbeNote>

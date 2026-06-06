@@ -1,0 +1,31 @@
+"Finding the state" is the hard, creative part of DP — once you have it, the code writes itself. The **state** is the minimal set of variables that fully describes a subproblem, such that two paths reaching the same state are interchangeable.
+
+## A repeatable procedure
+
+1. **Frame the choice.** At each step, what decision are you making? (Take this item or skip it. Cut the string here or extend.) The variables that change across decisions are your candidate state.
+2. **Find the minimal descriptor.** Ask: "Given only these variables, can I compute the answer without knowing how I got here?" If the future depends on history you have not captured, add a dimension. The state must satisfy the **Markov property** — the future depends only on the current state, not the path taken.
+3. **Write the transition.** Express `f(state)` in terms of strictly smaller states. This is the recurrence.
+4. **Pin the base cases.** The smallest states with no further dependencies.
+5. **Choose an iteration order** so dependencies are ready before they are read (bottom-up), or just memoize (top-down).
+
+## Worked example — coin change
+
+Choice: "which coin do I use next?" After using some coins, the only thing that matters for the rest is **how much amount remains** — not which coins I already spent. So the state is a single variable, `amount`:
+
+```java
+// dp[a] = fewest coins to make amount a
+dp[a] = min over coins c of (dp[a - c] + 1)
+```
+
+For **edit distance** the choice is "transform prefix of `s` into prefix of `t`," so the state is two indices `(i, j)` — a 2D table.
+
+<Callout kind="tip" title="Heuristics for the number of dimensions">
+- One moving index → **1D** (house robber, climbing stairs).
+- Two sequences or a position-plus-budget → **2D** (LCS, knapsack: `(item, capacity)`).
+- A range that fills by length → **interval** `dp[i][j]` (palindrome, matrix-chain).
+- An extra constraint like "k transactions left" or "currently holding" adds a dimension.
+</Callout>
+
+<ProbeNote>
+The interviewer is testing whether you can articulate state *before* writing code. Say it out loud: "My state is X because given only X, the remaining problem is identical regardless of the path that led here." If the future secretly depends on something you dropped, your recurrence is wrong — the most common DP failure mode is an under-specified state.
+</ProbeNote>

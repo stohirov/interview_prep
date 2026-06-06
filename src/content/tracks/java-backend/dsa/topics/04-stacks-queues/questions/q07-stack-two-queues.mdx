@@ -1,0 +1,40 @@
+**Problem.** Implement a LIFO **stack** using only two **queues** — `push`, `pop`, `top`, `empty` — with the queues' FIFO operations as your only primitives.
+
+## The idea
+
+A queue preserves arrival order; to get LIFO you must force the **most recently added** element to the front of a queue so it dequeues first. You can pay that cost on `push` or on `pop` — both are valid; the choice just shifts where the O(n) lands.
+
+## Two-queue, costly push — O(n) push, O(1) pop
+
+On each `push`, enqueue the new element into the empty helper queue, then drain the main queue behind it. Swap the references. The newest element is now at the front, so `pop` is a plain dequeue.
+
+## One-queue rotation — simpler, same cost
+
+A single queue suffices: after enqueuing, **rotate** the queue by moving the older elements (size − 1 of them) to the back, which spins the new element to the front.
+
+```java
+class MyStack {
+    private final Deque<Integer> q = new ArrayDeque<>();
+
+    public void push(int x) {
+        q.offer(x);                       // add at back (FIFO enqueue)
+        for (int i = q.size() - 1; i > 0; i--)
+            q.offer(q.poll());            // rotate older elements behind x
+    }                                     // now x is at the front
+
+    public int pop()  { return q.poll();  }   // O(1): newest is at front
+    public int top()  { return q.peek();  }
+    public boolean empty() { return q.isEmpty(); }
+}
+```
+
+Each `push` rotates *size* elements, so push is O(n); pop and top are O(1). (The two-queue version has the same asymptotics; this one is less code and easier to get right.)
+
+<ComplexityTable rows={[
+  {op: "push", best: "O(1)", average: "O(n)", worst: "O(n)", note: "rotate n-1 elements to the back"},
+  {op: "pop / top", best: "O(1)", average: "O(1)", worst: "O(1)", note: "newest element sits at the front"},
+]} />
+
+<ProbeNote>
+Interviewers want you to recognize the trade-off: you pay O(n) somewhere — push *or* pop — and there is no amortized escape, unlike queue-from-two-stacks. State which side you are making expensive and why. Contrast it explicitly with the previous problem: queue-from-stacks is **amortized O(1)** because reversal is reusable; stack-from-queues is **O(n) per operation** because every push (or pop) must re-establish the full ordering.
+</ProbeNote>

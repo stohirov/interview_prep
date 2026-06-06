@@ -1,0 +1,20 @@
+**Video streaming** (Netflix, YouTube) is the heavyweight media-system design. It is really three systems bolted together: an **ingest + encoding pipeline** that turns one uploaded master into many renditions, a **delivery system** built almost entirely on CDN with adaptive bitrate streaming, and a set of metadata services (catalog, recommendations, view counting). The bytes are enormous and the read path is dominated by the CDN, so the interesting engineering is in the asynchronous transcoding pipeline and in how you keep the player smooth across variable networks.
+
+## The shape of the problem
+
+The defining characteristic is the **asymmetry between upload and playback**, and the fact that **playback is served from the edge, not from your origin**. A video is uploaded once but watched billions of times, so you spend heavily once (transcode into many bitrates and resolutions, segment into chunks) to make every subsequent read a cheap CDN hit. The player drives **adaptive bitrate (ABR)** — it switches rendition per segment based on measured bandwidth — which is why you encode multiple renditions and expose them through an HLS/DASH manifest.
+
+## What the interviewer is probing, by style
+
+- **FAANG** — go deep on the encoding pipeline (chunked, parallel transcoding via a job queue), the manifest + segment model for HLS/DASH, CDN tiering and cache-fill, and view counting at billions of events/day (approximate, stream-aggregated). Expect "how do you transcode a 4-hour 4K master quickly?"
+- **EU / remote contracting** — pragmatism and cost: managed encoding (MediaConvert) + a commercial CDN (CloudFront/Akamai/Fastly) instead of bespoke. Justify rendition ladder and storage tiering on cost.
+- **Regional (EPAM / Uzum)** — a clean upload + status API, an understanding of why playback is CDN-served, a sane catalog schema, and an honest async-pipeline story.
+
+## The key decisions
+
+1. **Encoding pipeline** — chunk the master, transcode chunks in parallel into a **rendition ladder** (e.g. 240p→4K), then segment for streaming. Async, off the upload path.
+2. **Streaming protocol** — HLS or DASH: a manifest plus short segments, with multiple bitrates for ABR.
+3. **Delivery** — CDN-first, multi-tier, with origin shielding; playback essentially never touches your application servers.
+4. **View counting** — high-volume, approximate, stream-aggregated counters; never synchronous DB updates.
+
+The worked solution applies the full 11-section structure and shows all three style angles where they diverge.

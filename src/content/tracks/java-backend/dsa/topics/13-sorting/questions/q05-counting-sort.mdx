@@ -1,0 +1,35 @@
+**Problem.** What is CountingSort, when does it apply, and what's its complexity?
+
+## The idea
+
+CountingSort is a **non-comparison** sort. Instead of comparing elements, it counts how many times each key value occurs, then uses a running prefix sum to place each element directly at its final index. It applies only when keys are **integers in a small, known range** `[0, k)`.
+
+```java
+int[] countingSort(int[] a, int k) {        // values in [0, k)
+    int[] count = new int[k];
+    for (int x : a) count[x]++;              // tally occurrences
+    for (int i = 1; i < k; i++)
+        count[i] += count[i - 1];            // prefix sums -> end positions
+    int[] out = new int[a.length];
+    for (int i = a.length - 1; i >= 0; i--)  // iterate right-to-left for STABILITY
+        out[--count[a[i]]] = a[i];
+    return out;
+}
+```
+
+## Complexity
+
+- **Time: O(n + k)** — one pass to count, one over the buckets, one to place.
+- **Space: O(n + k)** — the count array plus the output buffer.
+
+When `k = O(n)` this is **linear** — beating the Ω(n log n) comparison-sort lower bound, because it never compares; it indexes. When `k ≫ n` (e.g., sorting 10 values in range `[0, 10⁹)`) the count array dwarfs the data and it becomes wasteful — that's the boundary where you fall back to a comparison sort or to RadixSort (which applies CountingSort digit-by-digit to handle large ranges).
+
+## Stability matters
+
+Iterating the input **right-to-left** while decrementing the prefix-sum positions keeps equal keys in original order — making CountingSort **stable**. That stability is exactly what makes it usable as the inner pass of **RadixSort**.
+
+<Callout kind="warn" title="The applicability test">
+Use CountingSort only when keys are bounded small integers (ages, grades, ASCII chars, small enum ordinals). It does not work on arbitrary objects, floats, or huge integer ranges.
+</Callout>
+
+<ProbeNote>State the constraint first — "small integer keys in a known range" — then the O(n + k) bound and why that beats Ω(n log n) (no comparisons, direct indexing). Mention the right-to-left placement for stability and that RadixSort generalizes it to large ranges by sorting digit by digit.</ProbeNote>

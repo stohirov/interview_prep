@@ -1,0 +1,19 @@
+A **payment system** moves money between parties correctly, exactly once, and with a provable audit trail — and it must do so while integrating with external processors that can time out, retry, or fail at the worst moment. It is the highest-stakes system-design topic because the failure modes aren't "a slow page," they're "we charged the customer twice" or "the books don't balance." Interviewers love it precisely because it tests whether you respect correctness over cleverness.
+
+## The shape of the problem
+
+A payment is a **distributed transaction across systems you don't control**: your service, a card processor (model it on **Stripe**), banks, and your own ledger. You can't wrap them in a single ACID transaction, so you must achieve consistency through **idempotency** (the same request never charges twice), **sagas** (multi-step flows with compensating actions when a later step fails), **double-entry bookkeeping** (every movement recorded as balanced debit/credit pairs so the ledger always reconciles), and **reconciliation** (continuously proving your records match the processor's). Around this sit fraud hooks and the integration contract with the processor.
+
+## What the interviewer is probing, by style
+
+- **FAANG** — idempotency-key design, the saga/state-machine for authorize → capture → settle with compensations, exactly-once charging across retries and processor timeouts, the double-entry ledger as the source of truth, and reconciliation at 100K TPS.
+- **EU / remote contracting** — pragmatism and correctness: idempotency keys, an outbox for reliable processor calls, a ledger you can audit, and integration with Stripe/Adyen rather than touching card networks directly. PCI scope awareness is a plus.
+- **Regional (EPAM / Uzum)** — a clean Spring payment service, a defensible ledger schema, retry/idempotency handling, and integration with regional processors (Click.uz, Payme) and Stripe. This is a strong topic to make concrete with real **Stripe Connect / Click / Payme** experience — describe the patterns you used, but do not invent any company's internal architecture.
+
+## The key decisions
+
+1. **Idempotency** — client-supplied idempotency keys + a dedup store so retries (network, user double-click, processor timeout) are safe and return the original result.
+2. **Distributed transaction strategy** — a **saga** (orchestrated state machine) over authorize/capture/ledger-post/notify, each step with a compensating action, since 2PC across external processors isn't available.
+3. **Ledger correctness** — immutable, append-only **double-entry** bookkeeping as the system of record, with continuous **reconciliation** against the processor.
+
+The worked solution applies the full 11-section structure and shows all three style angles where they diverge.

@@ -1,0 +1,47 @@
+**Problem.** Given an integer array `nums` and an integer `k`, return the number of **contiguous subarrays** whose sum equals `k`. Values may be negative.
+
+## Brute force — O(n²) time
+
+Fix each start index, extend the end, accumulate the running sum, and count hits:
+
+```java
+int subarraySumBrute(int[] nums, int k) {
+    int count = 0;
+    for (int i = 0; i < nums.length; i++) {
+        int sum = 0;
+        for (int j = i; j < nums.length; j++) {
+            sum += nums[j];
+            if (sum == k) count++;
+        }
+    }
+    return count;
+}
+```
+
+Correct, but quadratic. (And note: because values can be **negative**, a sliding window does **not** work — growing the window doesn't monotonically grow the sum, so you can't decide when to shrink.)
+
+## Optimal — prefix sums + a hash map of counts — O(n)
+
+Let `prefix[i]` be the sum of `nums[0..i]`. A subarray `(j, i]` sums to `k` exactly when `prefix[i] - prefix[j] == k`, i.e. `prefix[j] == prefix[i] - k`. So as we scan and maintain the running prefix, each step asks: *how many earlier prefixes equal `prefix - k`?* That count is how many subarrays ending here sum to `k`. Store prefix→occurrence-count in a hash map.
+
+```java
+int subarraySum(int[] nums, int k) {
+    Map<Integer, Integer> prefixCount = new HashMap<>();
+    prefixCount.put(0, 1);            // empty prefix: handles subarrays starting at index 0
+    int prefix = 0, count = 0;
+    for (int n : nums) {
+        prefix += n;
+        count += prefixCount.getOrDefault(prefix - k, 0);   // earlier prefixes that close a k-sum here
+        prefixCount.merge(prefix, 1, Integer::sum);          // record this prefix
+    }
+    return count;
+}
+```
+
+**Time:** O(n), one pass. **Space:** O(n) for the prefix map.
+
+<Callout kind="tip" title="The seed entry">
+`prefixCount.put(0, 1)` is the part people forget. A prefix sum equal to `k` itself (a subarray starting at index 0) needs a "prefix 0 seen once" baseline to be counted. Without it you undercount.
+</Callout>
+
+<ProbeNote>Two things they probe: (1) recognizing the **prefix-sum + hashmap** pattern (count, not last-index — duplicates matter, so store *counts*), and (2) knowing that **negatives kill the sliding window**, forcing this approach. Edge cases: the seed `(0,1)` entry, `k = 0`, all-negative arrays, and repeated prefix values. State both complexities out loud.</ProbeNote>

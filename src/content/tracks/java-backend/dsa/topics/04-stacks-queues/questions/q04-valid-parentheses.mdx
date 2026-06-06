@@ -1,0 +1,38 @@
+**Problem.** Given a string containing only `()[]{}`, determine whether the brackets are **balanced**: every opener is closed by the matching closer, and pairs nest correctly. `"([])"` is valid; `"([)]"` and `"(]"` are not.
+
+## Brute force — O(n²) time
+
+Repeatedly find an innermost matched pair (`()`, `[]`, or `{}`) and delete it; if the string becomes empty it was valid. Each pass removes one pair and rescans, so it is O(n²). Correct but wasteful — and it quietly screams "use a stack."
+
+## Optimal — O(n) time, O(n) space
+
+The matching rule is **LIFO**: the most recently opened bracket must be the first to close. That is exactly a stack. Push each opener; on a closer, the stack top **must** be its matching opener — otherwise fail fast. At the end the stack must be empty (no unclosed openers).
+
+```java
+boolean isValid(String s) {
+    Deque<Character> stack = new ArrayDeque<>();
+    for (char c : s.toCharArray()) {
+        switch (c) {
+            case '(' -> stack.push(')');   // push the EXPECTED closer
+            case '[' -> stack.push(']');
+            case '{' -> stack.push('}');
+            // c is a closer: it must equal what we expect on top
+            default -> {
+                if (stack.isEmpty() || stack.pop() != c) return false;
+            }
+        }
+    }
+    return stack.isEmpty();   // any leftover opener => unbalanced
+}
+```
+
+Pushing the *expected closer* instead of the opener is a clean trick: the closer branch becomes a single equality check, no lookup table needed.
+
+<ComplexityTable rows={[
+  {op: "isValid", best: "O(1)", average: "O(n)", worst: "O(n)", note: "single pass; best case = immediate mismatch"},
+  {op: "space", best: "O(1)", average: "O(n)", worst: "O(n)", note: "all-openers string fills the stack"},
+]} />
+
+<ProbeNote>
+Watch the three failure modes the interviewer is checking: a closer with an **empty stack** (`")"`), a **mismatched** closer (`"(]"`), and **leftover openers** at the end (`"("`). All three are handled above — the `isEmpty()` guard, the `pop() != c` check, and the final `isEmpty()`. If they extend it to arbitrary character strings, you only stack the bracket characters and ignore the rest.
+</ProbeNote>

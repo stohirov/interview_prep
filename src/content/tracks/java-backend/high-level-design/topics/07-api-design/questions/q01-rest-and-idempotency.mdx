@@ -1,0 +1,66 @@
+## REST principles and idempotency — which methods are idempotent, and why it matters for retries
+
+### REST in one breath
+
+REST models the domain as **resources** addressed by URLs, manipulated through a small fixed set of **HTTP methods**, with **status codes** carrying outcome and **representations** (usually JSON) carrying state. It is **stateless** — each request carries everything the server needs, so any replica can handle it — and responses are explicit about **cacheability**. The discipline that separates a senior answer is using HTTP *semantics* correctly rather than tunneling every operation through `POST /doThing`.
+
+### Safe vs idempotent — two different properties
+
+- **Safe** — the method has no side effects; it only reads. `GET`, `HEAD`, `OPTIONS`.
+- **Idempotent** — making the request *N* times has the same server-side effect as making it **once**. The response body may differ (e.g. a second `DELETE` returns `404`), but the *state* converges to the same place.
+
+Safe implies idempotent, but not vice versa: a `PUT` mutates yet is idempotent.
+
+| Method | Safe | Idempotent | Why |
+| --- | --- | --- | --- |
+| `GET` / `HEAD` | yes | yes | read-only |
+| `PUT` | no | **yes** | replaces the resource with the supplied representation — same result every time |
+| `DELETE` | no | **yes** | resource ends up gone regardless of how many times you call it |
+| `POST` | no | **no** | creates a new subordinate resource each time → duplicates |
+| `PATCH` | no | **not guaranteed** | depends on the patch: `set field = x` is idempotent; `increment by 1` is not |
+
+### Why this matters for retries
+
+In a distributed system, a client that sends a request and gets **no response** cannot distinguish three cases: the request was lost, it succeeded but the *response* was lost, or it's still in flight. The only safe recovery is to **retry** — and retries are baked into load balancers, service meshes, gRPC clients, and SDKs.
+
+If the method is idempotent, retrying is free: replay it until you get an answer. If it is **not** (a bare `POST` that charges a card or creates an order), a blind retry can **double-charge or double-create**.
+
+<Callout kind="danger" title="The classic failure">
+"We retry on timeout" + a non-idempotent `POST` = duplicate orders in production. The timeout fired *after* the server committed but *before* the response came back. Retrying without dedup means you process the same intent twice.
+</Callout>
+
+### The fix: idempotency keys
+
+For an inherently non-idempotent operation, make it idempotent at the application layer with a **client-generated idempotency key**:
+
+```
+POST /payments
+Idempotency-Key: 9f2c1e7a-...   (a UUID the client picks once per intent)
+{ "amount": 4200, "currency": "USD" }
+```
+
+The server stores the key with the result of the first execution. On a retry with the **same key**, it returns the **stored result** instead of re-executing. Stripe's API is the canonical example.
+
+<Mermaid caption="An idempotency key turns a retried POST into a safe replay">{`sequenceDiagram
+    participant C as Client
+    participant S as Server
+    participant D as Idempotency store
+    C->>S: POST /payments (Key: K1)
+    S->>D: seen K1?
+    D-->>S: no
+    S->>S: charge card, store result under K1
+    S--xC: response LOST (timeout)
+    C->>S: retry POST /payments (Key: K1)
+    S->>D: seen K1?
+    D-->>S: yes -> stored result
+    S-->>C: same 200, no second charge`}</Mermaid>
+
+### Practical notes
+
+- Scope the key with a TTL (e.g. 24h) and key it per endpoint + user to avoid collisions.
+- `GET` should *never* mutate — putting a side effect behind a `GET` breaks caches, prefetchers, and crawlers that replay it freely.
+- Make `DELETE` and `PUT` genuinely idempotent; returning `404` on a second `DELETE` is fine — the state (gone) is unchanged.
+
+<ProbeNote>
+The interviewer wants the precise list — `GET`/`PUT`/`DELETE` idempotent, `POST` not, `PATCH` "it depends" — and crucially the *reasoning*: retries are unavoidable, so non-idempotent writes need an idempotency key to dedupe. Bonus signal: distinguishing safe from idempotent, and naming Stripe-style keys.
+</ProbeNote>

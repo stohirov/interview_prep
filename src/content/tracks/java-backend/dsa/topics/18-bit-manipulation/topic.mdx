@@ -1,0 +1,43 @@
+**Bit manipulation** operates directly on the binary representation of integers. It shows up in interviews for two reasons: a handful of problems have elegant O(1)-space bit solutions (Single Number, Missing Number), and bitmasks are the standard way to represent subsets in enumeration and DP over small sets.
+
+## Java's bitwise operators
+
+- `&` AND, `|` OR, `^` XOR, `~` NOT (one's complement).
+- `<<` left shift (multiply by 2 per shift).
+- `>>` **arithmetic** right shift — sign-extends (fills with the sign bit), so negatives stay negative.
+- `>>>` **logical/unsigned** right shift — fills with zeros. Java has no unsigned types, so `>>>` is how you treat an `int` as 32 unsigned bits. This distinction is a frequent interview question.
+
+Shift counts wrap modulo the type width: `1 << 32 == 1` for `int` (uses only the low 5 bits of the count), `1L << 64 == 1L` for `long` (low 6 bits). A common bug.
+
+## The essential tricks
+
+<ComplexityTable rows={[
+  {op: "Test bit i", best: "(n >> i) & 1", average: "—", worst: "—"},
+  {op: "Set bit i", best: "n | (1 << i)", average: "—", worst: "—"},
+  {op: "Clear bit i", best: "n & ~(1 << i)", average: "—", worst: "—"},
+  {op: "Toggle bit i", best: "n ^ (1 << i)", average: "—", worst: "—"},
+  {op: "Clear lowest set bit", best: "n & (n - 1)", average: "—", worst: "—"},
+  {op: "Isolate lowest set bit", best: "n & (-n)", average: "—", worst: "—"},
+  {op: "Power of two test", best: "n > 0 && (n & (n-1)) == 0", average: "—", worst: "—"},
+]} />
+
+`n & (n - 1)` clears the lowest set bit — the basis of Brian Kernighan's bit-count (loops once per set bit). `n & (-n)` isolates it (used in Fenwick trees).
+
+## XOR — the workhorse
+
+`a ^ a = 0`, `a ^ 0 = a`, and XOR is commutative and associative. XOR-ing a list cancels every value that appears an even number of times, leaving the odd one out — that's the whole trick behind Single Number and Missing Number, in O(1) space.
+
+## Bitmasks for subsets
+
+An `int` with `n` low bits represents a subset of an `n`-element set: bit `i` set means element `i` is included. Iterating `mask` from `0` to `2^n - 1` enumerates all subsets. Combined with DP (`dp[mask]`), this solves problems over small sets (n ≤ ~20) like Traveling Salesman.
+
+<Callout kind="tip" title="Java standard library">
+- `Integer.bitCount(n)` / `Long.bitCount(n)` — population count (number of set bits), often a single CPU instruction.
+- `Integer.numberOfLeadingZeros` / `numberOfTrailingZeros`, `highestOneBit`, `reverse`, `reverseBytes`.
+- `Integer.toBinaryString(n)` — debugging.
+- **`BitSet`** — a growable bit vector for masks wider than 64 bits, with `set`, `get`, `cardinality`, `and`/`or`/`xor`. Use it for large sieves and bit-flag sets.
+</Callout>
+
+<Callout kind="warn" title="Sign and width gotchas">
+`Integer.MIN_VALUE` has only the sign bit set; `-n` of it overflows back to itself. Mixing `int` and `long` shifts silently truncates the count. When treating bits as unsigned, reach for `>>>` and `Integer.toUnsignedLong`.
+</Callout>

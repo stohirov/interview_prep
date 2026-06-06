@@ -1,0 +1,35 @@
+Java's `PriorityQueue` is a **min-heap by default** — it orders by natural ordering and hands you the *smallest* element. To get a **max-heap**, you reverse the comparator so the *largest* element compares as "first."
+
+```java
+// Cleanest for Comparable types:
+PriorityQueue<Integer> maxHeap = new PriorityQueue<>(Comparator.reverseOrder());
+
+maxHeap.addAll(List.of(3, 1, 4, 1, 5));
+maxHeap.peek();   // 5  -- largest at the head
+maxHeap.poll();   // 5
+```
+
+## The three idioms
+
+- **`Comparator.reverseOrder()`** — the idiomatic, type-safe choice for any `Comparable`.
+- **Lambda `(a, b) -> b - a`** — works for `int`, but **risks overflow** when `b - a` exceeds `Integer.MAX_VALUE`. Prefer `Integer.compare(b, a)`, which is overflow-safe.
+- **Key extractor reversed** — for objects: `Comparator.comparingInt(Task::priority).reversed()`.
+
+```java
+// Max-heap of tasks by priority, overflow-safe:
+PriorityQueue<Task> q =
+    new PriorityQueue<>(Comparator.comparingInt(Task::priority).reversed());
+
+// Common bug -- do NOT do this for arbitrary ints:
+PriorityQueue<Integer> buggy = new PriorityQueue<>((a, b) -> b - a);  // overflow!
+```
+
+## Why there's no built-in max-heap
+
+There's no separate `MaxPriorityQueue` class because a comparator fully parameterizes the ordering — min and max are the same structure with an inverted compare. This generalizes: any "extract the most *important*" rule (longest job, highest score, closest point) is just a custom comparator over a min-heap.
+
+<Callout kind="warn" title="The b - a overflow trap">
+`(a, b) -> b - a` silently breaks when the subtraction overflows `int` (e.g. `b = Integer.MAX_VALUE`, `a` negative). Always use `Integer.compare(b, a)` or `Comparator.reverseOrder()` — interviewers specifically probe this.
+</Callout>
+
+<ProbeNote>Lead with `Comparator.reverseOrder()`. If asked for the lambda, write `Integer.compare(b, a)`, not `b - a`, and name the overflow reason. Knowing that min/max are one structure differing only by comparator shows you understand `PriorityQueue` is comparator-driven, not hardcoded.</ProbeNote>

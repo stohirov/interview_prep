@@ -1,0 +1,180 @@
+## 1. Functional requirements
+
+- A square **board** of `N` cells (typically 100), cell 1 to cell `N`.
+- **Snakes** (head → lower tail) and **ladders** (bottom → higher top) placed on the board.
+- Two or more **players** take turns in a fixed order.
+- On a turn, a player **rolls a die**, advances, and — if landing on a snake head or ladder bottom — is teleported to the other end.
+- A player **wins** by reaching the final cell; configurable exact-roll-to-win vs overshoot.
+- The game reports the winner and the turn sequence.
+
+## 2. Non-functional requirements
+
+- **Extensibility** — swapping the die (fair, loaded, multi-die) must not touch the game loop (Open/Closed).
+- **Testability** — a deterministic/seeded die makes the engine unit-testable.
+- **Single responsibility** — board owns jumps, dice owns randomness, game owns the turn loop; no class reaches into another's rules.
+- **Lightweight** — no concurrency or persistence required; resist over-engineering.
+
+## 3. Core entities
+
+| Entity | Responsibility |
+| --- | --- |
+| `Board` | Sized grid; maps a cell to its jump destination (snake or ladder). |
+| `Jump` | Uniform start → end move; a `Snake` jumps down, a `Ladder` jumps up. |
+| `Dice` | Strategy producing a roll value (fair, loaded, multi-die). |
+| `Player` | A participant with a name and current position. |
+| `Game` | Engine: turn order, the loop, applying jumps, declaring a winner. |
+| `MoveObserver` | Optional sink notified on each position change (logger/UI). |
+
+## 4. Class diagram
+
+<Mermaid caption="Snake and ladder class model">{`classDiagram
+    class Game {
+      -Board board
+      -Dice dice
+      -Queue~Player~ players
+      +play() Player
+    }
+    class Board {
+      -int size
+      -Map~Integer,Integer~ jumps
+      +destination(int) int
+      +size() int
+    }
+    class Jump {
+      -int start
+      -int end
+    }
+    class Dice {
+      <<interface>>
+      +roll() int
+    }
+    class Player {
+      -String name
+      -int position
+      +moveTo(int)
+    }
+    class MoveObserver {
+      <<interface>>
+      +onMove(Player, int, int)
+    }
+    Game --> Board
+    Game --> Dice
+    Game "1" o-- "*" Player
+    Game ..> MoveObserver
+    Board "1" o-- "*" Jump
+    Dice <|.. FairDice
+    Dice <|.. LoadedDice`}</Mermaid>
+
+## 5. Key interfaces and classes
+
+```java
+interface Dice {                       // Strategy: pluggable randomness
+    int roll();
+}
+
+final class FairDice implements Dice {
+    private final Random rng;
+    private final int faces;
+    FairDice(int faces, long seed) { this.faces = faces; this.rng = new Random(seed); }
+    public int roll() { return 1 + rng.nextInt(faces); }   // seeded -> testable
+}
+
+final class LoadedDice implements Dice {                   // biased toward high rolls
+    private final Random rng = new Random();
+    private final int faces;
+    LoadedDice(int faces) { this.faces = faces; }
+    public int roll() { return Math.max(rng.nextInt(faces) + 1, rng.nextInt(faces) + 1); }
+}
+
+final class Jump {                     // a snake or a ladder, modeled uniformly
+    final int start, end;
+    Jump(int start, int end) { this.start = start; this.end = end; }
+}
+
+interface MoveObserver {               // Observer: logger / UI hook
+    void onMove(Player p, int from, int to);
+}
+
+final class Player {
+    final String name;
+    private int position = 0;          // 0 = off-board start
+    Player(String name) { this.name = name; }
+    int position() { return position; }
+    void moveTo(int p) { this.position = p; }
+}
+```
+
+```java
+final class Board {
+    private final int size;
+    private final Map<Integer, Integer> jumps = new HashMap<>();  // start cell -> end cell
+
+    Board(int size, List<Jump> jumpList) {
+        this.size = size;
+        for (Jump j : jumpList) jumps.put(j.start, j.end);        // snakes and ladders, uniformly
+    }
+    int size() { return size; }
+    // Returns the cell to settle on after applying any jump that starts here.
+    int destination(int cell) { return jumps.getOrDefault(cell, cell); }
+}
+```
+
+```java
+final class Game {
+    private final Board board;
+    private final Dice dice;
+    private final Queue<Player> players;                  // round-robin turn order
+    private final List<MoveObserver> observers = new ArrayList<>();
+
+    Game(Board board, Dice dice, List<Player> players) {
+        this.board = board;
+        this.dice = dice;
+        this.players = new LinkedList<>(players);
+    }
+
+    void addObserver(MoveObserver o) { observers.add(o); }
+
+    Player play() {
+        while (true) {
+            Player p = players.poll();                    // take turn
+            int roll = dice.roll();
+            int target = p.position() + roll;
+            if (target <= board.size()) {                 // overshoot stays put (exact-win rule)
+                int from = p.position();
+                int landed = board.destination(target);   // apply snake/ladder
+                p.moveTo(landed);
+                observers.forEach(o -> o.onMove(p, from, landed));
+                if (landed == board.size()) return p;     // winner
+            }
+            players.offer(p);                             // back of the queue
+        }
+    }
+}
+```
+
+## 6. Design patterns used
+
+- **Strategy** — `Dice` hides the roll algorithm so a fair (seeded) die, a loaded die, or a multi-die sum can be swapped in without touching `Game`. It also makes the engine deterministically testable.
+- **Observer** — `MoveObserver` lets a logger, replay recorder, or UI react to each move without the `Game` knowing about them.
+- **Factory** — a `BoardFactory` (e.g. `standardBoard()`, `fromConfig(...)`) centralizes board construction so snake/ladder placement is defined in one place rather than littering the caller.
+
+## 7. Trade-offs and alternatives
+
+- **Uniform jumps vs separate Snake/Ladder classes.** Storing both as `start → end` entries in one map collapses the logic to a single lookup. Separate `Snake`/`Ladder` subclasses read nicely but add no behavior — a textbook case where inheritance earns nothing. Prefer the map.
+- **Exact-roll-to-win vs overshoot.** Shown rule: an overshoot forfeits the move (stay put). Alternatives include "bounce back" from the final cell; clarify which the interviewer wants — getting this rule right signals attention to requirements.
+- **Restraint over patterns.** State or Command could be layered on, but for a board this simple they are over-engineering. Naming the seams (Dice, Observer) and *declining* to add more is the senior move.
+- **Turn order structure.** A `Queue` gives clean round-robin; a list with an index works too but is easier to get wrong on removal.
+
+## 8. Common follow-up questions
+
+- **Multiple players** — already handled by the round-robin queue; scale is just more entries.
+- **Custom / configurable board** — drive snake/ladder placement from config via a `BoardFactory`; validate no two jumps share a start cell and no jump lands on the final cell.
+- **Weighted / loaded dice** — a `LoadedDice` Strategy; the engine is unchanged, which is the point of the abstraction.
+- **Replay** — record each `onMove` event via an observer; the seeded `FairDice` makes a full game reproducible.
+- **Multiple dice / movement variants** — a `MultiDice` summing several rolls slots in behind the same `Dice` interface.
+
+## 9. What interviewers are really probing
+
+<ProbeNote>
+That you (1) found the clean Board/Dice/Player/Game boundaries without inventing dead-weight classes, (2) modeled snakes and ladders **uniformly as jumps** instead of two special cases, (3) hid the die behind a **Strategy** and seeded it so the engine is testable, and (4) showed **restraint** — naming where Observer/Factory help and declining to over-pattern a tiny domain. On a warm-up this small, judgment about *what not to build* is the senior signal.
+</ProbeNote>

@@ -1,0 +1,26 @@
+## RDBMS strengths and weaknesses — when are they the right answer?
+
+The relational model has dominated for fifty years for good reasons. Knowing *why* — and where it bends — lets you justify "just use Postgres" or explain exactly what forces you off it.
+
+### What an RDBMS is genuinely great at
+
+- **Multi-row ACID transactions.** Atomic, isolated commits across many rows and tables. Move money, decrement inventory while creating an order, enforce a unique constraint — the engine guarantees the invariant or rolls back. This is the single hardest thing to reproduce on a distributed NoSQL store.
+- **Ad-hoc queries with joins.** SQL lets you ask questions you didn't anticipate at schema-design time. Normalize once, query a thousand ways. No need to pre-shape the data per access pattern.
+- **Strong consistency by default.** Reads from the primary see the latest committed write. No reconciliation logic in your application.
+- **A declarative schema and constraints.** Types, `NOT NULL`, foreign keys, `CHECK`, and unique indexes push data integrity into the database, where it can't be bypassed by a buggy service.
+- **Mature ecosystem.** Decades of tooling, query planners, replication, backups, and operational know-how. Postgres in particular also does JSON (`jsonb`), full-text search, geospatial (PostGIS), and time-series — covering several "NoSQL" needs in one engine.
+
+### Where it strains
+
+- **Horizontal write scaling.** A single primary accepts all writes. You scale reads with replicas easily, but scaling *writes* past one node means **sharding**, which the relational model does not do natively — you lose cross-shard joins and cross-shard transactions, the very things you chose it for.
+- **Rigid schema under rapid change.** Migrations on huge tables need care (`ALTER` locks, online migration tooling). Flexible/sparse data fits a document store more naturally (though `jsonb` softens this).
+- **Extreme throughput / huge objects.** Millions of writes/sec or large blobs belong in wide-column stores or object storage, not rows.
+- **Deep relationship traversal.** Six-hop "friends of friends of friends" joins blow up; a graph database is built for that.
+
+<Callout kind="tip" title="The honest default">
+For the overwhelming majority of systems — including ones at real scale — a single well-tuned Postgres primary with read replicas is the correct, boring choice. You outgrow it for a *specific* reason (write volume, a specialized access pattern), not as a default posture.
+</Callout>
+
+<ProbeNote>
+The interviewer wants you to lead with **ACID transactions, joins, and ad-hoc query flexibility** as the strengths, and to name **single-primary write scaling** as the real ceiling — then note that sharding sacrifices cross-shard transactions and joins. Reflexively reaching for NoSQL "because scale" without that reasoning reads as junior.
+</ProbeNote>

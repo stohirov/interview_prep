@@ -1,0 +1,49 @@
+**Problem.** Return the number of `1` bits (the **Hamming weight**) of a 32-bit integer.
+
+## Naive — check every bit, O(32)
+
+```java
+int hammingWeight(int n) {
+    int count = 0;
+    for (int i = 0; i < 32; i++)
+        count += (n >>> i) & 1;     // >>> so the sign bit doesn't smear ones
+    return count;
+}
+```
+
+Use `>>>` (unsigned shift): with `>>`, a negative `n` sign-extends and the loop would over-count. Always 32 iterations regardless of input.
+
+## Optimal — Brian Kernighan's, O(set bits)
+
+`n & (n - 1)` clears the lowest set bit, so the loop runs once per set bit — cheaper for sparse numbers:
+
+```java
+int hammingWeight(int n) {
+    int count = 0;
+    while (n != 0) {
+        n &= (n - 1);   // remove the lowest set bit
+        count++;
+    }
+    return count;
+}
+```
+
+This works correctly for negative inputs without `>>>` because we never shift — we only mask. `n != 0` terminates after exactly `popcount(n)` iterations.
+
+## Production answer
+
+```java
+int hammingWeight(int n) {
+    return Integer.bitCount(n);   // typically one CPU POPCNT instruction
+}
+```
+
+In real code this is the right answer; in an interview, mention it but be ready to show Kernighan's loop, since they're testing whether you know the trick.
+
+<ComplexityTable rows={[
+  {op: "Bit-by-bit scan", best: "O(32)", average: "O(32)", worst: "O(32)", note: "constant but always 32 steps"},
+  {op: "Kernighan n & (n-1)", best: "O(1)", average: "O(popcount)", worst: "O(32)", note: "one step per set bit"},
+  {op: "Integer.bitCount", best: "O(1)", average: "O(1)", worst: "O(1)", note: "hardware POPCNT"},
+]} />
+
+<ProbeNote>The trap is `>>` vs `>>>` in the naive scan — a negative number sign-extends and over-counts. Kernighan's `n & (n-1)` sidesteps shifting entirely and is the expected "trick" answer. Always name `Integer.bitCount` as the production choice; interviewers like candidates who know the standard library but can still derive the underlying algorithm.</ProbeNote>

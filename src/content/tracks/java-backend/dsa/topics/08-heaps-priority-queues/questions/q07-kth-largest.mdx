@@ -1,0 +1,66 @@
+**Problem.** Given an integer array `nums` and an integer `k`, return the `k`th largest element (in sorted order, *not* the kth distinct).
+
+## Brute force — O(n log n) time, O(1) space
+
+Sort descending and index:
+
+```java
+int findKthLargestSort(int[] nums, int k) {
+    Arrays.sort(nums);
+    return nums[nums.length - k];   // kth from the end
+}
+```
+
+Correct and trivially short, but it orders the *entire* array when you need only the cutoff — wasteful for large `n` and small `k`, and useless on a stream.
+
+## Optimal (heap) — O(n log k) time, O(k) space
+
+Keep a **min-heap of size k** (the top-K pattern). After processing every element, the heap holds the K largest and its root *is* the kth largest.
+
+```java
+int findKthLargest(int[] nums, int k) {
+    PriorityQueue<Integer> heap = new PriorityQueue<>();  // min-heap, size k
+    for (int x : nums) {
+        heap.offer(x);
+        if (heap.size() > k) heap.poll();   // evict the weakest winner
+    }
+    return heap.peek();   // root = kth largest
+}
+```
+
+Each element costs at most O(log k); memory stays O(k). This is the answer to lead with for streaming or when `k ≪ n`.
+
+## Faster in memory — QuickSelect, O(n) average
+
+If the whole array is in memory, **QuickSelect** averages **O(n)** (worst case O(n²) with adversarial pivots; randomize to avoid it). It partitions around a pivot like QuickSort but recurses into only the side containing the target rank.
+
+```java
+int quickSelect(int[] a, int k) {
+    int target = a.length - k, lo = 0, hi = a.length - 1;
+    Random rnd = new Random();
+    while (lo < hi) {
+        int p = partition(a, lo, hi, lo + rnd.nextInt(hi - lo + 1));
+        if (p == target) break;
+        if (p < target) lo = p + 1; else hi = p - 1;
+    }
+    return a[target];
+}
+int partition(int[] a, int lo, int hi, int pivotIdx) {
+    int pivot = a[pivotIdx];
+    swap(a, pivotIdx, hi);
+    int store = lo;
+    for (int i = lo; i < hi; i++)
+        if (a[i] < pivot) swap(a, store++, i);
+    swap(a, store, hi);
+    return store;
+}
+void swap(int[] a, int i, int j) { int t = a[i]; a[i] = a[j]; a[j] = t; }
+```
+
+<ComplexityTable rows={[
+  {op: "Sort", best: "O(n log n)", average: "O(n log n)", worst: "O(n log n)", note: "simplest; sorts more than needed"},
+  {op: "Heap (size k)", best: "O(n)", average: "O(n log k)", worst: "O(n log k)", note: "O(k) space; streaming-friendly"},
+  {op: "QuickSelect", best: "O(n)", average: "O(n)", worst: "O(n²)", note: "in-memory; randomize the pivot"},
+]} />
+
+<ProbeNote>State the trade-off out loud: heap is O(n log k) with O(k) space and works on streams; QuickSelect is O(n) average but mutates the array and needs a randomized pivot to dodge O(n²). Watch the off-by-one — "kth largest" is `nums[n - k]` after ascending sort, not `nums[k]`. Clarify whether kth *distinct* is meant.</ProbeNote>

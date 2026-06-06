@@ -1,0 +1,34 @@
+**Amortized O(1)** means that *averaged over a sequence of operations*, each costs O(1) — even though an individual operation may occasionally be O(n). It is a guarantee about the *total* cost of `n` operations being O(n), not about any single call. This is distinct from average-case: amortized analysis makes no probabilistic assumption: it holds for *every* sequence.
+
+## ArrayList.add() — the canonical example
+
+`ArrayList` wraps a fixed-size backing array. Most `add` calls just write to the next free slot — O(1). But when the array is full, `add` must **grow**: allocate a larger array and copy every existing element over — O(n) for that one call.
+
+The key is the growth strategy. Java's `ArrayList` grows by roughly **1.5×** (`oldCapacity + (oldCapacity >> 1)`); the classic textbook version doubles. Either way, capacity grows *geometrically*, which spaces the expensive copies exponentially further apart.
+
+## The doubling argument
+
+Suppose we double and start at capacity 1, inserting `n` elements. Resizes happen at sizes 1, 2, 4, 8, …, up to `n`, copying that many elements each time. The total copy work is:
+
+```
+1 + 2 + 4 + 8 + ... + n  ≈  2n
+```
+
+A geometric series dominated by its last term. So `n` inserts cost ~`n` writes plus ~`2n` copies = **O(n) total**, which is **O(1) amortized** per add. The crucial insight: each element is copied O(1) times *on average* across the whole sequence, because each doubling at least doubles the room before the next copy is needed.
+
+## Why geometric growth is essential
+
+If instead you grew by a **constant** amount (say +10 slots each time), resizes would happen every 10 adds, copying an ever-larger array each time. Total work becomes `10 + 20 + 30 + ... + n ≈ n²/20` = **O(n²)** — amortized O(n) per add. Geometric growth is what buys the O(1).
+
+```java
+List<Integer> list = new ArrayList<>();
+for (int i = 0; i < 1_000_000; i++) {
+    list.add(i);   // amortized O(1); a handful of these calls each did an O(n) copy
+}
+// Sizing up front avoids all resizes:
+List<Integer> sized = new ArrayList<>(1_000_000);
+```
+
+<ProbeNote>
+Be ready to say what is *not* amortized O(1): `add(index, element)` in the middle is O(n) (element shifting), and `remove(0)` is O(n). Also know that pre-sizing with `new ArrayList<>(expectedSize)` eliminates resize copies entirely — a cheap real-world win.
+</ProbeNote>

@@ -1,0 +1,40 @@
+**Fast modular exponentiation** (binary exponentiation / exponentiation by squaring) computes `x^n mod m` in **O(log n)** multiplications instead of the naive **O(n)**.
+
+## The naive way — O(n)
+
+Multiply `x` into an accumulator `n` times. For `n = 10^9` that's a billion multiplications — far too slow, and without `mod` it overflows immediately.
+
+## The insight — square the base, halve the exponent
+
+Any exponent's binary expansion lets you build `x^n` from squarings: `x^13 = x^8 · x^4 · x^1` (since `13 = 1101₂`). Walk the bits of `n` from least significant; square `base` each step, and multiply it into the result whenever the current bit is `1`:
+
+```java
+long modPow(long x, long n, long m) {
+    long result = 1 % m;          // handles m == 1
+    x %= m;
+    while (n > 0) {
+        if ((n & 1) == 1)         // current exponent bit is set
+            result = result * x % m;
+        x = x * x % m;            // square the base for the next bit
+        n >>= 1;                  // move to the next bit
+    }
+    return result;
+}
+```
+
+Each loop iteration consumes one bit of `n`, so there are `⌊log₂ n⌋ + 1` iterations — **O(log n)**.
+
+## Why O(log n) crushes O(n)
+
+For `n = 10^9`, naive is ~10^9 operations; binary exponentiation is ~30. That's the difference between seconds and microseconds. The same logarithmic-via-doubling argument underlies fast Fibonacci (matrix power) and modular inverse via Fermat.
+
+## Overflow discipline
+
+`result * x` and `x * x` are products of values up to `m - 1`. If `m` approaches `2^31`, the product overflows `int` — use `long`. If `m` approaches `2^63`, even `long` overflows; switch to `Math.multiplyHigh`, 128-bit multiply, or `BigInteger.modPow`. Reducing `x %= m` up front and taking `% m` after every multiply keeps values bounded.
+
+<ComplexityTable rows={[
+  {op: "Naive repeated multiply", best: "O(n)", average: "O(n)", worst: "O(n)", note: "overflows without mod"},
+  {op: "Binary exponentiation", best: "O(log n)", average: "O(log n)", worst: "O(log n)", note: "O(1) space; use long for products"},
+]} />
+
+<ProbeNote>The key explanation: "I read the exponent's bits, squaring the base each step and accumulating when a bit is set — that's why it's O(log n)." The overflow follow-up is guaranteed: products of two near-`m` longs can still overflow, so know `BigInteger.modPow` / 128-bit multiply as the escape hatch. This algorithm also gives the modular inverse via Fermat (`a^(p-2) mod p`).</ProbeNote>

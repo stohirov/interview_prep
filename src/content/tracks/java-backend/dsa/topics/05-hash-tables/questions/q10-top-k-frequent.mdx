@@ -1,0 +1,76 @@
+**Problem.** Given an integer array `nums` and an integer `k`, return the `k` most frequent elements. You may return them in any order.
+
+## Step shared by every approach — count
+
+A `HashMap<Integer, Integer>` gives frequencies in one O(n) pass:
+
+```java
+Map<Integer, Integer> freq = new HashMap<>();
+for (int n : nums) freq.merge(n, 1, Integer::sum);
+```
+
+The question is how to extract the top `k` from those frequencies.
+
+## Heap approach — O(n log k)
+
+Keep a **min-heap of size k** keyed by frequency. Push each distinct element; when the heap exceeds `k`, evict the smallest-frequency element. What survives is the top `k`. Each of the `m` distinct elements costs O(log k), so total O(n + m log k) ≈ **O(n log k)**.
+
+```java
+int[] topKFrequentHeap(int[] nums, int k) {
+    Map<Integer, Integer> freq = new HashMap<>();
+    for (int n : nums) freq.merge(n, 1, Integer::sum);
+
+    // min-heap by frequency; the smallest sits at the top, ready to evict
+    PriorityQueue<Integer> heap =
+        new PriorityQueue<>((a, b) -> freq.get(a) - freq.get(b));
+    for (int key : freq.keySet()) {
+        heap.offer(key);
+        if (heap.size() > k) heap.poll();   // drop the least frequent
+    }
+
+    int[] result = new int[k];
+    for (int i = 0; i < k; i++) result[i] = heap.poll();
+    return result;
+}
+```
+
+This is the answer to lead with when `k` is small relative to `n`, or in a streaming setting where you can't hold everything.
+
+## Bucket sort — O(n)
+
+Frequencies are bounded: an element can appear at most `n` times. So index an array of buckets **by frequency** — `buckets[f]` holds every element seen `f` times — then walk from the highest frequency down, collecting until you have `k`.
+
+```java
+int[] topKFrequentBucket(int[] nums, int k) {
+    Map<Integer, Integer> freq = new HashMap<>();
+    for (int n : nums) freq.merge(n, 1, Integer::sum);
+
+    // buckets[f] = elements with frequency exactly f; max possible f is nums.length
+    List<Integer>[] buckets = new List[nums.length + 1];
+    for (var e : freq.entrySet()) {
+        int f = e.getValue();
+        if (buckets[f] == null) buckets[f] = new ArrayList<>();
+        buckets[f].add(e.getKey());
+    }
+
+    int[] result = new int[k];
+    int idx = 0;
+    for (int f = buckets.length - 1; f >= 0 && idx < k; f--) {  // high freq -> low
+        if (buckets[f] == null) continue;
+        for (int val : buckets[f]) {
+            result[idx++] = val;
+            if (idx == k) break;
+        }
+    }
+    return result;
+}
+```
+
+Counting is O(n), filling buckets O(m), the descending walk O(n) — **O(n) overall**, beating the heap when `k` is large.
+
+<ComplexityTable rows={[
+  {op: "Heap (size k)", best: "O(n)", average: "O(n log k)", worst: "O(n log k)", note: "best when k << n or streaming"},
+  {op: "Bucket sort", best: "O(n)", average: "O(n)", worst: "O(n)", note: "needs frequencies bounded by n"},
+]} />
+
+<ProbeNote>Strong candidates volunteer *both* and state the trade-off: heap is O(n log k) and works for streams / small k; bucket sort is O(n) but assumes bounded integer frequencies and uses O(n) buckets. Edge cases: `k` equals the number of distinct elements, ties at the cutoff frequency (any valid set is accepted), and a single repeated value.</ProbeNote>

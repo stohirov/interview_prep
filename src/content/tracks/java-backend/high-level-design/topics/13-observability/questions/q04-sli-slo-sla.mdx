@@ -1,0 +1,50 @@
+## SLI vs SLO vs SLA, and the error budget
+
+These three acronyms are constantly muddled, and getting them straight — plus the **error budget** that falls out of them — is how you show you think about reliability as an *engineering* decision, not an aspiration. They come from Google's SRE practice, and interviewers expect the precise definitions.
+
+### The three definitions
+
+- **SLI — Service Level Indicator.** A **measured** quantity that reflects how the service is doing, expressed as a ratio of good events to total events. Examples: the fraction of requests that succeed (availability), the fraction served under 200 ms (latency). An SLI is a *number you observe*. Good SLIs measure what users actually experience (request success, latency), not internal proxies like CPU.
+- **SLO — Service Level Objective.** The **internal target** for an SLI over a window. Example: "99.9% of requests succeed over 30 days." It's the line you commit to *yourselves*. The SLO is what drives engineering decisions and alerting.
+- **SLA — Service Level Agreement.** The **external contract** with customers that includes **consequences** (refunds, credits, penalties) if the target is missed. SLAs are looser than SLOs by design.
+
+The relationship is a nesting:
+
+<Mermaid caption="SLI is measured, SLO is the internal target, SLA is the external contract with teeth">{`graph LR
+    SLI["SLI: measured indicator<br/>(e.g., 99.94% success)"] --> SLO["SLO: internal target<br/>(e.g., 99.9%)"]
+    SLO --> SLA["SLA: external contract<br/>(e.g., 99.5% or refund)"]`}</Mermaid>
+
+<Callout kind="note" title="Why SLA target < SLO target">
+You always set the **SLA looser than the SLO** (e.g., SLO 99.9% internal, SLA 99.5% to customers). The gap is a safety buffer: your team gets alerted and reacts when you breach the *internal* SLO, well before you ever breach the *contractual* SLA and owe money. Promising customers exactly what you target internally leaves no room for the normal noise of operations.
+</Callout>
+
+### The error budget — the key insight
+
+100% reliability is the wrong target: it's impossible, and chasing the last fraction of a nine costs exponentially more while delivering no user-perceptible benefit. So an SLO **deliberately accepts** some unreliability. That accepted amount is the **error budget**:
+
+> **error budget = 100% − SLO**
+
+For a 99.9% SLO over 30 days, the budget is **0.1%** of requests (or of time) allowed to fail. In time terms, 99.9% availability ≈ **~43 minutes of downtime per month**; 99.99% ≈ **~4.3 minutes**.
+
+<ComplexityTable>
+
+| SLO | Error budget | Downtime / 30 days |
+|---|---|---|
+| 99% | 1% | ~7.2 hours |
+| 99.9% | 0.1% | ~43 minutes |
+| 99.99% | 0.01% | ~4.3 minutes |
+| 99.999% | 0.001% | ~26 seconds |
+
+</ComplexityTable>
+
+### What the error budget is *for*
+
+The budget turns reliability into a shared, quantitative currency that resolves the classic tension between dev (ship fast) and ops (stay stable):
+
+- **Budget remaining → ship.** If you're comfortably within SLO, you have budget to spend — release features, run risky migrations, do chaos experiments. Reliability is "good enough," so velocity wins.
+- **Budget exhausted → freeze.** If you've burned the budget (too many incidents), the policy is to **halt feature launches** and redirect effort to reliability work until you're back under SLO. The budget makes "should we slow down?" an objective trigger, not an argument.
+- **Burn-rate alerting.** Rather than alerting on every error, modern SRE alerts on the **rate** at which the error budget is being consumed — a fast burn (about to exhaust the month's budget in hours) pages immediately; a slow burn opens a ticket. This cuts alert noise and ties paging directly to user-facing impact.
+
+<ProbeNote>
+The interviewer wants the three crisply: **SLI** is the measured indicator, **SLO** the internal target, **SLA** the external contract with penalties — and SLA is looser than SLO on purpose. The payoff signal is the **error budget = 100% − SLO**: that it makes 100% the wrong goal, gives dev and ops a shared currency (spend it on velocity, freeze when exhausted), and underpins **burn-rate alerting** instead of alerting on raw errors.
+</ProbeNote>

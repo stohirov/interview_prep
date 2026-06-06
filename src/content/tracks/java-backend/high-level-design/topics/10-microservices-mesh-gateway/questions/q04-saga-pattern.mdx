@@ -1,0 +1,53 @@
+## The Saga pattern — choreography vs. orchestration
+
+Once each service owns its own database, a single business operation that spans services — place an order, reserve inventory, charge payment, schedule shipping — can no longer be one ACID transaction. There is no distributed lock you'd want to hold across services, and two-phase commit (2PC) is avoided in practice because it blocks and couples availability to the slowest participant. The **Saga** pattern is the standard alternative.
+
+### The core idea
+
+A Saga is a sequence of **local transactions**, one per service. Each local transaction commits independently and publishes an event (or triggers the next step). If a step fails, the Saga runs **compensating transactions** that semantically undo the work already committed by prior steps — there is no global rollback, so each "undo" is an explicit business action (refund the charge, release the reservation).
+
+<Callout kind="warn" title="Compensation is not rollback">
+A compensating action *cannot* restore the prior state perfectly — the earlier transaction already committed and may have been observed. Refunding a payment is a new transaction, not an erasure. Sagas give **eventual consistency** with explicit compensation, not isolation. Design every step to be **idempotent** (events get redelivered) and accept that intermediate states are visible to other readers.
+</Callout>
+
+### Two coordination styles
+
+**Choreography** — no central coordinator. Each service listens for events and reacts, emitting its own events that the next service consumes. The workflow is *emergent* from the chain of event reactions.
+
+**Orchestration** — a central **orchestrator** (a Saga coordinator service) explicitly tells each service what to do and when, and drives compensation on failure. The workflow lives in one place.
+
+<Mermaid caption="Orchestrated order Saga: the orchestrator drives each step and compensates on failure">{`sequenceDiagram
+    participant O as Order Orchestrator
+    participant I as Inventory
+    participant P as Payment
+    participant S as Shipping
+    O->>I: Reserve items
+    I-->>O: Reserved
+    O->>P: Charge customer
+    P-->>O: Payment FAILED
+    Note over O,P: failure -> run compensations in reverse
+    O->>I: Release reservation (compensate)
+    I-->>O: Released
+    O-->>O: Saga ended: order cancelled`}</Mermaid>
+
+### Choosing between them
+
+| Aspect | Choreography | Orchestration |
+|---|---|---|
+| Coordination | Distributed — services react to events | Central orchestrator drives steps |
+| Coupling | Loose — no central dependency | Services depend on the orchestrator |
+| Workflow visibility | Implicit, spread across services | Explicit, in one place |
+| Best for | Few steps, simple linear flows | Many steps, complex branching |
+| Failure handling | Each service knows its compensations | Orchestrator owns compensation logic |
+| Risk | Hard to follow / cyclic event chains | Orchestrator can become a god-service |
+
+- **Choreography** suits short, simple flows where loose coupling matters and the chain is easy to follow. It degrades badly as steps multiply — the logic is scattered across services and the event web becomes hard to reason about or debug.
+- **Orchestration** suits complex, multi-step workflows with real branching and compensation. Centralizing the state machine makes the flow explicit, observable, and easier to change — at the cost of a component every participant depends on (keep it a *coordinator*, not a place where business logic accretes).
+
+### The outbox connection
+
+Each Saga step does two things: commit its local DB change *and* publish an event. Doing both is the **dual-write problem** — if the DB commits but the publish fails (or vice versa), the Saga stalls or diverges. The fix is the **outbox pattern**: write the event into an `outbox` table *in the same local transaction* as the business change, then a relay (or CDC) reliably publishes it afterward. Outbox is what makes each Saga step atomic and reliable; the two patterns almost always appear together.
+
+<ProbeNote>
+The interviewer (Amazon-style here) wants the Saga as the answer to "no distributed transaction," the choreography-vs-orchestration distinction with a clear recommendation per scenario, and — the senior detail — that compensation is a forward business action, not a rollback, so every step must be idempotent. Linking Saga to the outbox pattern for reliable event publishing is a strong closing signal.
+</ProbeNote>

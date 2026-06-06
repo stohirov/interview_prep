@@ -1,0 +1,38 @@
+**Space complexity** measures the *extra* memory an algorithm needs as a function of `n`, beyond the input itself. By convention we report **auxiliary space** — what the algorithm allocates — not the input array, which the caller already owns. The two sources engineers conflate are the **recursive call stack** and **auxiliary data structures**; a senior answer keeps them distinct.
+
+## Auxiliary structures
+
+These are explicit allocations: a `HashMap` for memoization, a second array for merging, a visited set for graph traversal. Two Sum's hash map is O(n) auxiliary space. MergeSort's temporary merge buffer is O(n). They are easy to count — you can point at the `new`.
+
+## The recursive call stack
+
+Recursion costs memory too. Every active call frame holds parameters, locals, and a return address on the JVM stack. A recursion `depth` of `d` consumes **O(d)** stack space *even if the function allocates nothing on the heap*. This is the part candidates routinely forget.
+
+- **Binary search (recursive)** — O(log n) stack depth.
+- **DFS on a tree** — O(h) stack depth, where `h` is height; O(n) for a degenerate (linked-list-shaped) tree, O(log n) for a balanced one.
+- **Naive recursive Fibonacci** — O(n) max stack depth (the deepest single chain), despite exponential *time*.
+
+Deep recursion is not free and not unbounded: blow past the stack and you get a `StackOverflowError`, not just slowness.
+
+```java
+// O(1) auxiliary structures, but O(n) stack space in the worst case
+int sumList(Node node) {
+    if (node == null) return 0;        // base case
+    return node.val + sumList(node.next);  // one frame per node — O(n) deep
+}
+
+// Iterative version: O(1) total space — no stack growth
+int sumListIter(Node node) {
+    int sum = 0;
+    while (node != null) { sum += node.val; node = node.next; }
+    return sum;
+}
+```
+
+## Why the distinction matters
+
+An algorithm can be O(1) in auxiliary structures yet O(n) in stack space — the recursive `sumList` above. When you state space complexity, you must include the deeper of the two. And because Java does **not** perform tail-call optimization, even tail-recursive code keeps every frame, so converting deep recursion to iteration (or an explicit `Deque` stack) is a real space optimization, not just style.
+
+<ProbeNote>
+The trap: claiming a recursive solution is "O(1) space." If it recurses `d` deep, it is at least O(d). Quicksort's "in-place" reputation is in-place for *data*, but its recursion is O(log n) stack on average and O(n) worst case — interviewers love to surface exactly this.
+</ProbeNote>

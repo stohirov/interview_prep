@@ -1,0 +1,27 @@
+A load balancer (LB) sits in front of a pool of servers and spreads incoming traffic across them. It is the component that turns "one box" into "a fleet" — it's how you scale horizontally, survive a dead instance, and roll out new versions without downtime. Every non-trivial design has at least one, and interviewers expect you to place it correctly and reason about its layer, algorithm, health checks, and its own failure.
+
+## L4 vs L7 — the first distinction
+
+- **L4 (transport)** balances on **TCP/UDP** — it sees IPs and ports, not the request. It just forwards packets/connections to a backend. Extremely fast, protocol-agnostic, low overhead.
+- **L7 (application)** terminates the connection and reads the **HTTP request** — URL, headers, cookies, method. That visibility unlocks content-based routing, TLS termination, header rewriting, sticky sessions by cookie, and per-request retries — none of which L4 can do because it never parses the request.
+
+The trade-off is visibility vs cost: L7 is smarter but does more work per request (and must terminate TLS); L4 is a dumb, blazing-fast pipe.
+
+## Balancing algorithms
+
+- **Round-robin** — rotate through backends in order; weighted variant biases toward bigger boxes.
+- **Least-connections** — send to the backend with the fewest active connections; better when request durations vary.
+- **IP-hash** — hash the client IP to a backend for a crude form of stickiness.
+- **Consistent hashing** — hash the *request key* to a backend so the **same key lands on the same server**, which is how you build cache-aware routing (maximize cache hits) while minimizing reshuffling when the pool changes.
+
+## Health checks and stickiness
+
+The LB only sends traffic to **healthy** backends, decided by **health checks** — **active** (the LB probes `/health` on a schedule) and **passive** (the LB observes real traffic and ejects a backend that starts erroring/timing out). **Sticky sessions** pin a user to one backend (for in-memory session state) but cost you even load distribution and clean failover — the senior preference is **stateless** services with externalized session state.
+
+## The LB must not be a single point of failure
+
+A single LB is itself a SPOF. Production setups run **redundant LBs** (active-active or active-passive) with a **floating/virtual IP** that fails over, fronted by **DNS** or **anycast** for cross-region distribution. Common implementations: **HAProxy** and **NGINX** (battle-tested L4/L7 proxies), **Envoy** (the modern, dynamically-configurable proxy that powers most **service meshes**, where a sidecar proxy load-balances *client-side* between services).
+
+## What the questions cover
+
+The questions sharpen the three highest-yield points: exactly what L7 can do that L4 cannot; how the balancing algorithms differ and when consistent hashing matters; and the operational reality of active vs passive health checks, the cost of sticky sessions, and what happens when the load balancer itself dies.

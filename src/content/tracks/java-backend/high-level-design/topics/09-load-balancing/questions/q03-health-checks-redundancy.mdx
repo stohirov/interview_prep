@@ -1,0 +1,48 @@
+## Health checks, sticky sessions, and what happens when the LB itself fails
+
+A load balancer's value depends on three operational facts: it must only route to **healthy** backends, the cost of **pinning users** to a backend, and the reality that the **LB is itself a component that can die**.
+
+### Health checks — active vs passive
+
+The LB needs a live view of which backends can serve traffic.
+
+- **Active health checks** — the LB *proactively probes* each backend on a schedule (e.g. `GET /health` every few seconds). After N consecutive failures it marks the backend **unhealthy** and stops routing to it; after M consecutive successes it returns it. Pros: detects a sick backend even with no traffic, and a backend stays out until it recovers. Cons: adds probe load, and a shallow probe (just "process is up") can miss real problems.
+- **Passive health checks (outlier detection)** — the LB *observes real traffic* and ejects a backend that starts returning errors or timing out (e.g. too many `5xx`/connection failures in a window). Pros: zero extra traffic, reacts to genuine user-facing failures instantly. Cons: needs live traffic to notice, and the first few unlucky users hit the failing backend before it's ejected.
+
+Production systems use **both**: active probes for baseline liveness, passive detection to catch real failures fast. A good health endpoint is a **deep check** (DB reachable, dependencies OK), but beware making it *too* deep — a shared-dependency blip can mark the **whole fleet** unhealthy at once.
+
+<Callout kind="warn" title="The cascading-health trap">
+If `/health` checks a shared database and the DB hiccups, every backend fails its probe simultaneously and the LB has **nowhere to route** — a self-inflicted total outage. Separate "am I alive" (liveness) from "is my dependency healthy," and avoid failing all instances on one shared dependency.
+</Callout>
+
+### Sticky sessions — and their cost
+
+A **sticky session** pins a client to a specific backend (via a cookie at L7, or IP-hash at L4), usually because that backend holds **in-memory session state**. The costs:
+
+- **Uneven load** — the LB can no longer freely balance; one backend can get hot while others idle.
+- **Painful failover** — if the pinned backend dies, the session (and its in-memory state) is **lost**; the user is bounced to a fresh backend with no context.
+- **Hard to scale/deploy** — you can't drain and replace a backend cleanly without disrupting its stuck sessions.
+
+<Callout kind="tip" title="Prefer stateless">
+The senior answer is to **externalize session state** (Redis, a token like a JWT, or a DB) so any backend can serve any request. Then you don't need stickiness at all — you get even balancing, clean failover, and trivial autoscaling. Use stickiness only when forced (legacy in-memory state, or WebSocket connections that are inherently pinned).
+</Callout>
+
+### When the load balancer itself fails
+
+A single LB is a **single point of failure** — if it dies, the entire fleet behind it is unreachable no matter how healthy the backends are. Mitigations:
+
+- **Redundant LBs.** Run at least two in **active-passive** (a standby takes over) or **active-active** (both serve, sharing load). A **virtual/floating IP** (VRRP/keepalived) moves to the surviving LB on failover, so clients keep using the same address.
+- **DNS / anycast in front.** DNS can hand out multiple LB addresses (with health-checked failover), and **anycast** advertises one IP from many locations so traffic reroutes to a live LB automatically — also the basis of multi-region resilience.
+- **Cloud-managed LBs** (ALB/NLB, GCLB) hide this — they're already horizontally scaled and redundant across availability zones, which is why "use the cloud LB" is a perfectly senior answer.
+
+<Mermaid caption="Redundant LBs with a floating IP remove the LB single point of failure">{`graph TB
+    DNS[DNS / Anycast] --> VIP[Floating / Virtual IP]
+    VIP -->|active| LB1[LB primary]
+    VIP -.failover.-> LB2[LB standby]
+    LB1 --> B1[Backend 1]
+    LB1 --> B2[Backend 2]
+    LB1 --> B3[Backend 3]`}</Mermaid>
+
+<ProbeNote>
+Interviewers want three things: active **vs** passive health checks (and the trap of a too-deep check killing the whole fleet); that sticky sessions cost you even load and clean failover, so **stateless + externalized session state** is preferred; and that the LB is a SPOF you remove with **redundant LBs + a floating IP**, fronted by DNS/anycast. "Just add a load balancer" without redundancy is the junior tell.
+</ProbeNote>

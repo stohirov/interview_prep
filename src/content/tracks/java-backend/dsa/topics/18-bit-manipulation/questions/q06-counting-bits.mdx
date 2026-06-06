@@ -1,0 +1,48 @@
+**Problem.** Given an integer `n`, return an array `ans` of length `n + 1` where `ans[i]` is the number of `1` bits in `i`, for every `i` from `0` to `n`.
+
+## Naive — popcount each number, O(n log n)
+
+Call `Integer.bitCount(i)` (or Kernighan's loop) for each `i`. Correct, but the interview wants the DP that achieves **O(n)**.
+
+## Optimal — DP, O(n) time, O(n) space
+
+The trick is to express `popcount(i)` in terms of an already-computed smaller value. Two clean recurrences:
+
+### Recurrence A — drop the lowest set bit
+
+`i & (i - 1)` clears the lowest set bit, giving a strictly smaller number, and removes exactly one `1`:
+
+```java
+int[] countBits(int n) {
+    int[] dp = new int[n + 1];
+    for (int i = 1; i <= n; i++)
+        dp[i] = dp[i & (i - 1)] + 1;   // one more bit than i with its lowest bit cleared
+    return dp;
+}
+```
+
+### Recurrence B — shift right by one
+
+`i >> 1` is `i` with its last bit dropped; add back that last bit `i & 1`:
+
+```java
+int[] countBits(int n) {
+    int[] dp = new int[n + 1];
+    for (int i = 1; i <= n; i++)
+        dp[i] = dp[i >> 1] + (i & 1);   // bits of i/2, plus the parity bit
+    return dp;
+}
+```
+
+Both reference an index strictly smaller than `i`, so the values are already filled — pure bottom-up DP. Each entry is O(1), giving O(n) total.
+
+## Why it's a DP problem, not just a bit trick
+
+It has **optimal substructure** (the count for `i` is built from the count of a smaller number) and the subproblems are reused across the range. That's exactly DP — this question sits at the intersection of bit manipulation and DP, which is why it's a favorite.
+
+<ComplexityTable rows={[
+  {op: "Popcount each", best: "O(n)", average: "O(n log n)", worst: "O(n log n)", note: "log factor per number"},
+  {op: "DP (either recurrence)", best: "O(n)", average: "O(n)", worst: "O(n)", note: "O(1) per entry"},
+]} />
+
+<ProbeNote>Either recurrence is accepted; `dp[i >> 1] + (i & 1)` is the most intuitive to explain ("bits of `i/2` plus the trailing bit"). The point being tested is that you *recognize the DP* rather than calling `bitCount` in a loop. Be ready to articulate the optimal-substructure argument that makes it O(n).</ProbeNote>

@@ -1,0 +1,25 @@
+Since Java 8, `HashMap` no longer stores each bucket as a plain linked list forever. When a single bucket gets too crowded, the map **treeifies** it — converts that bucket's chain into a **red-black tree** — so a pathological bucket degrades to O(log n) instead of O(n).
+
+## The two thresholds
+
+Treeification of a bucket happens only when **both** conditions hold:
+
+1. The bucket's chain reaches **`TREEIFY_THRESHOLD = 8`** entries, **and**
+2. The table's total capacity is **≥ `MIN_TREEIFY_CAPACITY = 64`**.
+
+If a bucket hits 8 entries but the table capacity is still below 64, `HashMap` **resizes (doubles) instead of treeifying** — because at small capacity a long chain usually just means the table is too small, and resizing redistributes entries more cheaply than building a tree.
+
+## Untreeification
+
+The reverse also exists. During a resize, if a treeified bucket shrinks to **`UNTREEIFY_THRESHOLD = 6`** or fewer entries, it converts back to a linked list. The gap between 8 and 6 is **hysteresis** — it prevents a bucket hovering right at the boundary from thrashing between list and tree on every add/remove.
+
+## Why these numbers
+
+With a well-distributed hash and load factor 0.75, the probability that any bucket reaches 8 entries by chance follows a Poisson distribution and is vanishingly small — under one in ten million. So treeification effectively **never triggers for honest data**; it is a defense, not a routine optimization. It exists to neutralize:
+
+- **Weak `hashCode()` implementations** that collide heavily.
+- **Hash-collision DoS attacks**, where an attacker crafts keys that all hash to one bucket to force O(n) lookups and stall the server.
+
+Treeification caps that worst case at O(log n) per bucket. (Note: tree nodes only order by hash, falling back to comparing keys when they implement `Comparable`, or by an identity tie-break otherwise.)
+
+<ProbeNote>The numbers interviewers fish for: **8** to treeify, **6** to untreeify, **64** minimum capacity. The two subtleties that separate a strong answer: (1) below capacity 64 it **resizes instead of treeifying**, and (2) the 8/6 gap is hysteresis to avoid thrashing. Close with *why* it exists — defending O(n) worst-case against bad `hashCode()`s and collision DoS — not as a routine speedup.</ProbeNote>

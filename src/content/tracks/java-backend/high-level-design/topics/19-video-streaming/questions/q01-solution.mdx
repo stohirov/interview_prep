@@ -1,0 +1,119 @@
+## 1. Functional requirements
+
+- Upload a video master (`POST /videos`), encode it into multiple renditions.
+- Stream a video with **adaptive bitrate** (HLS/DASH) across variable networks.
+- Browse a **catalog** and get **recommendations**.
+- Count **views** per video.
+- Resume playback from last position.
+
+## 2. Non-functional requirements
+
+- **Scale:** 1B users; ~500K hours uploaded/day; **massively read-heavy** playback.
+- **Latency:** start-up (time-to-first-frame) < 2 s; rebuffering rate < 1%.
+- **Availability:** 99.99% on the playback path (CDN-served).
+- **Durability:** uploaded masters and encoded renditions must not be lost (object storage).
+- **Consistency:** catalog/view counts eventually consistent.
+
+## 3. Capacity estimation
+
+- Upload: 500K hours/day ÷ 86,400 s ≈ **~21 hours of video ingested per second**; with parallel chunked transcoding this fans out to thousands of concurrent encode jobs.
+- Playback: 1B users × ~1 hour/day ≈ 1B watch-hours/day. At ~5 Mbps average ≈ 1B × 3600 × 5 Mb ≈ **~18 exabits/day ≈ ~2.25 PB/day** of egress → almost all from CDN.
+- Storage: 1 master × ~6 renditions; 500K hr/day × ~6 renditions × ~1 GB/hr ≈ **~3 PB/day** raw → object storage with lifecycle tiering.
+- View events: 1B+ play events/day ≈ **~12K events/s** (×3 peak) → stream-aggregated, approximate.
+
+## 4. High-level architecture
+
+<Mermaid caption="Video streaming — upload triggers an async transcoding pipeline; playback is served from the CDN via HLS/DASH manifests">{`graph LR
+    U[Uploader] --> UP[Upload Service]
+    UP --> RAW[(Object Storage - Masters)]
+    UP -->|event| MQ[(Kafka)]
+    MQ --> SPL[Chunk Splitter]
+    SPL --> ENC[Transcode Workers - rendition ladder]
+    ENC --> PKG[Packager - HLS / DASH segments]
+    PKG --> STORE[(Object Storage - Segments)]
+    STORE --> CDN[CDN - multi-tier]
+    V[Viewer] --> CDN
+    V --> API[Playback API]
+    API --> META[(Catalog DB)]
+    API --> REC[Recommendation Service]
+    V -->|play events| VQ[(Kafka)]
+    VQ --> VC[View Counter - stream aggregate]`}</Mermaid>
+
+## 5. API design
+
+```http
+POST /api/v1/videos                       # returns a pre-signed upload target
+  Body: { "title": "...", "visibility": "public" }
+  201:  { "videoId": "v_77a2", "uploadUrl": "https://s3/..." }
+
+GET  /api/v1/videos/{videoId}/manifest    # ABR manifest (HLS .m3u8 / DASH .mpd)
+  200:  Content-Type: application/vnd.apple.mpegurl
+        # lists renditions 240p..2160p with segment URLs (CDN-hosted)
+
+GET  /api/v1/videos/{videoId}             # metadata + encode status
+POST /api/v1/videos/{videoId}/views       { "positionSec": 120 }   # fire-and-forget
+GET  /api/v1/recommendations?userId=...
+```
+
+Segments themselves are served **directly by the CDN**, not by these APIs. The manifest just points the player at CDN URLs; ABR logic lives in the player.
+
+## 6. Data model
+
+```sql
+CREATE TABLE video (
+  video_id    BIGINT PRIMARY KEY,        -- snowflake
+  uploader_id BIGINT NOT NULL,
+  title       TEXT NOT NULL,
+  status      TEXT NOT NULL,             -- UPLOADED|TRANSCODING|READY|FAILED
+  master_key  TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE rendition (
+  video_id    BIGINT NOT NULL,
+  quality     TEXT NOT NULL,             -- 240p|480p|720p|1080p|2160p
+  codec       TEXT NOT NULL,             -- h264|av1
+  manifest_key TEXT NOT NULL,            -- key of the HLS/DASH playlist
+  PRIMARY KEY (video_id, quality, codec)
+);
+-- View counts and watch progress live in a fast store (Cassandra/Redis),
+-- aggregated from the event stream, not as synchronous UPDATEs.
+```
+
+## 7. Detailed component design
+
+- **Encoding pipeline.** On upload, the master lands in object storage and emits a Kafka event. A **splitter** breaks it into chunks (e.g. GOP-aligned segments); a fleet of transcode workers process chunks **in parallel** into the full **rendition ladder** (240p→2160p, multiple codecs). A **packager** then segments each rendition (~2–6 s segments) and writes HLS/DASH manifests. Chunked parallel transcoding is what turns a 4-hour 4K encode from hours into minutes.
+- **Adaptive bitrate (ABR).** The manifest exposes every rendition. The player measures throughput and buffer health and requests the next **segment** at the appropriate bitrate, switching mid-stream without re-buffering. The server is dumb here — intelligence is in the player + manifest.
+- **CDN delivery.** Segments are pushed/pulled to a **multi-tier CDN** with origin shielding; popular titles are pre-warmed. Playback never touches application servers — only the small manifest/metadata calls do.
+- **View counting.** Play events go to Kafka and are aggregated in a stream processor into approximate, eventually-consistent counters — synchronous DB increments cannot survive billions/day.
+- **Recommendations.** Offline-trained models produce candidate lists served from a low-latency store; ranking happens at request time.
+
+## 8. Scaling considerations
+
+- **CDN is the system** — ~99% of bytes never reach origin; tiering + origin shield protect storage.
+- **Transcode fleet** autoscales off Kafka queue depth; chunking gives embarrassingly parallel encode.
+- **Storage tiering** — hot renditions on fast storage, cold/long-tail titles on cheaper tiers; drop unused codecs lazily.
+- **Async pipeline** — encoding, packaging, view counting, indexing all off the request path.
+- **Pre-warming** — predicted-popular releases are pushed to edge before launch.
+
+## 9. Trade-offs and alternatives
+
+- **HLS vs DASH.** HLS has the broadest device support (Apple); DASH is codec-agnostic and open. Most systems ship both via the same segments + two manifests.
+- **Build vs managed encoding.** Bespoke transcode fleet (FAANG, cost-optimal at scale) vs MediaConvert/managed (EU/regional, fast to ship).
+- **Rendition ladder depth.** More renditions = smoother ABR but more storage and encode cost; tune to audience devices.
+- **Exact vs approximate views.** Exact counts don't scale; approximate stream-aggregated counts are standard.
+- **Codec choice (H.264 vs AV1).** AV1 saves ~30% bandwidth but costs far more to encode — trade egress cost vs compute.
+
+## 10. Common follow-up questions
+
+- How do you transcode a 4-hour 4K master fast? (Chunk + parallel transcode, then stitch manifests.)
+- How does the player avoid rebuffering on a flaky network? (ABR steps down per segment using buffer + throughput.)
+- How do you handle a viral video / thundering herd? (CDN tiering, origin shield, pre-warm.)
+- Live streaming vs VOD — lower-latency packaging (LL-HLS), shorter segments, no full pre-encode.
+- DRM / signed URLs to protect content.
+
+## 11. What interviewers are really probing
+
+<ProbeNote>
+**All styles:** that you recognized playback is CDN-served (not origin-served), made transcoding an async parallel pipeline, and understood ABR via manifest + segments. **FAANG:** depth on chunked parallel encoding, CDN tiering/origin shield, HLS/DASH internals, and approximate view counting at billions/day. **EU/contracting:** a pragmatic managed-encoding + commercial-CDN stack with cost/codec justification. **Regional:** a clean upload + status API, a catalog/rendition schema, and a clear async-pipeline diagram. The classic failure is trying to stream bytes through your application servers, or doing one giant synchronous transcode instead of chunked parallel encoding.
+</ProbeNote>

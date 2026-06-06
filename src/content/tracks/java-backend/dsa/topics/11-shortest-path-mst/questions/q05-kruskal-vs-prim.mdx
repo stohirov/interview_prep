@@ -1,0 +1,41 @@
+Both build a **minimum spanning tree** — a cycle-free subset of edges connecting every vertex at minimum total weight — and both are **greedy**, justified by the **cut property**: the lightest edge crossing any partition of the vertices is safe to include. They differ in *which* greedy step they take.
+
+## Kruskal — sort edges, grow a forest
+
+Sort all edges by weight; scan from cheapest, adding an edge only if its endpoints are in **different components** (checked with **union-find**). It grows many small trees that merge into one.
+
+- Cost is dominated by the sort: **O(E log E) = O(E log V)**.
+- Operates on a plain **edge list** — no adjacency structure needed.
+- Wins on **sparse** graphs and when edges are already sorted or streamed.
+
+```java
+edges.sort((a, b) -> Integer.compare(a[2], b[2]));   // {u, v, weight}
+DSU dsu = new DSU(n);
+int total = 0, used = 0;
+for (int[] e : edges) {
+    if (dsu.union(e[0], e[1])) {        // union returns false if same set
+        total += e[2];
+        if (++used == n - 1) break;      // MST complete
+    }
+}
+```
+
+## Prim — grow one tree from a seed
+
+Start at any vertex; repeatedly pull the **cheapest edge crossing the frontier** (the cut between the tree and the rest) using a **priority queue**. The tree grows one vertex at a time.
+
+- With a binary heap: **O(E log V)**. With a Fibonacci heap: **O(E + V log V)**.
+- Needs an **adjacency list** and works directly on it.
+- Wins on **dense** graphs (E ≈ V²), where an array-based Prim even hits **O(V²)** without a heap — beating Kruskal's `E log E ≈ V² log V`.
+
+## The decision
+
+<ComplexityTable rows={[
+  {op: "Kruskal", best: "O(E log V)", average: "O(E log V)", worst: "O(E log V)", note: "edge list + union-find; favors sparse"},
+  {op: "Prim (binary heap)", best: "O(E log V)", average: "O(E log V)", worst: "O(E log V)", note: "adjacency list + PQ; favors dense"},
+  {op: "Prim (array)", best: "O(V²)", average: "O(V²)", worst: "O(V²)", note: "no heap; best on dense graphs"}
+]} />
+
+<ProbeNote>
+Name the **cut property** as the shared correctness argument, then split on data structure: Kruskal = sort + union-find on an edge list (sparse); Prim = PQ on an adjacency list (dense). Mention that on a disconnected graph Kruskal naturally produces a **minimum spanning forest**, whereas Prim only spans the component of its seed.
+</ProbeNote>

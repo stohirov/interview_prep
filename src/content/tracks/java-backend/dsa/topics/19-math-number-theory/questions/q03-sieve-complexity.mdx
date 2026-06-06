@@ -1,0 +1,40 @@
+The **Sieve of Eratosthenes** finds all primes up to `n` by marking the multiples of each prime as composite. Its time complexity is **O(n log log n)** — nearly linear — using **O(n)** space.
+
+## The algorithm
+
+Start with all numbers `2..n` assumed prime. For each prime `p`, mark `p²`, `p²+p`, `p²+2p`, ... as composite. Anything still unmarked at the end is prime.
+
+```java
+boolean[] sieve(int n) {
+    boolean[] isComposite = new boolean[n + 1];
+    for (int p = 2; (long) p * p <= n; p++) {       // long p*p to avoid overflow
+        if (!isComposite[p]) {
+            for (int multiple = p * p; multiple <= n; multiple += p)
+                isComposite[multiple] = true;
+        }
+    }
+    return isComposite;   // isComposite[i] == false (for i >= 2) means i is prime
+}
+```
+
+## Why O(n log log n), not O(n log n)
+
+The inner loop for prime `p` runs `n / p` times. Summing over all primes `p ≤ n`:
+
+```
+n · (1/2 + 1/3 + 1/5 + 1/7 + 1/11 + ...)
+```
+
+The sum of reciprocals **of the primes** up to `n` grows like `ln ln n` (a classic result of Mertens), not `ln n`. So the total work is `O(n · log log n)`. The reciprocal-of-*all*-integers harmonic sum would give `log n`; restricting to primes is what shaves it to `log log n` — practically a small constant (for `n = 10^9`, `log log n ≈ 3`).
+
+## Two standard optimizations (constant-factor)
+
+- **Start at `p²`:** every smaller multiple of `p` (like `2p`, `3p`) was already marked by a smaller prime. This is why the inner loop begins at `p * p`.
+- **Stop the outer loop at `√n`:** any composite `≤ n` has a factor `≤ √n`, so primes beyond `√n` mark nothing new.
+
+## Variants
+
+- **Segmented sieve** — sieve a range `[L, R]` using primes up to `√R`, keeping memory `O(R - L)` instead of `O(R)`; needed when `n` is too large for an `O(n)` array.
+- **Linear sieve (Euler's)** — marks each composite exactly once for true **O(n)**, and yields smallest-prime-factors for free, at the cost of more code.
+
+<ProbeNote>The number to state is **O(n log log n)**, and the *reason* — the sum of reciprocals of primes is `log log n` (not the harmonic `log n`). The two optimizations (start at `p²`, stop at `√n`) are constant-factor but expected. Mention the segmented sieve for huge `n` and the linear sieve for exact O(n); knowing those flags depth.</ProbeNote>

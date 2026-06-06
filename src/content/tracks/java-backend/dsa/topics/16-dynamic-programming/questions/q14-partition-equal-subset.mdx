@@ -1,0 +1,40 @@
+**Problem.** Given an array of positive integers, decide whether it can be split into two subsets with **equal sum**. `[1,5,11,5] → true` (`{1,5,5}` and `{11}`).
+
+## Reduce to subset-sum
+
+If the total is `S`, each half must sum to `S/2`. So:
+
+- If `S` is **odd**, it is immediately impossible — return `false`.
+- Otherwise the question becomes: "is there a subset summing to `target = S/2`?" That is **0/1 knapsack** where each number's weight equals its value and we ask for an exact fill.
+
+Brute force enumerates all 2ⁿ subsets — exponential.
+
+## DP — O(n · target) time, O(target) space
+
+State `dp[s]` = can we form sum `s` using some subset seen so far? Start with `dp[0] = true` (the empty subset). For each number, iterate sums **right-to-left** so each number is used at most once (the 0/1 rule):
+
+```java
+boolean canPartition(int[] nums) {
+    int sum = 0;
+    for (int x : nums) sum += x;
+    if ((sum & 1) == 1) return false;          // odd total can't split evenly
+    int target = sum / 2;
+
+    boolean[] dp = new boolean[target + 1];
+    dp[0] = true;                              // empty subset sums to 0
+    for (int x : nums)
+        for (int s = target; s >= x; s--)      // RIGHT-TO-LEFT → each number once
+            dp[s] = dp[s] || dp[s - x];
+    return dp[target];
+}
+```
+
+Once `dp[target]` flips to `true`, the answer is settled. The 2D form would be `dp[i][s]`, but the rolling 1D array is standard here.
+
+<Callout kind="tip" title="Recognizing the reduction">
+"Partition into equal halves" → "subset summing to half the total" → 0/1 subset-sum. The same boolean-knapsack template solves Target Sum (assign +/- signs), Last Stone Weight II, and "subset with sum k". Spotting that a partition/sign-assignment question is really subset-sum is the senior move.
+</Callout>
+
+<ProbeNote>
+Two early-exit checks score points: the odd-sum short-circuit, and bailing if any single element exceeds `target`. Stress the **right-to-left** iteration — left-to-right would reuse a number and turn this into unbounded knapsack, silently returning wrong answers. An optional micro-optimization is a `long` bitset where each number ORs in a left-shifted mask, giving O(n · target / 64).
+</ProbeNote>

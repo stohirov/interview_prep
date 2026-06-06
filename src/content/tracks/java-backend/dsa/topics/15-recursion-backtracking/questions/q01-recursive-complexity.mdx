@@ -1,0 +1,32 @@
+You reason about a recursive algorithm's cost by writing a **recurrence relation** — `T(n)` in terms of `T` of smaller inputs — and then solving it, usually with a recursion tree or the master theorem.
+
+## Write the recurrence
+
+Read it straight off the code: count the work done *outside* the recursive calls, then add the cost of the calls.
+
+- Binary search recurses once on half the input with O(1) extra work: `T(n) = T(n/2) + O(1)` → **O(log n)**.
+- Merge sort recurses twice on halves with an O(n) merge: `T(n) = 2T(n/2) + O(n)` → **O(n log n)**.
+- Naive Fibonacci recurses twice on nearly the full input: `T(n) = T(n-1) + T(n-2) + O(1)` → **O(φⁿ)**, exponential.
+
+## The recursion tree
+
+Draw the tree of calls. Cost = (work per node) × (number of nodes), or sum the work level by level.
+
+<Diagram caption="Each fib(n) spawns two children; the tree is exponential because subproblems repeat.">{`               fib(5)
+            /          \\
+        fib(4)         fib(3)
+        /     \\        /    \\
+     fib(3)  fib(2)  fib(2) fib(1)
+     ...      ...     ...`}</Diagram>
+
+Two numbers govern the total: the **branching factor** `b` (children per node) and the **depth** `d`. A balanced exponential tree has roughly `bᵈ` leaves, so the cost is often `O(bᵈ)`. For Fibonacci `b≈2`, `d=n` → exponential; the same `n` subproblems recur, which is exactly the cue to add memoization and collapse it to O(n).
+
+## Master theorem for divide-and-conquer
+
+For `T(n) = a·T(n/b) + f(n)`, compare `f(n)` to `n^(log_b a)`: the larger term dominates. This nails most divide-and-conquer recurrences (`a=2, b=2, f=n` → `n log n`).
+
+## Don't forget space
+
+Recursion costs **O(max depth)** stack space even when it does no auxiliary allocation — binary search recursion is O(log n) space, a left-skewed tree traversal is O(n) space.
+
+<ProbeNote>The interviewer wants you to *write the recurrence out loud* and identify branching factor × depth. For backtracking, the bound is usually (number of leaves/solutions) × (work to build each), e.g. permutations are O(n · n!). Always state the recursion-stack space separately from auxiliary space.</ProbeNote>

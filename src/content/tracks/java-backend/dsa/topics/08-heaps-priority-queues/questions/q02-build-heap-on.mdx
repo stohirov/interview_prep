@@ -1,0 +1,33 @@
+Inserting `n` elements one at a time costs `n` sift-ups of O(log n) each — **O(n log n)**. But building a heap *in place* by sifting **down** from the last internal node to the root is **O(n)**. The surprise is that the tighter bound is real, not an averaging trick.
+
+```java
+void buildHeap(int[] a) {
+    for (int i = a.length / 2 - 1; i >= 0; i--)  // last internal node -> root
+        siftDown(a, i, a.length);
+}
+```
+
+## The cost argument
+
+The work in `siftDown` is bounded by the node's **height** (distance to a leaf), not its depth. In a heap of `n` nodes:
+
+- roughly `n/2` nodes are leaves — height 0, zero work,
+- `n/4` have height 1,
+- `n/8` have height 2, and so on.
+
+Total work is the sum of (number of nodes at height `h`) × `h`:
+
+<Diagram caption="Work telescopes to a constant times n.">{`  sum_{h=0}^{log n}  (n / 2^(h+1)) * h
+  = (n/2) * sum_{h>=0} h / 2^h
+  = (n/2) * 2          <-- the series sum_{h>=0} h/2^h converges to 2
+  = O(n)`}</Diagram>
+
+The infinite series `Σ h / 2^h` converges to 2, so the whole sum is bounded by `n`. The many cheap leaf-level nodes dominate the count; the few expensive near-root nodes are too rare to matter.
+
+## Why sift-*down*, not sift-up
+
+If you build by sifting *up*, the expensive nodes (the leaves, which are the majority) each travel the full height of the tree — giving back the O(n log n) bound. Sifting *down* assigns the long journeys to the rare near-root nodes, which is what saves you.
+
+This is why `new PriorityQueue<>(collection)` and heap sort's setup phase are O(n), not O(n log n).
+
+<ProbeNote>The trap answer is "n inserts × log n = O(n log n)." The senior answer: heapify sifts *down*, work is bounded by node *height* not depth, most nodes are leaves with near-zero height, and `Σ h/2^h = 2` makes the total O(n). Note that O(n log n) is still the lower bound for heap *sort* — build-heap being O(n) doesn't beat the sorting bound.</ProbeNote>

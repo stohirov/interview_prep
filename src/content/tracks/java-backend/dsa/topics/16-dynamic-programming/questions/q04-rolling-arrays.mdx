@@ -1,0 +1,42 @@
+A **rolling array** is the standard DP space optimization: when a state depends only on the last few rows (or cells) of the table, you keep just those and discard the rest. Time is unchanged; space drops by a whole dimension.
+
+## When it applies
+
+Inspect the recurrence. If `dp[i]` reads only `dp[i-1]` and `dp[i-2]`, the entire history is dead weight — two scalars suffice.
+
+```java
+// Full table: O(n) space
+int[] dp = new int[n + 1];
+dp[0] = 0; dp[1] = 1;
+for (int i = 2; i <= n; i++) dp[i] = dp[i - 1] + dp[i - 2];
+
+// Rolling: O(1) space — keep only the two values you read
+int prev2 = 0, prev1 = 1;
+for (int i = 2; i <= n; i++) {
+    int cur = prev1 + prev2;
+    prev2 = prev1; prev1 = cur;
+}
+```
+
+## 2D → 1D and the iteration-order trap
+
+A grid DP where `dp[i][j]` depends on the previous row collapses to a single row. **The direction you iterate matters**, because you are overwriting the array in place.
+
+In 0/1 knapsack, `dp[i][w]` depends on `dp[i-1][w]` and `dp[i-1][w-wt]`. Reusing one row, you must iterate capacity **right-to-left** so that `dp[w-wt]` still holds the *previous* item's value (not yet overwritten this round):
+
+```java
+int[] dp = new int[W + 1];
+for (int i = 0; i < n; i++)
+    for (int w = W; w >= wt[i]; w--)        // right-to-left → each item used once
+        dp[w] = Math.max(dp[w], dp[w - wt[i]] + val[i]);
+```
+
+For **unbounded** knapsack you iterate **left-to-right**, deliberately reading the already-updated cell so an item can be reused. Same array, opposite direction, different semantics.
+
+<Callout kind="warn" title="The cost of rolling">
+Space optimization usually destroys the information needed to **reconstruct** the actual solution (the chosen items, the LCS string itself). If the interviewer wants the path, not just the optimum, keep the full table or store parent pointers. Optimize space only after correctness, and mention this trade-off.
+</Callout>
+
+<ProbeNote>
+Demonstrate that you derive the rolling array *from* the recurrence ("dp[i] only reads i-1 and i-2, so two variables suffice") rather than memorizing it. The killer follow-up is the knapsack iteration direction — explaining why 0/1 goes right-to-left and unbounded goes left-to-right proves you actually understand the in-place overwrite, not just the pattern.
+</ProbeNote>

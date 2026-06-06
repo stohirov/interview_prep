@@ -1,0 +1,35 @@
+The **common growth rates**, ordered from slowest-growing (best as `n` scales) to fastest-growing (worst), are:
+
+`O(1) < O(log n) < O(n) < O(n log n) < O(n²) < O(2ⁿ) < O(n!)`
+
+Each step is a categorical jump in how the algorithm scales — not a constant-factor difference. Knowing this ordering cold lets you sanity-check any complexity claim instantly.
+
+<ComplexityTable rows={[
+  {op: "O(1) constant", best: "1", average: "1", worst: "1", note: "HashMap.get, array index, stack push"},
+  {op: "O(log n) logarithmic", best: "~20", average: "~20", worst: "~20", note: "binary search, balanced-tree ops (n = 10⁶)"},
+  {op: "O(n) linear", best: "10⁶", average: "10⁶", worst: "10⁶", note: "single pass, linear scan"},
+  {op: "O(n log n) linearithmic", best: "~2×10⁷", average: "~2×10⁷", worst: "~2×10⁷", note: "MergeSort, Timsort, heap sort"},
+  {op: "O(n²) quadratic", best: "10¹²", average: "10¹²", worst: "10¹²", note: "nested loops, bubble/insertion sort"},
+  {op: "O(2ⁿ) exponential", best: "intractable", average: "intractable", worst: "intractable", note: "naive subsets, brute-force recursion"},
+  {op: "O(n!) factorial", best: "intractable", average: "intractable", worst: "intractable", note: "permutations, brute-force TSP"},
+]} />
+
+(Counts above are illustrative operation counts at `n = 10⁶`, except the bottom two which are astronomically large.)
+
+## The intuition behind the order
+
+- **O(1)** — cost independent of `n`. The gold standard.
+- **O(log n)** — each step *halves* the problem. Grows so slowly it is nearly constant: `n = 10⁹` takes only ~30 steps.
+- **O(n)** — you must at least *look at* every element. The floor for any problem that reads all its input.
+- **O(n log n)** — `n` work repeated across `log n` levels. The practical limit for comparison sorting (Ω(n log n) lower bound).
+- **O(n²)** — every element paired with every other. Fine for small `n`, lethal past ~10⁴.
+- **O(2ⁿ)** — one branch per element; the search space doubles with each added element. Tractable only for tiny `n` (≈20–25).
+- **O(n!)** — every ordering. Falls apart past `n ≈ 11`.
+
+## The dividing line
+
+Everything up through O(n log n) is **polynomial and practical**. O(2ⁿ) and O(n!) are **exponential** — you can solve them only for tiny inputs, or you must find a polynomial reformulation (often dynamic programming) or accept an approximation.
+
+<ProbeNote>
+Be ready to slot a *specific* algorithm into each tier and to explain the boundary: why O(n log n) is the comparison-sort floor, and why crossing from polynomial to exponential is the line between "scales" and "doesn't." Interviewers also like the curveball "where does O(√n) go?" — between O(log n) and O(n).
+</ProbeNote>

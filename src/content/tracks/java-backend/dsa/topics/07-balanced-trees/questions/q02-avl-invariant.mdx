@@ -1,0 +1,25 @@
+An **AVL tree** is a BST that maintains, at every node, the invariant that the heights of its two subtrees differ by at most one. Define a node's **balance factor** as `height(right) − height(left)`; the AVL invariant requires `balanceFactor ∈ {-1, 0, +1}` everywhere.
+
+## What it guarantees
+
+Bounding every node's balance factor bounds the whole tree's height to `≤ ~1.44·log₂(n + 2)`. That is the strictest balance of any common self-balancing tree — AVL trees are noticeably shorter than red-black trees, which makes **lookups** a touch faster, at the cost of more rebalancing work on writes.
+
+## Restoring the invariant: rotations
+
+After an insert or delete, you walk back up from the modified node, updating heights. The **first** ancestor whose balance factor reaches ±2 is the pivot to rebalance. There are exactly four cases, named by the path from the pivot to the deeper grandchild:
+
+- **LL** (left-heavy, inserted into left subtree's left) — one **right** rotation about the pivot.
+- **RR** (right-heavy, into right's right) — one **left** rotation.
+- **LR** (left-heavy, into left's right) — **left** rotation on the child, then **right** rotation on the pivot.
+- **RL** (right-heavy, into right's left) — **right** on the child, then **left** on the pivot.
+
+Each rotation is O(1) pointer rewiring.
+
+## Insertion vs deletion
+
+- **Insertion** is the simpler case: the imbalance has a single deepest location, and **one** rotation (single or double) fully rebalances the tree. You can stop climbing once you rotate.
+- **Deletion** is harder: a single rotation may shorten that subtree, propagating a new imbalance to its parent. So you must **continue up to the root**, potentially performing O(log n) rotations.
+
+In both cases total work is O(log n): O(log n) to find the spot, O(log n) height updates climbing back, and O(log n) rotations in the worst case (deletion) or O(1) (insertion).
+
+<ProbeNote>Be precise that the balance factor is per-node, not global, and that the height bound (~1.44·log n) is *why* AVL reads are fast. The classic gotcha: insertion needs at most one (single or double) rotation, but deletion can cascade rotations all the way to the root. If asked why the JDK uses red-black instead, the answer is AVL's stricter balance means more write-time rebalancing.</ProbeNote>

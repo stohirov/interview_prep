@@ -1,0 +1,21 @@
+A **Dynamo-style distributed key-value store** (Amazon Dynamo, Cassandra, Riak, Voldemort) is the deep end of the HLD pool. It is where every distributed-systems primitive shows up at once: **consistent hashing**, **quorum replication**, **conflict resolution**, **anti-entropy**, and **gossip**. Interviewers reach for it when they want to see whether you truly understand the CAP trade-off (see the CAP/PACELC topic) and replication (see the replication & partitioning topic) — not just recite them.
+
+## The shape of the problem
+
+The contract is tiny — `get(key)` and `put(key, value)` — but the system must store **petabytes** across thousands of commodity nodes, survive constant failures, and stay **available for writes** even during partitions. That last requirement is the defining choice: Dynamo is an **AP** system (CAP). It picks availability over strong consistency and pushes the resulting conflicts up to be resolved later. Almost every "hard" sub-question — vector clocks, read repair, hinted handoff — exists to make "always writable, eventually consistent" actually work.
+
+## What the interviewer is probing, by style
+
+- **FAANG** — the full Dynamo paper: consistent hashing with **virtual nodes**, the **N/R/W quorum** knobs, **vector clocks** for conflict detection, **Merkle trees** for anti-entropy, **gossip** for membership, and **sloppy quorum + hinted handoff** for write availability. Expect "what happens during a network partition?"
+- **EU / remote contracting** — when do you actually *want* this vs Postgres? Tunable consistency, operational cost, and the pain of conflict resolution. Pragmatism about whether AP is the right call.
+- **Regional (EPAM / Uzum)** — explain the core mechanics clearly: how a key maps to nodes, how replication works, how `R + W > N` gives consistency. A clean diagram and correct reasoning beat exotic detail.
+
+## The key decisions
+
+1. **Partitioning** — **consistent hashing** with **virtual nodes** so keys spread evenly and adding/removing a node moves minimal data. This is the foundation.
+2. **Replication & quorum** — replicate each key to **N** nodes; tune **R** (read) and **W** (write) acks. `R + W > N` ⇒ strong-ish consistency; `R + W ≤ N` ⇒ lower latency, more staleness.
+3. **Conflict resolution** — **vector clocks** detect concurrent writes; resolve via last-write-wins or application-level merge. **Read repair** fixes stale replicas on the read path.
+4. **Anti-entropy & membership** — **Merkle trees** to cheaply find divergent ranges between replicas; **gossip** to propagate membership and failure detection.
+5. **Failure handling** — **sloppy quorum + hinted handoff** keep writes available when the preferred replicas are down.
+
+The worked solution applies the full 11-section structure and shows all three style angles where they diverge.

@@ -1,0 +1,35 @@
+Both shift bits right, but they differ in **what fills the vacated high bits**, which only matters for negative numbers.
+
+## `>>` — arithmetic (signed) right shift
+
+Fills the high bits with the **sign bit**, preserving the number's sign. For non-negative numbers it divides by 2 (rounding toward negative infinity).
+
+```java
+ 8 >> 1;   //  4   (0...01000 -> 0...00100)
+-8 >> 1;   // -4   (sign bit 1 is propagated)
+-1 >> 31;  // -1   (all ones stays all ones)
+```
+
+## `>>>` — logical (unsigned) right shift
+
+Fills the high bits with **zeros**, regardless of sign. Because Java has no unsigned integer types, `>>>` is the only way to shift while treating the value as 32 (or 64) unsigned bits.
+
+```java
+-8 >>> 1;   // 2147483644   (sign bit replaced by 0 -> huge positive)
+-1 >>> 31;  // 1            (all ones shifted down, zeros fill in)
+-1 >>> 28;  // 15
+```
+
+There is **no `<<<`** — left shift always fills with zeros, so signed and unsigned left shift are identical, and Java provides only `<<`.
+
+## Where `>>>` actually matters
+
+- **Overflow-safe midpoint:** `int mid = (lo + hi) >>> 1;` computes the average even when `lo + hi` overflows into a negative `int` — the unsigned shift treats the overflowed bit pattern as a 33-bit-style unsigned value and gives the correct midpoint. This is the JDK's `Arrays.binarySearch` trick.
+- **`HashMap` hash spreading:** `h ^ (h >>> 16)` mixes high bits into low bits without sign contamination.
+- **Reading bits unsigned:** iterating over the 32 bits of a possibly-negative `int` uses `>>>` so the sign bit doesn't smear ones across the top.
+
+## Shift-count wraparound
+
+The shift amount is taken modulo the type width: `n >> 32 == n` for `int` (only the low 5 bits of the count are used) and modulo 64 for `long`. A surprising source of bugs.
+
+<ProbeNote>The one-liner: "`>>` sign-extends, `>>>` zero-fills; they differ only for negatives, and there's no `<<<` because left shift always zero-fills." The killer follow-up is the binary-search midpoint `(lo + hi) >>> 1` — naming that real-world use case is what separates a memorized answer from genuine understanding.</ProbeNote>

@@ -1,0 +1,23 @@
+**Big-O, Big-Omega, and Big-Theta** are asymptotic bounds on a function `T(n)` — usually an algorithm's running time — describing its growth as `n → ∞`. They differ in *which direction* they bound.
+
+## The three bounds
+
+- **Big-O — `T(n) = O(f(n))`** is an **upper bound**. There exist constants `c > 0` and `n₀` such that `T(n) ≤ c·f(n)` for all `n ≥ n₀`. It says the algorithm grows *no faster than* `f(n)`. "This sort is O(n²)" means it never does worse than quadratic.
+
+- **Big-Omega — `T(n) = Ω(f(n))`** is a **lower bound**: `T(n) ≥ c·f(n)` for all `n ≥ n₀`. It says the algorithm grows *at least as fast as* `f(n)`. Comparison sorting is Ω(n log n) — no comparison sort can beat it.
+
+- **Big-Theta — `T(n) = Θ(f(n))`** is a **tight bound**: it holds when `T(n)` is *both* O(f(n)) and Ω(f(n)), sandwiched between `c₁·f(n)` and `c₂·f(n)`. MergeSort is Θ(n log n) — best, average, and worst all match.
+
+## How they differ
+
+O caps the top, Ω floors the bottom, Θ pins both. Theta is the strongest claim: it requires the upper and lower bounds to be the same order. Big-O alone is a *one-sided* statement — saying an algorithm is "O(n²)" is technically also true if it is actually O(n), since any tighter bound is also a valid upper bound (n is O(n²)). That looseness is why O is often *over-claimed*.
+
+## What interviewers actually want
+
+In practice, engineers say "Big-O" to mean the *tight worst-case* bound, conflating O and Θ for convenience. A sharp interviewer probes the distinction: if you say binary search is "O(n)," that is technically not wrong as an upper bound, but it signals fuzzy thinking — the tight answer is Θ(log n).
+
+Two more nuances worth stating aloud: (1) the bound is about *growth*, so constants and lower-order terms drop — `Θ(3n² + n)` is `Θ(n²)`; (2) O/Ω/Θ are orthogonal to best/average/worst case — you can give a Big-Theta bound on the *worst case* specifically.
+
+<ProbeNote>
+The trap question: "Is QuickSort O(n log n)?" The precise answer is "O(n²) worst case, Θ(n log n) on average." Saying just "O(n log n)" without qualifying the case is the slip interviewers listen for.
+</ProbeNote>

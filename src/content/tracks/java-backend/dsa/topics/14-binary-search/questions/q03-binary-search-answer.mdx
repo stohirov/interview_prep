@@ -1,0 +1,38 @@
+**Problem.** What does "binary search on the answer" (parametric search) mean, and how do you recognize when it applies?
+
+## The shift in mindset
+
+Ordinary binary search looks for a value *in a sorted array*. Binary search on the answer drops the array entirely: you search a **range of candidate answers** for the threshold where a **monotonic feasibility predicate** flips. You never sort or store the inputs — you guess an answer and ask "is this achievable?"
+
+<Diagram caption="The predicate must be monotone for the boundary to be findable.">{`candidate x:  small ........................ large
+feasible(x): F   F   F   F   T   T   T   T   T
+                             ^ first feasible answer (the optimum)`}</Diagram>
+
+## The three conditions
+
+1. **The answer lives in a numeric range** `[lo, hi]` you can bound (a speed, a capacity, a maximum allowed sum).
+2. **There's a `feasible(x)` test** you can evaluate, usually in O(n).
+3. **`feasible` is monotonic** — if `x` works, every larger (or every smaller) `x` works too. That `F…F T…T` step is what makes the boundary binary-searchable.
+
+If those hold, binary-search the boundary in **O(log(range) × cost(feasible))**.
+
+```java
+int searchAnswer(int lo, int hi) {
+    while (lo < hi) {
+        int mid = lo + (hi - lo) / 2;
+        if (feasible(mid)) hi = mid;   // mid works -> answer is mid or smaller
+        else lo = mid + 1;             // mid fails -> need something larger
+    }
+    return lo;                          // first feasible value
+}
+```
+
+## Recognizing it
+
+The tells: a problem asks for the **minimum capacity / maximum value / smallest speed** such that some constraint holds, and a brute-force "try every candidate" would be linear or worse over the range. Examples: **Koko Eating Bananas** (search eating speed; feasible = finishes in time), **Capacity to Ship Packages in D Days** (search capacity; feasible = fits in D days), **Split Array Largest Sum**, and **Minimize Max Distance to Gas Station**.
+
+<Callout kind="tip" title="The reframe that unlocks it">
+Stop trying to *compute* the optimum directly. Instead ask: "Given a candidate answer, can I *check* feasibility in O(n)?" If yes and feasibility is monotone, you binary-search the answer space — turning an intractable optimization into log-many cheap checks.
+</Callout>
+
+<ProbeNote>Lead with monotonicity — that's the precondition. Show the `feasible(mid) → hi = mid` template (which returns the *first* feasible value), bound `lo`/`hi` from the problem's physical limits, and state the complexity as `O(log(range) × O(feasible))`. Naming Koko and Capacity-to-Ship as instances shows you see the pattern, not just one problem.</ProbeNote>

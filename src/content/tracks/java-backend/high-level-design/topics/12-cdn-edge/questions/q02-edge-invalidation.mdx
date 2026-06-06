@@ -1,0 +1,39 @@
+## Cache invalidation at the edge — TTL, purge, surrogate keys
+
+Edge invalidation is the same hard problem as application-cache invalidation, made harder by **distribution**: a cached object may live in hundreds of PoPs worldwide, so "delete this entry" means propagating a change across a global fleet. There are three mechanisms, used in combination.
+
+### The three mechanisms
+
+| Mechanism | How it works | Freshness | Cost |
+| --- | --- | --- | --- |
+| **TTL** | Each object expires after a set time (`Cache-Control: max-age`, `s-maxage`) | Bounded by the TTL | Free, no coordination |
+| **Purge** | Explicit API call invalidates a URL (or path/wildcard) across all PoPs | Near-immediate (seconds) | A purge call per change |
+| **Surrogate keys** | Tag objects with keys; purge by key to drop *all* related objects at once | Near-immediate, grouped | Tagging discipline at the edge |
+
+### TTL — the default
+
+Set `Cache-Control: max-age` (browser) and `s-maxage` (shared/CDN) and let objects expire. It needs no coordination and is self-healing, but staleness is bounded only by the TTL. For static assets the standard trick is **content-hashed URLs** (`app.3f9a2c.js`) with a near-infinite TTL: a new deploy produces a new URL, so you never invalidate — you just stop referencing the old one. That makes TTL the right answer for immutable, versioned assets.
+
+### Purge — explicit and immediate
+
+When content changes and you can't wait for the TTL (a corrected article, a pulled image), call the CDN's **purge API** to invalidate a specific URL across all PoPs within seconds. Purging works by URL, by path prefix, or with wildcards. The limitation: it operates on **individual URLs**, which is painful when one logical change affects many URLs (an updated product appearing on the homepage, a category page, search results, and an API endpoint).
+
+### Surrogate keys — purge by relationship
+
+Surrogate keys (a.k.a. **cache tags**) solve the "one change, many URLs" problem. The origin attaches a `Surrogate-Key` header listing tags an object belongs to (e.g. `product-123 category-shoes`). Later, **purging the tag `product-123` evicts every cached object carrying it**, no matter how many URLs that is, in a single call.
+
+<Mermaid caption="One surrogate-key purge evicts every object tagged with it">{`graph LR
+    W[Origin: product 123 changed] -->|purge key product-123| CDN[CDN control plane]
+    CDN --> O1[/home: tagged product-123/]
+    CDN --> O2[/category page: tagged product-123/]
+    CDN --> O3[/api/products/123/]`}</Mermaid>
+
+This is the senior answer for dynamic content: cache aggressively with long TTLs *and* tag everything with surrogate keys, then purge precisely by relationship on each write. You keep a high hit ratio without serving stale data.
+
+### Stale-while-revalidate
+
+A complementary header: `stale-while-revalidate` lets the edge serve the slightly-stale cached copy *immediately* while it refreshes from origin in the background — so an expiring object never causes a blocking miss for the user, smoothing the edge equivalent of a cache stampede.
+
+<ProbeNote>
+The interviewer wants all three named and, critically, **surrogate keys** as the answer to "one change invalidates many URLs." Strong signals: content-hashed URLs to avoid invalidation entirely for static assets, and `stale-while-revalidate` to avoid blocking misses on expiry.
+</ProbeNote>

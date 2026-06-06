@@ -1,0 +1,27 @@
+`ArrayList` is backed by a plain `Object[]`. A single `add` is **O(1)** when there's spare capacity — just write to the next slot and bump `size`. The subtlety is what happens when the backing array is full.
+
+## The resize
+
+When `size == capacity`, `add` must **grow**: allocate a bigger array, copy every existing element over (O(n)), then append. Java's `ArrayList` grows by roughly **1.5×** (`newCap = old + (old >> 1)`). That one resize is O(n) — so how is `add` "O(1)"?
+
+## Why it amortizes to O(1)
+
+The key is that resizes are **rare and the copy cost is shared across many cheap appends**. Suppose we double on each resize (the cleanest version of the argument). Going from 0 to n elements, resizes happen at sizes 1, 2, 4, 8, … n. The total copy work is:
+
+```
+1 + 2 + 4 + 8 + ... + n  =  2n - 1  =  O(n)
+```
+
+That's O(n) total copying spread over n appends → **O(1) amortized per append**. The geometric growth is what makes the series converge to a constant multiple of n. If instead you grew by a *fixed* amount (say +10 each time), resizes would happen O(n) times and total copy work would be O(n²) — amortized O(n) per add. Geometric growth is the whole trick.
+
+<ComplexityTable rows={[
+  {op: "add (append)", best: "O(1)", average: "O(1)", worst: "O(n)", note: "amortized O(1); worst case is the resize-and-copy"},
+  {op: "get / set", best: "O(1)", average: "O(1)", worst: "O(1)", note: "direct index into backing array"},
+  {op: "add(i, x) / remove(i)", best: "O(1)", average: "O(n)", worst: "O(n)", note: "shifts all elements after i"},
+]} />
+
+<Callout kind="info" title="Amortized ≠ average">
+Amortized is a *worst-case guarantee over a sequence* of operations — any n appends cost O(n) total, period. Average-case talks about expected cost under some input distribution. They coincide here but mean different things; say "amortized" precisely.
+</Callout>
+
+<ProbeNote>The crisp answer: "Geometric growth means total copy work across n appends is O(n) — a converging geometric series — so each append is O(1) amortized; a single append can still be O(n) during a resize." Bonus: name Java's 1.5× factor, contrast with fixed-increment growth (which would be O(n²) total), and pre-size with `new ArrayList<>(n)` to avoid resizes entirely when n is known.</ProbeNote>

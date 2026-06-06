@@ -1,0 +1,216 @@
+## 1. Functional requirements
+
+- **Catalog** of titles searchable by title, author, or ISBN.
+- A title (`Book`) has multiple physical copies (`BookItem`); the system tracks each copy's status.
+- **Members** check out copies (subject to a max-count and loan-period limit) and return them.
+- **Librarians** add/remove copies and manage members.
+- When all copies are out, a member may place a **reservation**; the next returned copy is held for the queue head.
+- **Fines** accrue for overdue returns per a configurable policy.
+- **Notifications** for overdue loans and "your hold is ready".
+
+## 2. Non-functional requirements
+
+- **Extensibility** — adding a fine policy or a notification channel must not touch checkout logic (Open/Closed).
+- **Correct availability** — a copy is loaned to at most one member; reservations are honored in FIFO order.
+- **Concurrency** — two members must not check out the same copy; a return-then-hold must be atomic.
+- **Auditability** — loans and returns are recorded with timestamps.
+
+## 3. Core entities
+
+| Entity | Responsibility |
+| --- | --- |
+| `Library` | Singleton aggregate root; owns the catalog and orchestrates checkout/return. |
+| `Book` | A title (ISBN, author); holds its `BookItem` copies and reservation queue. |
+| `BookItem` | A physical copy with a barcode and a lifecycle state. |
+| `BookStatus` | Copy state: `AVAILABLE`, `LOANED`, `RESERVED`, `LOST`. |
+| `Member` | A borrower with an `Account`, active loans, and reservations. |
+| `Librarian` | Staff who manage copies and members. |
+| `Account` | Per-member borrowing state (active loans, accrued fines). |
+| `Loan` | A checkout record: copy, member, issue and due dates. |
+| `Reservation` | A hold placed when no copy is available. |
+| `FineCalculator` | Strategy computing the overdue fine. |
+| `NotificationService` | Observer pushing overdue and hold-ready alerts. |
+
+## 4. Class diagram
+
+<Mermaid caption="Library management class model">{`classDiagram
+    class Library {
+      -Map~String,Book~ catalog
+      -FineCalculator fineCalc
+      +checkout(Member, String barcode) Loan
+      +returnItem(Loan)
+    }
+    class Book {
+      -String isbn
+      -String title
+      -List~BookItem~ copies
+      -Queue~Reservation~ holds
+      +availableCopy() Optional~BookItem~
+    }
+    class BookItem {
+      -String barcode
+      -BookStatus status
+      +loanTo(Member)
+      +markReturned()
+    }
+    class BookStatus {
+      <<enumeration>>
+      AVAILABLE
+      LOANED
+      RESERVED
+      LOST
+    }
+    class Member {
+      -String id
+      -Account account
+    }
+    class Account {
+      -List~Loan~ activeLoans
+      -double fines
+    }
+    class Loan {
+      -BookItem item
+      -LocalDate issued
+      -LocalDate due
+    }
+    class FineCalculator {
+      <<interface>>
+      +fine(Loan, LocalDate) double
+    }
+    class NotificationService {
+      <<interface>>
+      +notify(Member, String)
+    }
+    Library "1" o-- "*" Book
+    Library ..> FineCalculator
+    Book "1" o-- "*" BookItem
+    Book "1" o-- "*" Reservation
+    BookItem --> BookStatus
+    Member "1" --> "1" Account
+    Account "1" o-- "*" Loan
+    Loan --> BookItem
+    Reservation --> Member
+    NotificationService <.. Library`}</Mermaid>
+
+## 5. Key interfaces and classes
+
+```java
+enum BookStatus { AVAILABLE, LOANED, RESERVED, LOST }
+
+final class BookItem {                       // a physical copy
+    final String barcode;
+    private BookStatus status = BookStatus.AVAILABLE;
+
+    BookItem(String barcode) { this.barcode = barcode; }
+
+    synchronized boolean loanTo() {          // State guard against double-loan
+        if (status != BookStatus.AVAILABLE && status != BookStatus.RESERVED) return false;
+        status = BookStatus.LOANED;
+        return true;
+    }
+    synchronized void markReturned() { status = BookStatus.AVAILABLE; }
+    synchronized void hold()         { status = BookStatus.RESERVED; }
+    BookStatus status() { return status; }
+}
+
+final class Book {                           // a title (catalog identity)
+    final String isbn;
+    final String title;
+    private final List<BookItem> copies = new ArrayList<>();
+    private final Queue<Reservation> holds = new LinkedList<>();   // FIFO hold queue
+
+    Book(String isbn, String title) { this.isbn = isbn; this.title = title; }
+
+    Optional<BookItem> availableCopy() {
+        return copies.stream().filter(c -> c.status() == BookStatus.AVAILABLE).findFirst();
+    }
+    void addReservation(Reservation r) { holds.add(r); }
+    Optional<Reservation> nextHold()   { return Optional.ofNullable(holds.poll()); }
+}
+
+interface FineCalculator {                   // Strategy
+    double fine(Loan loan, LocalDate returnedOn);
+}
+
+interface NotificationService {              // Observer sink
+    void notify(Member member, String message);
+}
+```
+
+```java
+public final class Library {                          // Singleton aggregate root
+    private static final Library INSTANCE = new Library();
+    public static Library get() { return INSTANCE; }
+
+    private final Map<String, Book> catalog = new ConcurrentHashMap<>();   // isbn -> Book
+    private final Map<String, Book> byBarcode = new ConcurrentHashMap<>(); // barcode -> Book
+    private FineCalculator fineCalc = new PerDayFine(1.0);
+    private final List<NotificationService> notifiers = new CopyOnWriteArrayList<>();
+    private static final int LOAN_DAYS = 14;
+    private Library() {}
+
+    public Loan checkout(Member member, String barcode) {
+        Book book = byBarcode.get(barcode);
+        BookItem copy = book.availableCopy()
+            .orElseThrow(() -> new IllegalStateException("No copy available; place a reservation"));
+        if (!copy.loanTo()) throw new IllegalStateException("Copy not loanable");
+        Loan loan = new Loan(copy, member, LocalDate.now(), LocalDate.now().plusDays(LOAN_DAYS));
+        member.account().add(loan);
+        return loan;
+    }
+
+    public void returnItem(Loan loan, LocalDate on) {
+        double fine = fineCalc.fine(loan, on);
+        if (fine > 0) loan.member().account().addFine(fine);
+        Book book = byBarcode.get(loan.item().barcode);
+        // Atomic return-then-hold: serve the reservation queue before re-shelving.
+        book.nextHold().ifPresentOrElse(
+            res -> { loan.item().hold(); notify(res.member(), "Your hold on '" + book.title + "' is ready"); },
+            ()  -> loan.item().markReturned());
+        loan.member().account().remove(loan);
+    }
+
+    public void addNotifier(NotificationService n) { notifiers.add(n); }
+    private void notify(Member m, String msg) { notifiers.forEach(n -> n.notify(m, msg)); }
+}
+
+// Strategy: flat fee per overdue day.
+final class PerDayFine implements FineCalculator {
+    private final double perDay;
+    PerDayFine(double perDay) { this.perDay = perDay; }
+    public double fine(Loan loan, LocalDate returnedOn) {
+        long overdue = Math.max(0, ChronoUnit.DAYS.between(loan.due(), returnedOn));
+        return overdue * perDay;
+    }
+}
+```
+
+## 6. Design patterns used
+
+- **Factory** — a `BookItemFactory` (centralizing copy creation and barcode assignment) keeps the librarian flow from scattering `new BookItem(...)` calls; new copy variants are added in one place.
+- **Observer** — `NotificationService` subscribers receive overdue and hold-ready events; channels (email, SMS, push) are added without touching `Library`.
+- **Strategy** — `FineCalculator` lets per-day, tiered, or grace-period fine policies interchange freely.
+- **State** — `BookStatus` models the copy lifecycle (available → loaned → reserved → lost) with guarded transitions, preventing illegal double-loans.
+- **Singleton** — one `Library` aggregate root coordinates the catalog.
+
+## 7. Trade-offs and alternatives
+
+- **Book vs BookItem.** Modeling the title and the copy as one class is the cardinal error: you lose per-copy status and cannot represent partial availability. The split is non-negotiable.
+- **State enum vs State classes.** An enum with guarded setters is interview-fast; full State classes pay off when transitions multiply (damaged, in-repair, in-transit between branches).
+- **Hold queue placement.** Keeping the FIFO queue on `Book` makes "next reader" trivial and local; a global reservation table is more flexible for cross-branch holds but adds coordination cost.
+- **Fine precision.** `double` is acceptable in an interview; production money should use `BigDecimal` or minor-unit `long`.
+- **Concurrency.** Per-copy `synchronized loanTo()` plus an atomic return-then-hold avoids two members grabbing the same copy without a global lock.
+
+## 8. Common follow-up questions
+
+- **E-books / digital media** — a `DigitalItem` subtype with unlimited or license-limited concurrent loans; availability logic diverges from physical copies.
+- **Multi-branch libraries** — a `Branch` owns copies; add inter-branch transfers and branch-scoped availability and holds.
+- **Hold queue policy** — FIFO vs priority (faculty over students); the queue becomes a `PriorityQueue` keyed by member tier.
+- **ISBN vs copy identity** — search and reservations operate on ISBN (`Book`); checkout and status operate on the barcode (`BookItem`). Keeping these distinct is the recurring follow-up.
+- **Renewals** — extend a loan's due date if no reservation is queued for the title.
+
+## 9. What interviewers are really probing
+
+<ProbeNote>
+That you (1) split **Book (title/ISBN) from BookItem (physical copy)** immediately — the single decision the whole model rests on, (2) modeled the copy lifecycle as a guarded **State** rather than scattered flags, (3) gave fines and notifications their own **Strategy/Observer** seams, and (4) handled the **return-then-hold** sequence so the reservation queue head is served atomically. Drawing the Book/BookItem line unprompted is the senior signal.
+</ProbeNote>

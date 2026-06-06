@@ -1,0 +1,42 @@
+The knapsack family is the most reusable DP template: choose items to maximize value (or count ways, or hit a target) under a capacity constraint. The variants differ only in **how many times each item may be taken**, which shows up as the inner-loop direction.
+
+## 0/1 knapsack — each item at most once
+
+State `dp[w]` = best value achievable with capacity `w`. Iterate items, and for each item sweep capacity **right-to-left** so the value you read reflects the *previous* item — guaranteeing each item is considered once.
+
+```java
+int[] dp = new int[W + 1];
+for (int i = 0; i < n; i++)
+    for (int w = W; w >= wt[i]; w--)            // right-to-left
+        dp[w] = Math.max(dp[w], dp[w - wt[i]] + val[i]);
+```
+
+Subset-sum, partition-equal-subset, and "Coin Change with limited coins" are all 0/1 in disguise.
+
+## Unbounded knapsack — each item unlimited times
+
+Same table, but sweep capacity **left-to-right**. Reading `dp[w - wt[i]]` now sees the *already-updated* cell for this item, so the item can be reused.
+
+```java
+int[] dp = new int[W + 1];
+for (int i = 0; i < n; i++)
+    for (int w = wt[i]; w <= W; w++)            // left-to-right
+        dp[w] = Math.max(dp[w], dp[w - wt[i]] + val[i]);
+```
+
+Coin Change (min coins) and Coin Change 2 (count ways) are unbounded knapsack.
+
+## Bounded knapsack — each item at most k times
+
+Each item has a count limit `k`. Two standard approaches:
+
+- **Binary splitting:** decompose `k` into powers of two (1, 2, 4, …, remainder) and treat each chunk as a distinct 0/1 item. This turns a count-`k` item into O(log k) items, giving O(n·W·log k).
+- **Monotonic-deque / sliding-window optimization:** O(n·W) by grouping capacities into residue classes mod `wt[i]` and using a deque — the optimal but rarely-asked technique.
+
+<Callout kind="tip" title="The one thing to remember">
+0/1 → iterate capacity **right-to-left** (item used once). Unbounded → **left-to-right** (item reused). Bounded → binary-split the count into 0/1 items. The recurrence is identical; only the loop bound/direction encodes the multiplicity rule.
+</Callout>
+
+<ProbeNote>
+Interviewers test this by asking you to convert between variants live: "now suppose each coin can be used at most twice." A strong candidate immediately reaches for binary splitting and explains the loop-direction distinction between 0/1 and unbounded without hesitation. Also be ready to switch the objective from `max value` to `count ways` (sum instead of max) or `min coins` (min with an infinity sentinel).
+</ProbeNote>

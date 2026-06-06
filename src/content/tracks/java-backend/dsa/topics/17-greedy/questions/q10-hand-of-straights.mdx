@@ -1,0 +1,43 @@
+**Problem.** Given an array `hand` of card values and a `groupSize`, determine whether the cards can be rearranged into groups of `groupSize` **consecutive** values. (LeetCode also calls this "Divide Array in Sets of K Consecutive Numbers.")
+
+## Greedy idea — always start a straight at the smallest remaining card
+
+The smallest available card *must* be the start of some straight — nothing smaller exists to precede it. So greedily form a straight beginning at the current minimum, consuming `min, min+1, ..., min+groupSize-1`. If any required card is missing, it's impossible.
+
+## TreeMap solution — O(n log n)
+
+A `TreeMap<value, count>` keeps values sorted (cheap access to the minimum) and tracks remaining counts.
+
+```java
+boolean isNStraightHand(int[] hand, int groupSize) {
+    if (hand.length % groupSize != 0) return false;          // must divide evenly
+
+    TreeMap<Integer, Integer> count = new TreeMap<>();
+    for (int c : hand) count.merge(c, 1, Integer::sum);
+
+    while (!count.isEmpty()) {
+        int start = count.firstKey();                        // smallest remaining card
+        for (int v = start; v < start + groupSize; v++) {
+            Integer have = count.get(v);
+            if (have == null) return false;                  // missing card -> fail
+            if (have == 1) count.remove(v);
+            else count.put(v, have - 1);
+        }
+    }
+    return true;
+}
+```
+
+## Why the greedy choice is safe
+
+The minimum card cannot be the middle or end of any straight (no smaller value exists), so it can only be a start. Once we fix that, consuming the next `groupSize - 1` consecutive values is forced. There's never a choice to second-guess — hence greedy, not DP.
+
+## Complexity note
+
+`firstKey()` and each `get`/`put` are O(log n). We touch each card once across all straights, so total work is O(n log n). An alternative uses a `HashMap` plus a sort of the distinct keys for the same bound; the `TreeMap` is cleaner because it maintains the sorted order incrementally.
+
+<ComplexityTable rows={[
+  {op: "TreeMap greedy", best: "O(n log n)", average: "O(n log n)", worst: "O(n log n)", note: "sorted-map ops; O(n) space"},
+]} />
+
+<ProbeNote>The early `hand.length % groupSize != 0` check is a quick win. The core argument — "the smallest remaining card must begin a straight" — is what justifies greedy over brute force. Watch the count bookkeeping: removing a key when its count hits zero keeps `firstKey()` pointing at a genuinely available card.</ProbeNote>

@@ -1,0 +1,59 @@
+## Backpressure and dead-letter queues — when and why
+
+These two mechanisms answer the two ways a consumer can fall behind: **too many** messages (the consumer is slower than the producer → backpressure) and **bad** messages (a message that can never succeed → dead-letter queue). A robust pipeline needs both, and they solve different problems.
+
+### Backpressure — when producers outrun consumers
+
+Backpressure is the system's way of saying "slow down" when demand exceeds the rate work can be absorbed. Without it, an overwhelmed consumer has only bad options: buffer until it runs out of memory and crashes, or silently drop data. The goal is to push the pressure *back* toward the source in a controlled way.
+
+How the two broker models handle it:
+
+- **Logs (Kafka)** have **built-in backpressure by design**. The log is durably retained on disk, and consumers **pull** at their own pace. A slow consumer simply has growing **consumer lag** (offset behind log end) — the producer is never blocked, and nothing is lost as long as the data is within retention. Lag is the metric you alarm on; the fix is more consumers/partitions or faster processing.
+- **Queues (RabbitMQ)** must **bound the buffer** and apply flow control. Mechanisms: a **prefetch / QoS limit** (how many un-acked messages a consumer holds at once), **queue length limits** with an overflow policy (reject-publish or drop-head), and TCP-level flow control that slows publishers when memory/disk alarms fire.
+
+Strategies, from gentlest to harshest:
+
+<ComplexityTable>
+
+| Strategy | What it does | When |
+|---|---|---|
+| Buffer | Absorb the spike (disk in Kafka, bounded queue in RabbitMQ) | Short bursts |
+| Throttle producer | Signal/slow the source (flow control, rate limit) | Sustained overload, source can wait |
+| Scale consumers | Add workers / partitions to raise drain rate | Sustained load, work parallelizes |
+| Shed load | Drop or sample lower-priority messages | Protecting the system is worth losing some data |
+
+</ComplexityTable>
+
+The cardinal rule: **never let an unbounded queue grow until OOM.** Pick an explicit overflow policy.
+
+### Dead-letter queues — when a message can't succeed
+
+A **dead-letter queue (DLQ)** is a separate destination where messages go when they **cannot be processed successfully** after retries. The point is to get a poison message **out of the main flow** so it stops blocking everything behind it, while preserving it for inspection instead of dropping it.
+
+A message is dead-lettered when it:
+
+- **fails processing repeatedly** (exceeds a max-retry / max-delivery count),
+- **expires** (TTL elapsed), or
+- can't be routed / the queue is full.
+
+<Mermaid caption="Failed messages retry, then divert to the DLQ instead of blocking the main consumer">{`graph LR
+    Q[(Main queue)] --> C[Consumer]
+    C -->|success: ack| Done[Done]
+    C -->|fail| R{Retries left?}
+    R -->|yes: requeue / delay| Q
+    R -->|no| DLQ[(Dead-letter queue)]
+    DLQ --> H[Alert + human / fix + replay]`}</Mermaid>
+
+Why it matters especially for **logs**: in Kafka, a single poison record at an offset can **block the whole partition** if the consumer keeps failing and refusing to advance the offset (**head-of-line blocking**). The pattern is: retry a bounded number of times (often with backoff via a retry topic), then **publish the record to a DLQ topic and commit the offset** so the partition keeps moving.
+
+<Callout kind="warn" title="A DLQ is a tool, not a graveyard">
+A DLQ only adds value if something *acts* on it — alerting, a dashboard of dead-letter rate, and a replay path to reprocess after the bug is fixed. Always capture **why** a message died (failure reason, stack trace, original topic/offset) in headers. And add retries with **backoff**, not tight immediate retries, or you'll hammer a struggling downstream and turn a transient blip into an outage.
+</Callout>
+
+### Distinguishing transient vs permanent failures
+
+The retry-then-DLQ logic should distinguish a **transient** failure (downstream timeout, 503 → worth retrying with backoff) from a **permanent** one (malformed payload, validation error → no number of retries will help, DLQ immediately). Retrying permanent failures just wastes capacity and delays the obvious dead-letter.
+
+<ProbeNote>
+The interviewer wants you to separate the two concerns: backpressure handles **rate** mismatch (Kafka's pull + lag is backpressure for free; queues need prefetch/bounds), and the DLQ handles **poison** messages so they don't block the pipeline. Strong signals: never let buffers grow unbounded, beware head-of-line blocking on a Kafka partition, retry with backoff distinguishing transient vs permanent, and treat the DLQ as something you monitor and replay — not a black hole.
+</ProbeNote>

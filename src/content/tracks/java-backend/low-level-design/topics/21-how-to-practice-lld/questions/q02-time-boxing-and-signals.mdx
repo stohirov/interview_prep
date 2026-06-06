@@ -1,0 +1,49 @@
+Two things separate a pass from a fail with equal design knowledge: finishing on time, and emitting the signals that read as senior. Both are learnable and practicable.
+
+## The 45-minute budget
+
+Internalize this allocation so you instinctively know when to stop one phase and move on:
+
+<Diagram caption="A 45-minute LLD round, phase by phase">{`0-5    CLARIFY      requirements, assumptions, scope boundary
+5-10   ENTITIES     nouns -> classes; relationships sketch
+10-25  CLASS DESIGN diagram + core interfaces + the key code
+25-35  PATTERNS     wire in patterns; finish the proving method
+35-45  TRADE-OFFS   concurrency, alternatives, follow-ups, Q&A`}</Diagram>
+
+The two hardest disciplines:
+
+- **Don't over-clarify.** Five minutes, then commit. Endless questions read as indecision.
+- **Don't gold-plate the model.** When a phase's time is up, move on even if imperfect. A complete-but-rough design beats a perfect parking-spot class with no pricing or trade-off discussion.
+
+<Callout kind="warn" title="Running out of time is the most common failure">
+Far more candidates fail by spending 30 minutes on a beautiful class diagram and never reaching trade-offs than by having a slightly messy model. Watch the clock; the back half of the interview (patterns, concurrency, trade-offs) is where senior signals live. Sacrifice polish, not phases.
+</Callout>
+
+## How to signal senior
+
+These behaviors, more than the final artifact, push you into the senior band:
+
+- **Clarify and bound proactively** — state assumptions and an explicit scope instead of waiting to be told.
+- **Justify every pattern with its trigger** — "pricing varies and will grow, *so* Strategy," never a bare pattern name.
+- **Spot the concurrency race unprompted** — name the check-then-act race and guard it precisely.
+- **Volunteer trade-offs and alternatives** — "I could scan floors, but a per-type queue is O(1); for this scale the scan is fine."
+- **Design for the follow-up before it's asked** — leave an interface seam where EV charging / new channels / reservations will plug in.
+- **Communicate continuously** — narrate every fork and why you took it; the interviewer grades what they can observe.
+- **Take hints gracefully** — treat a nudge as a collaboration cue, adjust, and explain the change.
+
+## Junior tells to avoid
+
+<Diagram caption="What drops you a band">{`- Coding before clarifying scope
+- A God class doing everything
+- if (type == X) type ladders instead of polymorphism
+- Naming patterns with no justifying trigger
+- Ignoring obvious shared mutable state
+- Long silences; only one option ever presented`}</Diagram>
+
+## A closing checklist for the last five minutes
+
+When the design is on the board, spend the final minutes saying out loud: the concurrency story, one alternative you considered and why you chose otherwise, and the two or three follow-ups you've already designed seams for. This is the highest-density senior signal in the whole round.
+
+<ProbeNote>
+Tagged behavioral because, at the senior level, *how* you run the 45 minutes is graded as heavily as the design. Calm pacing, continuous narration, justified decisions, and proactive trade-off talk tell the interviewer "I've shipped systems and made these calls before" — which is ultimately what the round is trying to verify.
+</ProbeNote>

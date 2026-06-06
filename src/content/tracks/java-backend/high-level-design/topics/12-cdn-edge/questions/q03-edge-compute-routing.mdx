@@ -1,0 +1,46 @@
+## Edge compute, anycast vs DNS geo-routing, and TLS termination
+
+The modern edge does far more than cache bytes. Three capabilities turn a CDN into a programmable front door: **edge compute** (running code at the PoP), the **routing layer** that gets users to the nearest PoP (anycast vs DNS), and **TLS termination** at the edge.
+
+### Edge compute
+
+CDNs now run user code at the PoP — **Cloudflare Workers**, **AWS Lambda@Edge / CloudFront Functions**, **Fastly Compute** — executing within milliseconds of the user. Typical uses:
+
+- **Request routing & rewriting** — choose an origin, rewrite paths, normalize cache keys.
+- **Auth & security at the edge** — validate a JWT or signed URL, enforce a WAF rule, block bots before the request ever reaches origin.
+- **Personalization & A/B testing** — vary the response by cookie/geo without a round-trip to origin.
+- **Edge-side assembly** — stitch cached fragments into a page, or serve a fully cacheable shell and hydrate at the edge.
+
+The win is doing work **close to the user** and **off the origin**; the constraint is a restricted, short-lived runtime (CPU/memory/time limits, no full server environment).
+
+### Anycast vs DNS geo-routing
+
+Two ways to send a user to the nearest PoP — they operate at different layers.
+
+| | **Anycast** | **DNS geo-routing** |
+| --- | --- | --- |
+| Mechanism | Same IP announced from every PoP; **BGP** routes the packet to the topologically nearest one | DNS resolver returns the **IP of a nearby PoP** based on resolver location |
+| Granularity | Network-topology nearest (not always geo-nearest) | Geo/latency-based, can be policy-driven |
+| Failover | **Fast** — if a PoP withdraws its route, BGP reroutes automatically; no client change | **Slower** — bounded by **DNS TTL caching**; clients keep using a dead IP until TTL expires |
+| Connection stability | A routing change can move an in-flight TCP flow to another PoP | Stable for the life of the resolved record |
+
+<Mermaid caption="Anycast: one IP, BGP picks the nearest PoP; DNS routing resolves to a PoP IP">{`graph TB
+    subgraph Anycast
+      C1[Client] -->|1.2.3.4| BGP{BGP / topology}
+      BGP --> PA[PoP A]
+      BGP --> PB[PoP B]
+    end
+    subgraph DNS[DNS geo-routing]
+      C2[Client] --> DNS2[DNS resolver]
+      DNS2 -->|returns nearest PoP IP| PC[PoP C]
+    end`}</Mermaid>
+
+In practice large CDNs **combine** them: anycast for the data plane (fast failover, simplicity) and DNS-level steering for coarse geo/policy decisions. The key trade-off to state: **anycast fails over in seconds via BGP; DNS routing is hostage to TTL caching**, so a dead PoP keeps receiving traffic until cached records expire.
+
+### TLS termination at the edge
+
+The PoP **terminates the user's TLS connection** — the handshake completes close to the user, so the expensive round-trips of establishing TLS happen over a short, low-latency path instead of all the way to origin. The edge then talks to origin over **warm, pooled, reused connections** (often a persistent backhaul), and can speak modern protocols to the client (**HTTP/2** multiplexing, **HTTP/3 over QUIC** for faster resumption on mobile) even if the origin still speaks HTTP/1.1. Terminating at the edge also centralizes certificate management and lets edge compute and the WAF inspect decrypted traffic.
+
+<ProbeNote>
+The interviewer wants three distinct ideas kept straight: edge compute runs logic close to the user and off origin; the anycast-vs-DNS distinction hinges on **BGP fast-failover vs DNS-TTL-bound failover**; and TLS termination moves the costly handshake near the user while the edge reuses warm connections to origin. Naming HTTP/3-over-QUIC at the edge is a strong bonus.
+</ProbeNote>

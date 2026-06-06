@@ -1,0 +1,287 @@
+## 1. Functional requirements
+
+- Decide **allow / reject** for each incoming request identified by a **key** (user id, IP, or API key).
+- Enforce a configurable limit: `N` requests per window/second, plus an optional **burst** capacity.
+- Support multiple **algorithms** behind one interface: Token Bucket, Leaky Bucket, Fixed Window, Sliding Window Log, Sliding Window Counter.
+- Allow **chaining** several limits for one request (e.g. per-IP *and* per-user).
+- On rejection, expose enough info to populate a `429 Too Many Requests` + `Retry-After` header.
+
+## 2. Non-functional requirements
+
+- **Thread-safe** — the limiter is hit by many threads concurrently; counting must be atomic. Independent keys must not contend.
+- **Low latency** — the decision is on the hot path; O(1) per call, no allocation where avoidable.
+- **Bounded memory** — must not grow unbounded as new keys appear (eviction / TTL on idle keys).
+- **Extensible** — adding an algorithm must not touch existing ones (Open/Closed).
+- **Distributable** — single-node design must have a clear seam to move counters into Redis.
+
+## 3. Core entities
+
+| Entity | Responsibility |
+| --- | --- |
+| `RateLimiter` | Facade / Singleton; maps a key to its per-key state and delegates the decision. |
+| `RateLimitStrategy` | Interface; one implementation per algorithm. |
+| `TokenBucketStrategy` etc. | Concrete algorithms (Strategy). |
+| `Bucket` | Per-key mutable state for token/leaky bucket (tokens, last-refill timestamp). |
+| `RequestLog` | Per-key timestamp log for Sliding Window Log. |
+| `RateLimitResult` | Outcome: allowed flag + `retryAfterMillis`. |
+| `ChainedRateLimiter` | Decorator that ANDs several limiters together. |
+
+## 4. Class diagram
+
+<Mermaid caption="Rate limiter class model — Strategy behind a Singleton facade, Decorator for chaining">{`classDiagram
+    class RateLimiter {
+      -RateLimitStrategy strategy
+      +allow(String key) RateLimitResult
+    }
+    class RateLimitStrategy {
+      <<interface>>
+      +tryAcquire(String key) RateLimitResult
+    }
+    class RateLimitResult {
+      +boolean allowed
+      +long retryAfterMillis
+    }
+    class TokenBucketStrategy
+    class LeakyBucketStrategy
+    class FixedWindowStrategy
+    class SlidingWindowLogStrategy
+    class SlidingWindowCounterStrategy
+    class ChainedRateLimiter {
+      -List~RateLimiter~ limiters
+      +allow(String key) RateLimitResult
+    }
+    RateLimiter ..> RateLimitStrategy
+    RateLimiter ..> RateLimitResult
+    RateLimitStrategy <|.. TokenBucketStrategy
+    RateLimitStrategy <|.. LeakyBucketStrategy
+    RateLimitStrategy <|.. FixedWindowStrategy
+    RateLimitStrategy <|.. SlidingWindowLogStrategy
+    RateLimitStrategy <|.. SlidingWindowCounterStrategy
+    ChainedRateLimiter o-- RateLimiter`}</Mermaid>
+
+## 5. Key interfaces and classes
+
+The seam: a `RateLimitResult` value object, the `RateLimitStrategy` interface, and the `RateLimiter` facade.
+
+```java
+record RateLimitResult(boolean allowed, long retryAfterMillis) {
+    static final RateLimitResult OK = new RateLimitResult(true, 0);
+    static RateLimitResult denied(long retryAfterMillis) {
+        return new RateLimitResult(false, retryAfterMillis);
+    }
+}
+
+interface RateLimitStrategy {
+    RateLimitResult tryAcquire(String key);   // must be thread-safe per key
+}
+
+public final class RateLimiter {                       // Singleton facade
+    private static final RateLimiter INSTANCE =
+        new RateLimiter(new TokenBucketStrategy(10, 5));   // 10 burst, 5/s
+    public static RateLimiter get() { return INSTANCE; }
+
+    private final RateLimitStrategy strategy;
+    private RateLimiter(RateLimitStrategy strategy) { this.strategy = strategy; }
+
+    public RateLimitResult allow(String key) { return strategy.tryAcquire(key); }
+}
+```
+
+### Token Bucket — burst-friendly, lazy refill (full implementation)
+
+A bucket holds up to `capacity` tokens and refills at `refillPerSec`. Each request costs one token; if none are available it's rejected. Bursts up to `capacity` are allowed, then traffic is throttled to the refill rate. We refill **lazily** on each call (no background thread) and guard the bucket with `synchronized` — the critical section is tiny.
+
+```java
+final class TokenBucketStrategy implements RateLimitStrategy {
+    private final long capacity;
+    private final double refillPerSec;
+    private final ConcurrentHashMap<String, Bucket> buckets = new ConcurrentHashMap<>();
+
+    TokenBucketStrategy(long capacity, double refillPerSec) {
+        this.capacity = capacity;
+        this.refillPerSec = refillPerSec;
+    }
+
+    public RateLimitResult tryAcquire(String key) {
+        Bucket b = buckets.computeIfAbsent(key, k -> new Bucket(capacity));
+        synchronized (b) {                       // per-key lock: keys don't contend
+            long now = System.nanoTime();
+            double elapsedSec = (now - b.lastRefillNanos) / 1_000_000_000.0;
+            b.tokens = Math.min(capacity, b.tokens + elapsedSec * refillPerSec);
+            b.lastRefillNanos = now;
+            if (b.tokens >= 1.0) {
+                b.tokens -= 1.0;
+                return RateLimitResult.OK;
+            }
+            double needed = 1.0 - b.tokens;       // fraction of a token still missing
+            long retryMs = (long) Math.ceil(needed / refillPerSec * 1000);
+            return RateLimitResult.denied(retryMs);
+        }
+    }
+
+    private static final class Bucket {
+        double tokens;
+        long lastRefillNanos = System.nanoTime();
+        Bucket(long initial) { this.tokens = initial; }
+    }
+}
+```
+
+### Leaky Bucket — smooths bursts into a constant outflow
+
+A queue (the bucket) of fixed `capacity` drains at a steady `leakPerSec`. Requests are admitted only if there's room *after* leaking the elapsed amount. Unlike Token Bucket, it never lets a burst through at full speed — the *output* rate is constant, which is what you want when protecting a fragile downstream.
+
+```java
+final class LeakyBucketStrategy implements RateLimitStrategy {
+    private final long capacity;
+    private final double leakPerSec;
+    private final ConcurrentHashMap<String, Bucket> buckets = new ConcurrentHashMap<>();
+
+    LeakyBucketStrategy(long capacity, double leakPerSec) {
+        this.capacity = capacity; this.leakPerSec = leakPerSec;
+    }
+
+    public RateLimitResult tryAcquire(String key) {
+        Bucket b = buckets.computeIfAbsent(key, k -> new Bucket());
+        synchronized (b) {
+            long now = System.nanoTime();
+            double leaked = (now - b.lastLeakNanos) / 1e9 * leakPerSec;
+            b.level = Math.max(0, b.level - leaked);    // drain first
+            b.lastLeakNanos = now;
+            if (b.level + 1 <= capacity) {              // room for this drop?
+                b.level += 1;
+                return RateLimitResult.OK;
+            }
+            long retryMs = (long) Math.ceil((b.level + 1 - capacity) / leakPerSec * 1000);
+            return RateLimitResult.denied(retryMs);
+        }
+    }
+    private static final class Bucket { double level = 0; long lastLeakNanos = System.nanoTime(); }
+}
+```
+
+### Fixed Window — cheapest, but suffers the boundary-burst problem
+
+One counter per `(key, window)`, reset every window. O(1) and tiny memory, but a client can fire `N` requests at the end of one window and `N` at the start of the next — **2N in a sub-second span straddling the boundary.** `AtomicLong` makes the increment lock-free.
+
+```java
+final class FixedWindowStrategy implements RateLimitStrategy {
+    private final long limit;
+    private final long windowMs;
+    private final ConcurrentHashMap<String, Window> windows = new ConcurrentHashMap<>();
+
+    FixedWindowStrategy(long limit, long windowMs) { this.limit = limit; this.windowMs = windowMs; }
+
+    public RateLimitResult tryAcquire(String key) {
+        long nowWindow = System.currentTimeMillis() / windowMs;
+        Window w = windows.compute(key, (k, cur) ->
+            (cur == null || cur.window != nowWindow) ? new Window(nowWindow) : cur);
+        long count = w.count.incrementAndGet();          // lock-free
+        if (count <= limit) return RateLimitResult.OK;
+        long retryMs = (nowWindow + 1) * windowMs - System.currentTimeMillis();
+        return RateLimitResult.denied(Math.max(retryMs, 0));
+    }
+    private static final class Window {
+        final long window; final AtomicLong count = new AtomicLong();
+        Window(long window) { this.window = window; }
+    }
+}
+```
+
+### Sliding Window Log — exact, but memory-heavy
+
+Store the timestamp of every request in a deque; on each call, evict entries older than the window and count what remains. **Perfectly accurate** (no boundary spike), but memory is O(requests in window) per key — expensive at high volume.
+
+```java
+final class SlidingWindowLogStrategy implements RateLimitStrategy {
+    private final long limit, windowMs;
+    private final ConcurrentHashMap<String, Deque<Long>> logs = new ConcurrentHashMap<>();
+
+    SlidingWindowLogStrategy(long limit, long windowMs) { this.limit = limit; this.windowMs = windowMs; }
+
+    public RateLimitResult tryAcquire(String key) {
+        Deque<Long> log = logs.computeIfAbsent(key, k -> new ArrayDeque<>());
+        long now = System.currentTimeMillis();
+        synchronized (log) {                              // deque is not thread-safe
+            while (!log.isEmpty() && log.peekFirst() <= now - windowMs) log.pollFirst();
+            if (log.size() < limit) { log.addLast(now); return RateLimitResult.OK; }
+            long retryMs = log.peekFirst() + windowMs - now;   // when oldest falls out
+            return RateLimitResult.denied(retryMs);
+        }
+    }
+}
+```
+
+### Sliding Window Counter — approximate, low memory
+
+Keep only the current- and previous-window counts and blend them by how far we are into the current window. Memory is O(1) per key like Fixed Window, but it smooths the boundary spike to a small approximation error — the algorithm most production limiters (and Redis recipes) actually use.
+
+```java
+final class SlidingWindowCounterStrategy implements RateLimitStrategy {
+    private final long limit, windowMs;
+    private final ConcurrentHashMap<String, State> states = new ConcurrentHashMap<>();
+
+    SlidingWindowCounterStrategy(long limit, long windowMs) { this.limit = limit; this.windowMs = windowMs; }
+
+    public RateLimitResult tryAcquire(String key) {
+        long now = System.currentTimeMillis(), window = now / windowMs;
+        State s = states.computeIfAbsent(key, k -> new State());
+        synchronized (s) {
+            if (s.window != window) {                     // roll forward
+                s.prevCount = (s.window == window - 1) ? s.curCount : 0;
+                s.curCount = 0; s.window = window;
+            }
+            double elapsedFraction = (now % windowMs) / (double) windowMs;
+            double estimate = s.prevCount * (1 - elapsedFraction) + s.curCount;
+            if (estimate < limit) { s.curCount++; return RateLimitResult.OK; }
+            return RateLimitResult.denied(windowMs - (now % windowMs));
+        }
+    }
+    private static final class State { long window = -1, curCount, prevCount; }
+}
+```
+
+### Chaining limits — the Decorator
+
+```java
+final class ChainedRateLimiter {                  // per-IP AND per-user AND per-key
+    private final List<RateLimiter> limiters;
+    ChainedRateLimiter(List<RateLimiter> limiters) { this.limiters = limiters; }
+    RateLimitResult allow(String key) {
+        long maxRetry = 0; boolean ok = true;
+        for (RateLimiter l : limiters) {
+            RateLimitResult r = l.allow(key);
+            if (!r.allowed()) { ok = false; maxRetry = Math.max(maxRetry, r.retryAfterMillis()); }
+        }
+        return ok ? RateLimitResult.OK : RateLimitResult.denied(maxRetry);
+    }
+}
+```
+
+## 6. Design patterns used
+
+- **Strategy** — each algorithm is a `RateLimitStrategy`; swapping Token Bucket for Sliding Window Counter is a one-line change and adding a new one never touches the others.
+- **Singleton** — one shared `RateLimiter` per limit definition; the per-key `ConcurrentHashMap` lives inside it.
+- **Decorator** — `ChainedRateLimiter` wraps multiple limiters to enforce per-IP *and* per-user *and* per-API simultaneously, composing their decisions.
+- **Facade** — `RateLimiter.allow()` hides the strategy and per-key state lookup from callers.
+
+## 7. Trade-offs and alternatives
+
+- **Algorithm choice is the whole interview.** Token Bucket = allow bursts then throttle (most common, API-friendly). Leaky Bucket = constant outflow, smooths bursts (good in front of a fragile service). Fixed Window = cheapest but boundary-burst (up to 2N). Sliding Window Log = exact but O(n) memory. Sliding Window Counter = O(1) memory, small approximation error — the usual production pick.
+- **Thread-safety granularity.** A per-key `synchronized` block (or `AtomicLong` for Fixed Window) keeps independent keys contention-free; a single global lock would serialize the whole gateway. The CAS-free path matters because this is the hottest code in the request pipeline.
+- **Lazy refill vs background thread.** Refilling on read (as above) avoids a scheduler and scales to millions of idle keys; a background refiller wastes CPU on inactive buckets.
+- **Memory growth.** Keys accumulate forever unless idle entries are evicted — wrap the map in a size/TTL cache (links to the LRU/LFU topic) or use `ConcurrentHashMap` with periodic sweeping.
+
+## 8. Common follow-up questions
+
+- **Distributed rate limiting.** Move counters to Redis: `INCR key` + `EXPIRE key window` for Fixed Window, or a sorted-set (`ZADD`/`ZREMRANGEBYSCORE`/`ZCARD`) for Sliding Window Log. Wrap the multi-step logic in a **Lua script** so check-and-increment is atomic across nodes — otherwise concurrent gateway pods race. Token Bucket can be done with a Lua script storing `{tokens, lastRefill}`.
+- **Per-user / per-IP / per-key.** The `key` argument is the dimension; chain multiple limiters (Decorator) for layered limits with different ceilings.
+- **Graceful degradation.** If Redis is unreachable, decide **fail-open** (allow, prioritizing availability) vs **fail-closed** (reject, prioritizing protection). State the choice explicitly; most public APIs fail-open with a local fallback limiter.
+- **HTTP contract.** Reject with `429 Too Many Requests`, set `Retry-After: <seconds>` from `retryAfterMillis`, and optionally `X-RateLimit-Limit` / `X-RateLimit-Remaining` / `X-RateLimit-Reset` headers so well-behaved clients self-throttle.
+- **Clock skew** across distributed nodes makes Sliding Window Log fragile — prefer a single Redis clock or the counter variant.
+
+## 9. What interviewers are really probing
+
+<ProbeNote>
+That you (1) picked the algorithm from the *requirement* — burst-friendly vs smooth vs exact vs cheap — instead of reciting all five blindly; (2) named the **Fixed Window boundary-burst** problem and the Sliding Window Counter that fixes it cheaply; (3) made `allow()` genuinely thread-safe with per-key locking or `AtomicLong`, not a global `synchronized` that would bottleneck the gateway; and (4) reached for **Redis + Lua atomicity** and the **fail-open vs fail-closed** decision when pushed to distributed. Spotting that "find-then-increment" must be one atomic step — locally via the bucket lock, distributed via a Lua script — is the senior signal.
+</ProbeNote>

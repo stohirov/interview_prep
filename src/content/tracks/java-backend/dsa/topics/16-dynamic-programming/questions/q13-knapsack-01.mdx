@@ -1,0 +1,52 @@
+**Problem.** Given `n` items with weights `wt[]` and values `val[]`, and a knapsack of capacity `W`, maximize the total value of items packed. Each item may be taken **at most once** (0/1).
+
+## Brute force — O(2ⁿ)
+
+Every item is in or out — enumerate all subsets, keep the best feasible one. Exponential; fine only for tiny n.
+
+## 2D DP — O(n·W) time and space
+
+State `dp[i][w]` = best value using the first `i` items with capacity `w`. For each item, either **skip** it or **take** it (if it fits):
+
+```
+dp[i][w] = max(
+    dp[i-1][w],                          // skip item i
+    dp[i-1][w - wt[i]] + val[i])         // take it (only if wt[i] <= w)
+```
+
+```java
+int knapsack(int[] wt, int[] val, int W) {
+    int n = wt.length;
+    int[][] dp = new int[n + 1][W + 1];
+    for (int i = 1; i <= n; i++)
+        for (int w = 0; w <= W; w++) {
+            dp[i][w] = dp[i - 1][w];                       // skip
+            if (wt[i - 1] <= w)
+                dp[i][w] = Math.max(dp[i][w],
+                    dp[i - 1][w - wt[i - 1]] + val[i - 1]); // take
+        }
+    return dp[n][W];
+}
+```
+
+## 1D rolling — O(n·W) time, O(W) space
+
+Each row depends only on the row above, so collapse to one array. The key is iterating capacity **right-to-left**: when you read `dp[w - wt]`, it must still hold the *previous item's* value (not yet overwritten this round), which is what enforces "each item once".
+
+```java
+int knapsack(int[] wt, int[] val, int W) {
+    int[] dp = new int[W + 1];
+    for (int i = 0; i < wt.length; i++)
+        for (int w = W; w >= wt[i]; w--)        // RIGHT-TO-LEFT
+            dp[w] = Math.max(dp[w], dp[w - wt[i]] + val[i]);
+    return dp[W];
+}
+```
+
+<Callout kind="warn" title="Why right-to-left">
+Iterating left-to-right would read `dp[w - wt[i]]` *after* it was already updated with item `i`, letting the same item be packed multiple times — that is the **unbounded** knapsack. Right-to-left guarantees each item is used at most once. The loop direction is the entire 0/1-vs-unbounded distinction.
+</Callout>
+
+<ProbeNote>
+0/1 knapsack is "weakly NP-hard": O(n·W) is **pseudo-polynomial** — it scales with the numeric value of `W`, not its bit length, so it blows up when `W` is huge. Be ready to explain the right-to-left direction (the most-probed detail) and to reconstruct *which* items were chosen, which needs the full 2D table to backtrack.
+</ProbeNote>

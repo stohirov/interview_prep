@@ -1,0 +1,37 @@
+Backtracking is a depth-first search over a tree of partial solutions. Almost every backtracking problem is the same skeleton with four pluggable pieces; recognizing them lets you solve unseen problems on sight.
+
+## The canonical template
+
+```java
+List<List<Integer>> results = new ArrayList<>();
+
+void backtrack(List<Integer> path, /* problem state */ int start) {
+    if (isComplete(path)) {                 // 1. base / goal test
+        results.add(new ArrayList<>(path)); //    snapshot — copy, don't alias!
+        return;
+    }
+    for (int choice = start; choice < options; choice++) {
+        if (!isValid(choice, path)) continue; // 4. pruning
+        path.add(choice);                      // 2a. choose
+        backtrack(path, choice + 1);           // 2b. explore
+        path.remove(path.size() - 1);          // 3. unchoose (undo)
+    }
+}
+```
+
+## The four building blocks
+
+1. **Goal / base case** — when is a partial solution complete? Record it (always a *copy* — `new ArrayList<>(path)` — because `path` keeps mutating after you return).
+2. **Choices** — the loop over options at this node. A `start` index avoids reusing earlier elements (combinations/subsets); iterating all elements with a `used[]` flag allows reordering (permutations).
+3. **Choose / unchoose** — mutate the shared `path` going down, undo it coming back up. One buffer serves the entire tree.
+4. **Pruning** — skip choices that violate a constraint or cannot beat the best answer. This is where the asymptotics actually live.
+
+## Why one shared buffer
+
+Allocating a fresh list per node would be O(n) per call and bury you in garbage. The choose/unchoose pair keeps a single `path` that *is* the current root-to-node walk; the undo restores invariant state for the sibling branches.
+
+<Callout kind="tip" title="The four-question checklist">
+At the whiteboard, derive any backtracking solution by answering: (1) What's a complete solution? (2) What choices do I have at each step? (3) How do I undo a choice? (4) When can I prune? Permutations, subsets, N-Queens, and Sudoku are all this template with different answers to those four.
+</Callout>
+
+<ProbeNote>Two bugs interviewers wait for: adding `path` itself instead of a copy (every result aliases the same emptied list), and forgetting the unchoose (state leaks across branches). Say "choose, explore, unchoose" aloud as you write the three lines.</ProbeNote>

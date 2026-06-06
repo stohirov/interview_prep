@@ -1,0 +1,27 @@
+Once edges carry **weights**, plain BFS no longer finds the cheapest route — the fewest *hops* is not the lowest *cost*. This topic covers the four shortest-path algorithms and the two minimum-spanning-tree algorithms that show up constantly in routing, scheduling, and network-design interviews.
+
+## Single-source shortest path
+
+- **Dijkstra (lazy, with a binary heap).** Greedily expands the closest unsettled vertex. Push `(dist, node)` onto a `PriorityQueue`; pop the minimum, relax its edges, push improved distances. Runs in **O(E log V)**. Requires **non-negative** edge weights — the greedy "once popped, settled" invariant breaks the moment a negative edge can later lower a finalized distance.
+- **Bellman-Ford.** Relaxes *every* edge `V - 1` times: **O(V·E)**. Slower, but it tolerates **negative edges** and a `V`-th pass that still relaxes something proves a **negative cycle**. This is the algorithm for currency arbitrage and any graph where edges can reduce cost.
+
+## All-pairs shortest path
+
+- **Floyd-Warshall.** A three-loop DP over an adjacency matrix: `dist[i][j] = min(dist[i][j], dist[i][k] + dist[k][j])`. **O(V³)** time, **O(V²)** space. Worth it only on **small, dense** graphs when you need *every* pair — at V ≈ 400 it beats running Dijkstra from every source.
+
+## Heuristic search
+
+- **A\*.** Dijkstra steered by a heuristic: it orders the frontier by `f(n) = g(n) + h(n)`, the known cost so far plus an *estimate* of the cost remaining. With an **admissible** (never-overestimating) and **consistent** heuristic it still returns the optimal path, but it explores far fewer nodes — the backbone of game pathfinding and maps.
+
+## Minimum spanning tree
+
+Connect all vertices with minimum total edge weight, no cycles.
+
+- **Kruskal.** Sort edges, add the cheapest that does not form a cycle (cycle check via **union-find**). **O(E log E)**. Wins on **sparse** graphs and edge lists.
+- **Prim.** Grow one tree from a seed, always pulling the cheapest edge crossing the frontier (a `PriorityQueue`). **O(E log V)**. Wins on **dense** graphs.
+
+<Callout kind="tip" title="Picking the algorithm">
+Non-negative weights, one source → **Dijkstra**. Negative edges or cycle detection → **Bellman-Ford**. Every pair on a small graph → **Floyd-Warshall**. A good distance estimate → **A\***. Cheapest connecting tree → **Kruskal/Prim**.
+</Callout>
+
+The coding questions below — Network Delay Time, Cheapest Flights, Path with Minimum Effort, Min Cost to Connect Points — are these five algorithms wearing different costumes.

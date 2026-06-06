@@ -1,0 +1,56 @@
+Once you've decided state must be guarded, the next decision is *how much* to lock at once. This is the coarse-versus-fine-grained trade-off, and articulating it is a reliable senior signal.
+
+## The two ends of the spectrum
+
+**Coarse-grained** — one lock protects a large region or whole object. Simple, correct, easy to reason about; but it serializes everything and becomes a bottleneck under contention.
+
+```java
+class ParkingLot {
+    synchronized Ticket park(Vehicle v) {   // ONE lock for the whole lot
+        Spot s = findFree(v);
+        s.occupy();
+        return new Ticket(s, v);
+    }   // every gate waits on every other gate
+}
+```
+
+**Fine-grained** — many small locks, each protecting a minimal slice, so independent operations proceed in parallel. More throughput; but more code, and a real risk of **deadlock** if locks are acquired in inconsistent order.
+
+```java
+class Spot {
+    synchronized boolean tryOccupy(Vehicle v) {   // lock per SPOT
+        if (!free) return false;
+        free = false; return true;
+    }   // two cars taking different spots never block each other
+}
+```
+
+## How to choose
+
+<Diagram caption="Decision heuristic">{`Low contention / simple invariant ......... COARSE (start here)
+High contention, independent sub-units .... FINE  (lock per unit)
+Mostly reads, rare writes ................. ReadWriteLock / StampedLock
+Single number being updated ............... AtomicInteger (no lock)
+Map/list of independent entries ........... concurrent collection`}</Diagram>
+
+The pragmatic order: **start coarse, refine only where contention is real.** Premature fine-grained locking is its own anti-pattern — it adds deadlock risk and complexity for throughput you may not need.
+
+## The escalation ladder
+
+1. **Coarse `synchronized`** — default, correct, readable.
+2. **Lock per independent unit** (per spot, per account) — when units don't interact.
+3. **`ReadWriteLock` / `StampedLock`** — read-heavy, write-rare (a cache, a config).
+4. **Atomics / CAS** — a single counter or reference; lock-free.
+5. **Concurrent collections** — let `ConcurrentHashMap` etc. do the striping internally.
+
+<Callout kind="warn" title="Fine-grained locking buys deadlock risk">
+The moment you hold more than one lock, you can deadlock. Defenses: acquire locks in a **consistent global order**, use `tryLock` with a timeout, or — best — design so each operation needs only one lock. Mention this trade-off when you propose fine-grained locking; interviewers are listening for it.
+</Callout>
+
+## ReentrantLock vs synchronized
+
+`synchronized` is simpler and enough for most LLD answers. Reach for `ReentrantLock` when you need a feature it gives you: `tryLock` (with timeout, to avoid deadlock), interruptible acquisition, fairness, or multiple condition variables (producer/consumer).
+
+<ProbeNote>
+The graded behavior is the *trade-off conversation*, not the choice itself. "I'll lock per spot so gates don't serialize, accepting a bit more complexity — and since each park touches one spot, there's no multi-lock deadlock risk" demonstrates exactly the throughput-versus-simplicity reasoning interviewers want from a senior candidate.
+</ProbeNote>

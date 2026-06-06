@@ -1,0 +1,36 @@
+**XOR** (`^`) outputs `1` exactly when its two input bits differ. A small set of algebraic properties makes it the workhorse of bit-trick interview problems.
+
+## The four properties
+
+1. **Self-inverse:** `a ^ a = 0` — any value XOR'd with itself cancels.
+2. **Identity:** `a ^ 0 = a` — XOR with zero leaves a value unchanged.
+3. **Commutative:** `a ^ b = b ^ a`.
+4. **Associative:** `(a ^ b) ^ c = a ^ (b ^ c)`.
+
+Together (3) and (4) mean you can XOR a list **in any order** and regroup freely. Combined with (1) and (2): XOR-ing a whole collection cancels every value that appears an **even** number of times, leaving the XOR of the odd-count values.
+
+## Consequence — the cancellation trick
+
+```java
+// Single Number: every element appears twice except one.
+int singleNumber(int[] nums) {
+    int x = 0;
+    for (int n : nums) x ^= n;   // pairs cancel to 0; the lone value survives
+    return x;
+}
+```
+
+O(n) time, **O(1) space** — no hash set needed. The same idea solves Missing Number: XOR all indices `0..n` with all values; everything cancels except the missing index.
+
+## More consequences
+
+- **Swap without a temp:** `a ^= b; b ^= a; a ^= b;` (cute, but rarely worth the readability cost).
+- **Find the two unique numbers** (everyone else appears twice): XOR everything to get `a ^ b`, then use a set bit of that result (`d = (a^b) & -(a^b)`) to partition the array into two groups and XOR each separately.
+- **Toggle a bit:** `n ^ (1 << i)` flips bit `i` — flips on if off, off if on.
+- **Parity / checksums:** XOR detects single-bit errors; it's the basis of simple parity bits and RAID.
+
+## A subtle gotcha
+
+XOR's cancellation depends on values appearing an **even** number of times. If elements can repeat an *odd* number of times other than once (e.g. every number three times except one), plain XOR fails — you need bit-counting per position instead (see Single Number II).
+
+<ProbeNote>State all four properties and immediately connect them to "even occurrences cancel, odd ones survive in O(1) space." The standout follow-up is the two-unique-numbers variant: XOR everything, isolate a differing bit with `x & -x`, split into two groups. That demonstrates you understand XOR structurally, not just the Single Number incantation.</ProbeNote>

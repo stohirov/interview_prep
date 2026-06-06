@@ -1,0 +1,40 @@
+**Problem.** Reverse a string **in place**. Because Java `String` is immutable, the canonical form takes a `char[]` (this is exactly LeetCode 344's signature) and reverses it with O(1) extra space.
+
+## Brute force — O(n) time, O(n) space
+
+Build a new sequence backward:
+
+```java
+String reverseNaive(String s) {
+    StringBuilder sb = new StringBuilder(s.length());
+    for (int i = s.length() - 1; i >= 0; i--) sb.append(s.charAt(i));
+    return sb.toString();
+}
+```
+
+Correct and readable, but it allocates a second buffer — O(n) space. It also isn't "in place," which is the point of the question.
+
+## Optimal — O(n) time, O(1) space
+
+**Two pointers from both ends**, swapping inward until they meet:
+
+```java
+void reverseString(char[] s) {
+    int left = 0, right = s.length - 1;
+    while (left < right) {
+        char tmp = s[left];
+        s[left] = s[right];
+        s[right] = tmp;
+        left++;
+        right--;
+    }
+}
+```
+
+Each swap fixes two characters and the pointers cover the array once — n/2 swaps, O(n) time, O(1) extra space. The `left < right` guard correctly handles both even length (pointers cross) and odd length (the middle character is its own mirror and needs no swap).
+
+<Callout kind="info" title="Why a char[], not a String">
+`String` is immutable, so you cannot reverse one truly in place — `new StringBuilder(s).reverse().toString()` is the idiomatic library answer but allocates. Taking a `char[]` is how the in-place O(1)-space version is posed. For full Unicode correctness, note that `char` is a UTF-16 code unit: surrogate pairs (emoji, some CJK) and combining marks would be split by a naive char swap — `StringBuilder.reverse()` actually special-cases surrogate pairs.
+</Callout>
+
+<ProbeNote>The interviewer wants the in-place two-pointer swap and the words "O(n) time, O(1) space." Bonus points for mentioning `StringBuilder.reverse()` as the one-liner, for the `left < right` (not `<=`) detail handling odd-length midpoints, and for raising the surrogate-pair/Unicode caveat — that signals senior awareness that a `char` is not a "character."</ProbeNote>

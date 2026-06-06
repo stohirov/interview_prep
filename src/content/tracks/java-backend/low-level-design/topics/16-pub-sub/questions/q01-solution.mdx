@@ -1,0 +1,171 @@
+## 1. Functional requirements
+
+- Publishers publish **messages** to a named **topic**; topics are created on first use.
+- Subscribers **subscribe**/**unsubscribe** to a topic and receive every message published after they subscribe.
+- A subscriber may subscribe to multiple topics; a topic may have many subscribers.
+- Delivery is **asynchronous** — `publish` returns without waiting for subscribers to process.
+- Pluggable **delivery semantics**: at-most-once, at-least-once (retry), exactly-once (dedup).
+
+## 2. Non-functional requirements
+
+- **Concurrency** — concurrent publishers and subscribers; one slow subscriber must not block delivery to others or block the publisher.
+- **Ordering** — preserve per-topic, per-subscriber order (messages from one topic arrive in publish order).
+- **Backpressure** — bound memory; define a policy when a subscriber falls behind.
+- **Durability** — out of scope for the in-memory round (messages live in memory); the seam is shown. Distributed Kafka-style design is in the **HLD module**.
+
+## 3. Core entities
+
+| Entity | Responsibility |
+| --- | --- |
+| `Broker` | Singleton entry point; routes publishes to subscribers. |
+| `Topic` | Named channel; holds its subscriber set. |
+| `Publisher` | Client that calls `broker.publish(topic, msg)`. |
+| `Subscriber` | Callback (`onMessage`) plus its own delivery queue. |
+| `Message` | Immutable payload + metadata (id, topic, timestamp). |
+| `SubscriptionManager` | Maps topics ↔ subscribers; handles (un)subscribe. |
+| `DeliveryStrategy` | Encapsulates the delivery guarantee (at-most/at-least/exactly-once). |
+
+## 4. Class diagram
+
+<Mermaid caption="In-memory pub/sub class model">{`classDiagram
+    class Broker {
+      -SubscriptionManager subscriptions
+      -DeliveryStrategy delivery
+      -ExecutorService pool
+      +publish(String, Message)
+      +subscribe(String, Subscriber)
+      +unsubscribe(String, Subscriber)
+    }
+    class SubscriptionManager {
+      -Map~String, Set~Subscriber~~ topics
+      +add(String, Subscriber)
+      +remove(String, Subscriber)
+      +subscribers(String) Set~Subscriber~
+    }
+    class Topic {
+      -String name
+    }
+    class Message {
+      -String id
+      -String topic
+      -Object payload
+      -Instant timestamp
+    }
+    class Subscriber {
+      <<interface>>
+      +onMessage(Message)
+    }
+    class DeliveryStrategy {
+      <<interface>>
+      +deliver(Subscriber, Message)
+    }
+    Broker o-- SubscriptionManager
+    Broker ..> DeliveryStrategy
+    Broker ..> Message
+    SubscriptionManager o-- Subscriber
+    DeliveryStrategy ..> Subscriber
+    AtMostOnce ..|> DeliveryStrategy
+    AtLeastOnce ..|> DeliveryStrategy`}</Mermaid>
+
+## 5. Key interfaces and classes
+
+```java
+final class Message {
+    final String id;
+    final String topic;
+    final Object payload;
+    final Instant timestamp;
+    Message(String topic, Object payload) {
+        this.id = UUID.randomUUID().toString();
+        this.topic = topic;
+        this.payload = payload;
+        this.timestamp = Instant.now();
+    }
+}
+
+interface Subscriber {
+    String id();
+    void onMessage(Message m);   // may throw — strategy decides what to do
+}
+
+interface DeliveryStrategy {
+    void deliver(Subscriber s, Message m);
+}
+
+final class AtMostOnce implements DeliveryStrategy {        // fire and forget
+    public void deliver(Subscriber s, Message m) {
+        try { s.onMessage(m); } catch (Exception ignored) { /* no retry */ }
+    }
+}
+
+final class AtLeastOnce implements DeliveryStrategy {       // retry then DLQ
+    private final int maxRetries; private final DeadLetterQueue dlq;
+    AtLeastOnce(int maxRetries, DeadLetterQueue dlq) { this.maxRetries = maxRetries; this.dlq = dlq; }
+    public void deliver(Subscriber s, Message m) {
+        for (int attempt = 0; attempt <= maxRetries; attempt++) {
+            try { s.onMessage(m); return; } catch (Exception e) { /* backoff */ }
+        }
+        dlq.add(s, m);
+    }
+}
+```
+
+```java
+final class SubscriptionManager {
+    private final Map<String, Set<Subscriber>> topics = new ConcurrentHashMap<>();
+    void add(String topic, Subscriber s)    { topics.computeIfAbsent(topic, t -> ConcurrentHashMap.newKeySet()).add(s); }
+    void remove(String topic, Subscriber s) { topics.getOrDefault(topic, Set.of()).remove(s); }
+    Set<Subscriber> subscribers(String topic) { return topics.getOrDefault(topic, Set.of()); }
+}
+
+public final class Broker {
+    private static final Broker INSTANCE = new Broker();
+    public static Broker get() { return INSTANCE; }
+
+    private final SubscriptionManager subscriptions = new SubscriptionManager();
+    private final ExecutorService pool = Executors.newFixedThreadPool(
+        Runtime.getRuntime().availableProcessors());
+    private DeliveryStrategy delivery = new AtMostOnce();
+    private Broker() {}
+
+    public void subscribe(String topic, Subscriber s)   { subscriptions.add(topic, s); }
+    public void unsubscribe(String topic, Subscriber s) { subscriptions.remove(topic, s); }
+
+    public void publish(String topic, Object payload) {
+        Message m = new Message(topic, payload);
+        for (Subscriber s : subscriptions.subscribers(topic)) {
+            pool.submit(() -> delivery.deliver(s, m));   // async — publisher never blocks
+        }
+    }
+}
+```
+
+A production-grade variant gives each subscriber its **own single-threaded executor (or bounded `BlockingQueue`)** so that ordering is preserved per subscriber and a slow subscriber only backs up its own queue.
+
+## 6. Design patterns used
+
+- **Observer** — the core relationship: subscribers register with the broker and are notified on publish, with no compile-time coupling to publishers.
+- **Singleton** — one `Broker` per process is the routing hub.
+- **Strategy** — `DeliveryStrategy` makes at-most-once / at-least-once / exactly-once swappable without touching the broker.
+- **Factory** (optional) — a `SubscriberFactory` or message builder centralizes construction; mention but don't over-engineer.
+
+## 7. Trade-offs and alternatives
+
+- **Push vs pull.** Push (broker calls `onMessage`) is simple and low-latency but the broker must handle backpressure. Pull (subscriber polls its queue, Kafka-style) shifts pacing to the consumer and is more robust under load.
+- **Shared thread pool vs per-subscriber queue.** A shared pool is simplest but loses per-subscriber ordering and lets one bad subscriber starve threads. A per-subscriber bounded queue isolates slow consumers and preserves order, at the cost of more memory and threads.
+- **Backpressure policy.** When a bounded queue fills you must choose: **block the publisher** (flow control), **drop oldest/newest** (lossy), or **shed to a DLQ**. There is no free lunch — name the policy explicitly.
+- **Exactly-once is expensive.** It requires dedup (idempotency keys) and acknowledgement tracking; at-least-once + idempotent consumers is the pragmatic default.
+
+## 8. Common follow-up questions
+
+- **Filtered / wildcard subscriptions** — subscribe to `orders.*` or with a predicate; add a `Predicate<Message>` filter or topic-tree matching in the `SubscriptionManager`.
+- **Dead-letter queue** — route messages that exhaust retries to a DLQ for inspection/replay (shown in `AtLeastOnce`).
+- **Slow subscribers / backpressure** — per-subscriber bounded queue plus a drop/block/DLQ policy; possibly evict chronically-lagging subscribers.
+- **Ordering guarantees** — single-threaded delivery per subscriber preserves per-topic order; the shared pool does not.
+- **Durability / replay** — persist a per-topic log with offsets so subscribers can replay (the bridge to Kafka in the HLD module).
+
+## 9. What interviewers are really probing
+
+<ProbeNote>
+That you (1) recognized Observer and decoupled publishers from subscribers through the broker, (2) made delivery **asynchronous** so a slow subscriber can't block the publisher or its peers, (3) named the three delivery semantics as a Strategy and knew exactly-once is the costly one, and (4) raised **backpressure** unprompted and stated an explicit policy when a queue fills. Spotting that the shared-pool design silently loses per-subscriber ordering — and offering the per-subscriber queue fix — is the senior signal.
+</ProbeNote>

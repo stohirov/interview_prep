@@ -1,0 +1,19 @@
+A **distributed job scheduler** is "cron, but it survives machine death, runs millions of jobs, and never silently drops one." It shows up under many names — task scheduler, workflow trigger, delayed-job queue, batch orchestrator — and it is a favourite interview problem because the happy path is trivial while the failure modes (missed runs, duplicate runs, a dead leader, a stuck worker) are where all the real engineering lives.
+
+## The shape of the problem
+
+There are two distinct halves. The **scheduling** half decides *what should run when*: it stores job definitions (one-shot at a time, or recurring on a cron expression) and, every tick, finds jobs whose `next_run_at` is due. The **execution** half actually runs them: it hands due jobs to a pool of stateless workers, tracks attempts, retries failures, and records results. The interesting tension is **exactly-once semantics over an unreliable network** — you can have at-least-once delivery cheaply, but making the *effect* happen once requires idempotency.
+
+## What the interviewer is probing, by style
+
+- **FAANG** — leader election (Zookeeper/etcd/Raft) so only one node claims due jobs, partitioning the job space across schedulers, exactly-once vs at-least-once, and how you detect-and-recover a worker that died mid-job without re-running a non-idempotent payment.
+- **EU / remote contracting** — pragmatism: "Quartz on a shared DB, or Temporal, gets you 90% there." Justify when you actually need a custom scheduler versus a managed/off-the-shelf one, and how you keep it operable.
+- **Regional (EPAM / Uzum)** — a clean Spring service with `SELECT ... FOR UPDATE SKIP LOCKED` job claiming, a sensible schema, a retry/backoff policy, and a defensible diagram. Show you can build the real thing.
+
+## The key decisions
+
+1. **Who claims due jobs** — a single leader (elected via Zookeeper/etcd) scanning a due-index, or many schedulers using a DB-level distributed lock (`SKIP LOCKED`) to claim disjoint jobs without a leader at all.
+2. **Delivery & idempotency** — at-least-once delivery (simple, but workers must be idempotent via an idempotency key) versus best-effort exactly-once (fencing tokens + dedup store).
+3. **Missed-run handling** — when the scheduler was down across a fire time, do you skip, run-once-on-recovery, or backfill every missed tick? This must be an explicit, per-job policy.
+
+The worked solution applies the full 11-section structure and shows all three style angles where they diverge.

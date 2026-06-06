@@ -1,0 +1,45 @@
+Whether to write code or draw a diagram is a time-management decision, not a stylistic one. The wrong split is how strong designers run out of time with nothing compilable to show.
+
+## First, read the room
+
+The format is set by the round type — and you should confirm it in your clarifying questions.
+
+| Round type | What's expected | Code vs diagram |
+| --- | --- | --- |
+| **Machine-coding** (timed, in IDE) | Compilable, runnable code | ~80% code, minimal diagram |
+| **Whiteboard / OOD** (no IDE) | Class diagram + key signatures | ~50/50; diagram-led |
+| **Discussion / panel** | Verbal model + sketches | Diagram + pseudocode only |
+
+When in doubt, ask: *"Should this compile and run, or is a class-level diagram with key methods enough?"*
+
+## A default time budget (45-min whiteboard round)
+
+<Diagram caption="Where the 45 minutes go on a typical OOD round">{`Clarify scope ........  5 min   talk
+Entities + relations .  5 min   DIAGRAM (boxes + edges)
+Class diagram ........ 10 min   DIAGRAM (fields, methods, interfaces)
+Core code ............ 15 min   CODE (the 1-2 classes that prove the design)
+Trade-offs/follow-ups  10 min   talk + small sketches`}</Diagram>
+
+## What to diagram vs what to code
+
+**Diagram** the structure — it conveys relationships at a glance and is cheap to revise:
+- Entities and their relationships (class diagram).
+- State machines (vending machine, elevator, order lifecycle).
+- The pattern wiring (which class holds the Strategy/Observer).
+
+**Code** the parts where behavior is the point and a signature isn't enough to prove it:
+- The **central interface(s)** and one or two concrete implementations.
+- The **tricky method** — the allocation race, the LRU eviction, the rate-limiter tick.
+- Anything the interviewer says "show me how that works."
+
+<Callout kind="warn" title="Don't write boilerplate by hand">
+Getters, constructors, `equals`/`hashCode`, and trivial DTOs waste minutes. Say "standard getters/constructor omitted" and spend the time on the method that demonstrates your design. Interviewers expect this shorthand from senior candidates.
+</Callout>
+
+## The rule of thumb
+
+Code the **proof**, diagram the **plan**. Your diagram shows you can decompose a domain; a small slice of real code shows the abstractions actually hold together. A design that's all diagram looks hand-wavy; a design that's all code (no diagram) looks like you can't see the forest.
+
+<ProbeNote>
+The judgment being tested is prioritization. Producing the one method that proves the hard part works — and explicitly skipping boilerplate — signals that you know where the design risk lives. Spending fifteen minutes typing getters signals the opposite.
+</ProbeNote>

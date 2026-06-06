@@ -1,0 +1,52 @@
+A **binary tree** is a hierarchy where every node has at most two children, `left` and `right`. It is the structural backbone of an enormous swath of interview problems — traversals, recursion, divide-and-conquer — and the conceptual ancestor of heaps, tries, and the balanced trees that back `TreeMap`.
+
+## Terminology
+
+- **Height** of a node — the number of edges on the longest path down to a leaf. The tree's height is the root's height. A single node has height 0; an empty tree, conventionally -1.
+- **Depth** of a node — edges from the root down to that node. The root has depth 0. Height counts *down*, depth counts *down from the root* — mirror images.
+- **Balanced** — for every node, the left and right subtree heights differ by at most 1 (the height-balanced / AVL definition). A balanced tree of *n* nodes has height O(log n).
+
+## The four traversals
+
+Three are **depth-first**, distinguished by *when* you visit the node relative to its children:
+
+- **Preorder** (node, left, right) — clones a tree, serializes structure.
+- **Inorder** (left, node, right) — on a **BST**, yields keys in **sorted order**.
+- **Postorder** (left, right, node) — frees/aggregates children before the parent (sizes, heights, deletion).
+
+The fourth is **level-order** (breadth-first), visiting nodes rank by rank using a queue.
+
+<Diagram caption="Traversal orders on a small tree">{`
+        4
+       / \\
+      2   6
+     / \\ / \\
+    1  3 5  7
+
+preorder:   4 2 1 3 6 5 7
+inorder:    1 2 3 4 5 6 7   (sorted!)
+postorder:  1 3 2 5 7 6 4
+level:      4 | 2 6 | 1 3 5 7
+`}</Diagram>
+
+## Binary search trees
+
+A **BST** adds an ordering invariant: for every node, *all* keys in the left subtree are smaller and *all* in the right are larger. That invariant makes `search`, `insert`, and `delete` follow a single root-to-leaf path — **O(h)** where *h* is the height.
+
+## Why height is everything
+
+When the tree is balanced, h = O(log n) and those operations are O(log n). But a BST has no self-correction: insert sorted keys (1, 2, 3, 4, …) and each new node hangs off the right, producing a **degenerate** tree — effectively a linked list with h = n and **O(n)** operations. This degradation is exactly why balanced trees (AVL, red-black) exist.
+
+## No standard binary tree in Java
+
+The JDK gives you `TreeMap`/`TreeSet` (red-black balanced), but **no general-purpose binary tree** — you roll your own node:
+
+```java
+class TreeNode {
+    int val;
+    TreeNode left, right;
+    TreeNode(int val) { this.val = val; }
+}
+```
+
+Every problem below operates on this `TreeNode`.

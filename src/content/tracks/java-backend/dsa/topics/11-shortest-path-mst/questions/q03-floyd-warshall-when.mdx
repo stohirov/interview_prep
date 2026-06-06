@@ -1,0 +1,33 @@
+Floyd-Warshall computes **all-pairs** shortest paths with a three-loop dynamic program over an adjacency matrix. The state is "shortest path from `i` to `j` using only intermediate vertices drawn from `{0..k}`," and each new allowed intermediate `k` either helps or it doesn't:
+
+```java
+void floydWarshall(long[][] d, int n) {   // d[i][j] = weight, INF if no edge
+    for (int k = 0; k < n; k++)            // intermediate vertex
+        for (int i = 0; i < n; i++)
+            for (int j = 0; j < n; j++)
+                if (d[i][k] != INF && d[k][j] != INF && d[i][k] + d[k][j] < d[i][j])
+                    d[i][j] = d[i][k] + d[k][j];
+}
+```
+
+That is **O(V³)** time and **O(V²)** space.
+
+## When it makes sense
+
+- **You need every pair**, not just one source — e.g. a routing table, the transitive closure, or graph diameter / center.
+- The graph is **small and dense**: V is in the low hundreds. At V ≈ 400, V³ ≈ 6.4×10⁷ — trivial, and the tight three-loop has excellent cache behavior on a contiguous matrix.
+- Weights may be **negative** (no negative cycles). Like Bellman-Ford, it tolerates negative edges; a negative value on the diagonal `d[i][i] < 0` after running flags a **negative cycle**.
+
+## When to reach for something else
+
+Run Dijkstra from every source instead when the graph is **large or sparse**: V Dijkstra runs cost **O(V·E log V)**, which on a sparse graph (E ≈ V) is roughly **O(V² log V)** — far below V³. The crossover is the **density** of the graph, not just its size.
+
+<ComplexityTable rows={[
+  {op: "Floyd-Warshall", best: "O(V³)", average: "O(V³)", worst: "O(V³)", note: "all pairs; dense; O(V²) space; allows negatives"},
+  {op: "Dijkstra × V sources", best: "O(V·E log V)", average: "O(V·E log V)", worst: "O(V·E log V)", note: "all pairs; sparse; non-negative only"},
+  {op: "Bellman-Ford × V", best: "O(V²·E)", average: "O(V²·E)", worst: "O(V²·E)", note: "all pairs with negatives, sparse"}
+]} />
+
+<ProbeNote>
+The decision rule the interviewer wants: all-pairs + small/dense + (possibly negative weights) → Floyd-Warshall; otherwise repeated Dijkstra. Bonus credit for naming the DP state ("intermediates restricted to {0..k}") and that `d[i][i] < 0` detects a negative cycle.
+</ProbeNote>

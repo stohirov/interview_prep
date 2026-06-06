@@ -1,0 +1,50 @@
+The **modular inverse** of `a` modulo `m` is the value `x` such that `a · x ≡ 1 (mod m)`. It's how you "divide" in modular arithmetic — there is no `÷` mod `m`, so `b / a mod m` becomes `b · a⁻¹ mod m`.
+
+## When does it exist?
+
+The inverse of `a` mod `m` exists **if and only if `gcd(a, m) = 1`** — that is, `a` and `m` are coprime. If they share a common factor, no `x` can satisfy `a·x ≡ 1`, because every multiple of `a` mod `m` is itself a multiple of that shared factor and can never reach `1`.
+
+Two important consequences:
+- If `m` is **prime**, then *every* `a` in `1..m-1` is coprime to `m`, so all of them have inverses. This is why competitive problems use a prime modulus like `10^9 + 7`.
+- `0` never has an inverse (for `m > 1`).
+
+## Two ways to compute it
+
+### 1. Fermat's little theorem — requires `m` prime
+
+If `m` is prime and `a` is not a multiple of `m`, then `a^(m-1) ≡ 1 (mod m)`, so:
+
+```
+a⁻¹ ≡ a^(m - 2) (mod m)
+```
+
+Compute it with fast modular exponentiation — O(log m):
+
+```java
+long modInverse(long a, long m) {       // m must be prime
+    return modPow(a, m - 2, m);         // a^(m-2) mod m
+}
+```
+
+### 2. Extended Euclidean algorithm — works for any coprime `m`
+
+Solve `a·x + m·y = gcd(a, m) = 1`; the coefficient `x` (reduced mod `m`) is the inverse. This is the general method when `m` is *not* prime — it only needs `gcd(a, m) = 1`, also O(log m).
+
+```java
+long modInverse(long a, long m) {       // requires gcd(a, m) == 1
+    long[] g = extgcd(a, m);            // returns {gcd, x, y}
+    if (g[0] != 1) throw new ArithmeticException("no inverse");
+    return ((g[1] % m) + m) % m;        // normalize to [0, m)
+}
+```
+
+## Production answer
+
+`BigInteger.modInverse(m)` does this directly and throws `ArithmeticException` when no inverse exists — the right tool outside a "do it by hand" interview.
+
+<ComplexityTable rows={[
+  {op: "Fermat (prime m)", best: "O(log m)", average: "O(log m)", worst: "O(log m)", note: "only when m is prime"},
+  {op: "Extended Euclid", best: "O(log m)", average: "O(log m)", worst: "O(log m)", note: "any m coprime to a"},
+]} />
+
+<ProbeNote>The existence condition `gcd(a, m) = 1` is the heart of the question — say it first, then note that a prime modulus makes *every* nonzero residue invertible. Know both computation methods and when each applies: Fermat needs a prime modulus; extended Euclid handles any coprime modulus. `BigInteger.modInverse` is the production escape hatch.</ProbeNote>

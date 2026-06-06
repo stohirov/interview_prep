@@ -1,0 +1,52 @@
+The **master theorem** is a cookbook for solving **divide-and-conquer recurrences** of the form:
+
+```
+T(n) = a · T(n/b) + f(n)
+```
+
+where `a ≥ 1` is the number of subproblems, `b > 1` is the factor by which input size shrinks per recursion, and `f(n)` is the cost to *split and combine* outside the recursive calls. It applies precisely when a problem of size `n` is solved by recursing on `a` subproblems of size `n/b` plus some non-recursive work `f(n)`.
+
+## The comparison that drives everything
+
+The whole theorem hinges on comparing `f(n)` against the **critical exponent** `n^(log_b a)` — the cost if the leaves of the recursion tree dominate. Whichever grows faster wins.
+
+## Case 1 — leaves dominate (recursion-bound)
+
+If `f(n) = O(n^(log_b a − ε))` for some `ε > 0` (the combine work is *polynomially smaller* than the leaf work):
+
+```
+T(n) = Θ(n^(log_b a))
+```
+
+**Example — binary search:** `T(n) = 1·T(n/2) + O(1)`. Here `a=1, b=2`, so `n^(log₂ 1) = n⁰ = 1`, and `f(n)=O(1)` matches the boundary → in the canonical form this lands as `Θ(log n)` (binary search is the classic `a=1` edge handled by the same comparison logic).
+
+## Case 2 — balanced (work spread evenly)
+
+If `f(n) = Θ(n^(log_b a))` (combine work *matches* leaf work at every level):
+
+```
+T(n) = Θ(n^(log_b a) · log n)
+```
+
+**Example — MergeSort:** `T(n) = 2·T(n/2) + O(n)`. Here `a=2, b=2`, so `n^(log₂ 2) = n¹ = n`, and `f(n) = Θ(n)` matches → `T(n) = Θ(n log n)`. Same for the canonical binary-tree traversal.
+
+## Case 3 — root dominates (combine-bound)
+
+If `f(n) = Ω(n^(log_b a + ε))` for some `ε > 0` **and** the regularity condition `a·f(n/b) ≤ c·f(n)` holds for some `c < 1`:
+
+```
+T(n) = Θ(f(n))
+```
+
+**Example:** `T(n) = 2·T(n/2) + O(n²)`. Here leaf work is `n`, but `f(n)=n²` dominates → `T(n) = Θ(n²)`.
+
+## When it does NOT apply
+
+The master theorem is not universal. It fails when:
+- Subproblem sizes are **unequal** (e.g. `T(n) = T(n/3) + T(2n/3) + n` — use the recursion-tree or Akra–Bazzi method).
+- `a` or `b` is not constant, or `f(n)` is not a nice polynomial (e.g. `f(n) = n/log n` falls in the **gap between cases**, where no case applies).
+- The recurrence is **subtractive**, like `T(n) = T(n−1) + n` (QuickSort's worst case) — that needs direct summation, giving Θ(n²).
+
+<ProbeNote>
+Senior signal: derive MergeSort's Θ(n log n) live (Case 2) and then state a recurrence the theorem *can't* solve — `T(n)=T(n−1)+O(1)` or unequal splits — to show you know its boundaries, not just its formula.
+</ProbeNote>

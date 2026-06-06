@@ -1,0 +1,44 @@
+**Problem.** Place `n` queens on an `n × n` board so that no two attack each other (no shared row, column, or diagonal). Return all distinct solutions (here, count or board layouts).
+
+## Brute force — O(n^(2n)) or C(n²·n)
+
+Try every way to drop `n` queens onto `n²` squares and validate each. That's `C(n², n)` placements — astronomically large and almost all invalid. Even restricting to one queen per row leaves `nⁿ` candidates. Hopeless without pruning.
+
+## Optimal — backtracking, one queen per row
+
+Place queens **row by row**, so column and the two diagonals are the only conflicts to track. The trick is O(1) conflict checks using three boolean sets:
+
+- **column** `cols[c]` — column `c` is taken.
+- **major diagonal** (`↘`): every cell on it shares `row - col`; offset by `n-1` to index `0..2n-2`.
+- **minor diagonal** (`↗`): every cell shares `row + col`, ranging `0..2n-2`.
+
+<Diagram caption="Cells on the same ↘ diagonal share (row - col); cells on the same ↗ diagonal share (row + col).">{`      col 0 1 2 3
+row 0    .  Q  .  .     row-col:  -1  diag↘ id
+row 1    .  .  .  Q     row+col:   4  diag↗ id
+row 2    Q  .  .  .
+row 3    .  .  Q  .`}</Diagram>
+
+```java
+int totalNQueens(int n) {
+    return backtrack(0, n, new boolean[n], new boolean[2*n-1], new boolean[2*n-1]);
+}
+
+int backtrack(int row, int n, boolean[] cols, boolean[] diag1, boolean[] diag2) {
+    if (row == n) return 1;                       // all rows placed → one solution
+    int count = 0;
+    for (int col = 0; col < n; col++) {
+        int d1 = row - col + n - 1, d2 = row + col;
+        if (cols[col] || diag1[d1] || diag2[d2]) continue;   // prune attacks
+        cols[col] = diag1[d1] = diag2[d2] = true;            // choose
+        count += backtrack(row + 1, n, cols, diag1, diag2);  // explore next row
+        cols[col] = diag1[d1] = diag2[d2] = false;           // unchoose
+    }
+    return count;
+}
+```
+
+Placing per row already prunes the row dimension; the three O(1) checks prune columns and diagonals. The explored tree is far smaller than `n!` — the bound is loosely **O(n!)** but pruning makes it dramatically faster in practice. Space is **O(n)** for the three arrays plus recursion depth.
+
+To return actual boards instead of a count, carry an `int[] queenCol` recording the column placed in each row and render it at the base case.
+
+<ProbeNote>The senior move is the O(1) diagonal encoding: `row - col` (shifted by `n-1`) for one diagonal, `row + col` for the other. Stating "one queen per row, so I only check column and two diagonals" up front shows you've reduced the search before writing code. Be ready to explain why the diagonal IDs span `0..2n-2`.</ProbeNote>

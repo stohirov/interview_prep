@@ -1,0 +1,58 @@
+Knowing the failure modes is as valuable as knowing the framework — interviewers have seen each of these dozens of times, and avoiding them is most of what separates a pass from a fail.
+
+## The God class
+
+One class (`ParkingLotManager`, `Game`, `System`) that holds all the state and does all the work: parking, pricing, payment, notifications. It violates the Single Responsibility Principle and becomes impossible to extend or test.
+
+```java
+// Anti-pattern: one class doing everything
+class ParkingSystem {
+    void park() { /* find spot + price + pay + notify + log */ }
+    double calculatePrice() { /* ... */ }
+    void processPayment() { /* ... */ }
+    void sendNotification() { /* ... */ }
+}
+```
+
+**Fix:** give each responsibility its own class — `SpotAllocator`, `PricingStrategy`, `PaymentProcessor`, `AvailabilityPublisher` — and have the orchestrator delegate.
+
+## Premature / decorative patterns
+
+Reaching for AbstractFactoryBuilderVisitor when an `if`/`enum` would do. Patterns add indirection; they only pay off where a **real axis of change** exists.
+
+<Callout kind="warn" title="Patterns must earn their place">
+Don't say "I'll use the Strategy pattern" — say "pricing varies by hourly/flat/weekend rules and new schemes are expected, *so* I'll use Strategy." If you can't name the axis of variation, you don't need the pattern.
+</Callout>
+
+## Ignoring concurrency
+
+Modeling shared mutable state (the spot pool, the seat map, the cache) as if the program were single-threaded. The classic tell is the **find-then-act race**: two threads both find a free spot, both take it.
+
+```java
+// Race: two cars get the same spot
+if (spot.isFree()) {   // both threads see true
+    spot.occupy();     // both occupy
+}
+```
+
+**Fix:** make the check-and-act atomic (synchronized region, CAS, or a concurrent collection). Spotting this *unprompted* is a senior signal — see the *Concurrency in LLD* topic.
+
+## Other recurring traps
+
+- **Anemic + procedural** — data-only classes with all logic in one service; the opposite of OO. Put behavior next to the data it operates on.
+- **Type ladders instead of polymorphism** — `if (type == CAR) … else if (type == BUS)` everywhere. Model subtypes and let the method dispatch.
+- **Primitive obsession** — passing `String`/`double` for money, IDs, plates. Wrap them in small value types where it matters.
+- **Over-engineering for imaginary scale** — building sharding into an in-memory exercise. Note it as a follow-up instead.
+- **No interfaces at the seams** — concrete classes wired directly together, so nothing is swappable or testable.
+
+## Quick self-audit
+
+<Diagram caption="Run this checklist before you say 'I'm done'">{`[ ] Does any one class have >1 reason to change?   -> split it
+[ ] Is there a type ladder?                        -> polymorphism
+[ ] Is shared state mutated without guarding?      -> concurrency
+[ ] Did I name a pattern without its trigger?      -> remove it
+[ ] Are the swap points behind interfaces?         -> add seams`}</Diagram>
+
+<ProbeNote>
+This question is tagged a trick: interviewers sometimes nudge you toward an anti-pattern ("can't you just put it all in one class?") to see if you'll defend clean boundaries. The senior move is to hold the line and explain the cost — or to knowingly accept the shortcut while naming the trade-off out loud.
+</ProbeNote>

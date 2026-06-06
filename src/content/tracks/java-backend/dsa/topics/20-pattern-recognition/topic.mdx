@@ -1,0 +1,42 @@
+**Pattern recognition** is the meta-skill that separates senior candidates from middle ones. Strong engineers rarely *invent* an algorithm under interview pressure — they **recognize** that a disguised problem is one they've seen, then apply the known technique. The work is mapping a problem statement's surface features ("shortest", "k-th", "all combinations", "contiguous subarray") to the right algorithmic family.
+
+## How recognition works
+
+Every interview problem broadcasts cues. Train yourself to read them:
+
+<ComplexityTable rows={[
+  {op: "When you see…", best: "…reach for", average: "Why", worst: "Watch for"},
+  {op: "Shortest path, unweighted", best: "BFS", average: "level order = distance", worst: "weighted → Dijkstra"},
+  {op: "Shortest path, weighted non-negative", best: "Dijkstra", average: "greedy + heap", worst: "negative edge → Bellman-Ford"},
+  {op: "K-th largest / top-K", best: "heap of size K (or QuickSelect)", average: "partial order suffices", worst: "streaming → must use heap"},
+  {op: "Running median of a stream", best: "two heaps", average: "balance halves", worst: "—"},
+  {op: "Contiguous subarray with property P", best: "sliding window or prefix sum", average: "avoid re-summing", worst: "negatives break window"},
+  {op: "All combinations / permutations", best: "backtracking", average: "build + undo choices", worst: "exponential output"},
+  {op: "Optimize over overlapping subproblems", best: "dynamic programming", average: "memoize states", worst: "no overlap → just recurse"},
+  {op: "Provably-safe local choice", best: "greedy", average: "exchange argument", worst: "prove it or counterexample it"},
+  {op: "Connectivity / grouping", best: "union-find", average: "near-O(1) merge & find", worst: "needs ordering → no"},
+  {op: "Prefix / autocomplete matching", best: "trie", average: "shared prefixes", worst: "space cost"},
+  {op: "Find boundary in monotonic space", best: "binary search", average: "halve the search", worst: "must be monotone"},
+]} />
+
+## The recognition checklist
+
+Run these questions over any problem before coding:
+
+1. **What's the output shape?** A boolean/count → often DP or greedy. A path → graph search. All solutions → backtracking. A single optimal value → DP, greedy, or binary search on the answer.
+2. **What's monotone?** If a predicate flips once across the input or the answer range, binary search applies.
+3. **Is there structure to exploit?** Sorted → two pointers / binary search. Intervals → sort then sweep (greedy). Small set (n ≤ 20) → bitmask.
+4. **Is the brute force exponential, and do subproblems repeat?** If yes → DP. If they don't repeat → plain recursion/backtracking.
+5. **Is it about "have I seen this?" or "how many?"** → hash map.
+
+## Why this is the senior signal
+
+Middle engineers solve problems they recognize and freeze on ones they don't. Senior engineers **systematically classify** an unfamiliar problem into a known family within the first two minutes, then spend the rest of the time on edge cases and complexity. The questions in this topic drill exactly that classification reflex.
+
+<Callout kind="tip" title="Verbalize the mapping">
+In the interview, say the recognition out loud: "Contiguous subarray plus a target sum with possible negatives — that's prefix-sum-with-a-hash-map, not a sliding window, because negatives break the window's monotonicity." Naming *why* you rejected the neighboring pattern is the clearest senior signal you can give.
+</Callout>
+
+<Callout kind="warn" title="Pattern-matching can mislead">
+Surface cues lie. "Coin change" looks greedy but is DP; "subarray sum" looks like a sliding window but needs prefix sums when negatives appear. Always confirm the pattern's preconditions (monotonicity, non-negative weights, greedy-choice property) before committing.
+</Callout>

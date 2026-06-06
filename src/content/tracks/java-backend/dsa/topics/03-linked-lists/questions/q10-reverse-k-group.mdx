@@ -1,0 +1,52 @@
+**Problem.** Given a linked list, reverse its nodes `k` at a time and return the modified list. If the number of remaining nodes is fewer than `k`, leave them as-is. Example: `1→2→3→4→5`, `k=3` becomes `3→2→1→4→5`.
+
+## Approach — reverse blocks, stitch with a dummy head, O(n) time, O(1) space
+
+Process the list in chunks of `k`:
+
+1. **Check** that at least `k` nodes remain; if not, stop — that trailing partial group stays untouched.
+2. **Reverse** exactly `k` nodes using the standard three-pointer in-place reversal (q05), but bounded to `k` iterations.
+3. **Stitch** the reversed block between the previous block's tail and the next block's head, then move the "previous tail" pointer forward to start the next group.
+
+A dummy head anchors the very first stitch so the original head being reversed isn't a special case.
+
+```java
+ListNode reverseKGroup(ListNode head, int k) {
+    ListNode dummy = new ListNode(0, head);
+    ListNode groupPrev = dummy;          // tail of the last finished group
+
+    while (true) {
+        // 1. find the kth node from groupPrev; bail if fewer than k remain
+        ListNode kth = groupPrev;
+        for (int i = 0; i < k && kth != null; i++) kth = kth.next;
+        if (kth == null) break;
+
+        ListNode groupNext = kth.next;    // first node of the NEXT group
+
+        // 2. reverse the group [groupPrev.next .. kth] in place
+        ListNode prev = groupNext, curr = groupPrev.next;
+        while (curr != groupNext) {
+            ListNode next = curr.next;
+            curr.next = prev;
+            prev = curr;
+            curr = next;
+        }
+
+        // 3. stitch: groupPrev.next was the old head, now the group's tail
+        ListNode newGroupTail = groupPrev.next;
+        groupPrev.next = kth;             // kth is now the group's head
+        groupPrev = newGroupTail;         // advance to this group's tail
+    }
+    return dummy.next;
+}
+```
+
+The clever touch: we seed `prev = groupNext` so the reversed block's tail already points at the next group — no separate fix-up. After reversing, the node that *was* the group's head (`groupPrev.next` before we overwrote it) is now its tail, which becomes the next `groupPrev`.
+
+<Callout kind="info" title="Recursive alternative">
+A recursive version reads more cleanly — reverse the first `k`, then recurse on the rest and attach — but costs O(n/k) stack frames. The iterative form above is O(1) space and is what to write when asked for the optimal.
+</Callout>
+
+<ProbeNote>
+This is a senior problem because it composes three moves: counting `k` ahead, bounded in-place reversal, and pointer stitching. The detail that trips people is the trailing group of `<k` nodes that must stay in original order — the `if (kth == null) break;` guard handles it. Walk a 5-node, `k=3` example end-to-end; interviewers watch the stitch step closely.
+</ProbeNote>

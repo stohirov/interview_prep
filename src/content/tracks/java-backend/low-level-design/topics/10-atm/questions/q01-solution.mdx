@@ -1,0 +1,203 @@
+## 1. Functional requirements
+
+- Authenticate a customer by **card + PIN** against a `BankService`.
+- Support four transaction types: **Withdraw**, **Deposit**, **Transfer**, **Balance inquiry**.
+- **Dispense cash** from multiple denomination bins ($100 / $50 / $20 / $10), giving correct change.
+- Maintain a **transaction log** (audit trail) of every operation, success or failure.
+- Eject the card and reset to idle at the end of a session or on cancel.
+
+## 2. Non-functional requirements
+
+- **Correct state lifecycle** — no transaction may run before authentication; illegal transitions must be impossible.
+- **Atomicity of money** — a withdrawal that debits the account but cannot dispense exact change must roll back fully.
+- **Auditability** — every `Transaction` is recorded with timestamp, type, amount, and outcome.
+- **Single active session** — one customer at a time; hardware (dispenser, reader) is serialized.
+- **Extensibility** — new transaction types or denominations should not touch existing classes (Open/Closed).
+
+## 3. Core entities
+
+| Entity | Responsibility |
+| --- | --- |
+| `ATM` | Context holding the current `ATMState`; orchestrates the session and hardware. |
+| `ATMState` | State interface — `insertCard`, `enterPin`, `selectTransaction`, `eject`. |
+| `BankService` | Authenticates cards, authorizes and applies debits/credits; owns the ledger. |
+| `Account` | Balance and account number; mutated only via `BankService`. |
+| `Card` | Card number + PIN hash; maps to an `Account`. |
+| `Transaction` | Command interface — `execute()` / `rollback()`; one subtype per operation. |
+| `CashDispenser` | Holds denomination bins; head of the dispensing Chain of Responsibility. |
+| `DenominationHandler` | One link per denomination; dispenses what it can, delegates the rest. |
+| `TransactionLog` | Append-only audit trail of executed commands. |
+
+## 4. Class diagram
+
+<Mermaid caption="ATM class model — State + Command + Chain of Responsibility">{`classDiagram
+    class ATM {
+      -ATMState state
+      -BankService bank
+      -CashDispenser dispenser
+      -TransactionLog log
+      -Card currentCard
+      +insertCard(Card)
+      +enterPin(String)
+      +selectTransaction(Transaction)
+      +eject()
+      +setState(ATMState)
+    }
+    class ATMState {
+      <<interface>>
+      +insertCard(ATM, Card)
+      +enterPin(ATM, String)
+      +selectTransaction(ATM, Transaction)
+      +eject(ATM)
+    }
+    class Transaction {
+      <<interface>>
+      +execute(BankService) boolean
+      +rollback(BankService)
+      +describe() String
+    }
+    class CashDispenser {
+      -DenominationHandler chain
+      +dispense(int amount) boolean
+    }
+    class DenominationHandler {
+      <<abstract>>
+      -DenominationHandler next
+      +dispense(int remaining) int
+    }
+    class BankService {
+      +authenticate(Card, String) boolean
+      +debit(String acct, int) boolean
+      +credit(String acct, int)
+    }
+    ATM o-- ATMState
+    ATM o-- CashDispenser
+    ATM o-- BankService
+    ATM ..> Transaction
+    ATMState <|.. IdleState
+    ATMState <|.. CardInsertedState
+    ATMState <|.. AuthenticatedState
+    Transaction <|.. WithdrawTransaction
+    Transaction <|.. DepositTransaction
+    Transaction <|.. TransferTransaction
+    Transaction <|.. BalanceInquiry
+    DenominationHandler <|-- HundredHandler
+    DenominationHandler <|-- FiftyHandler
+    CashDispenser o-- DenominationHandler`}</Mermaid>
+
+## 5. Key interfaces and classes
+
+```java
+interface ATMState {
+    default void insertCard(ATM atm, Card card)            { reject(); }
+    default void enterPin(ATM atm, String pin)             { reject(); }
+    default void selectTransaction(ATM atm, Transaction t) { reject(); }
+    default void eject(ATM atm)                            { atm.setState(new IdleState()); }
+    private void reject() { throw new IllegalStateException("operation not allowed in this state"); }
+}
+
+final class IdleState implements ATMState {
+    public void insertCard(ATM atm, Card card) {
+        atm.setCurrentCard(card);
+        atm.setState(new CardInsertedState());
+    }
+}
+
+final class CardInsertedState implements ATMState {
+    public void enterPin(ATM atm, String pin) {
+        if (atm.bank().authenticate(atm.currentCard(), pin))
+            atm.setState(new AuthenticatedState());
+        else
+            atm.eject();                       // wrong PIN -> session ends
+    }
+}
+
+final class AuthenticatedState implements ATMState {
+    public void selectTransaction(ATM atm, Transaction txn) {
+        boolean ok = txn.execute(atm.bank());  // Command runs against the bank
+        atm.log().record(txn, ok);             // audit trail, success or fail
+        atm.eject();
+    }
+}
+```
+
+```java
+interface Transaction {                        // Command — loggable & reversible
+    boolean execute(BankService bank);
+    void rollback(BankService bank);
+    String describe();
+}
+
+final class WithdrawTransaction implements Transaction {
+    private final String account; private final int amount;
+    private final CashDispenser dispenser;
+    WithdrawTransaction(String acct, int amt, CashDispenser d) {
+        this.account = acct; this.amount = amt; this.dispenser = d;
+    }
+    public boolean execute(BankService bank) {
+        if (!dispenser.canDispense(amount)) return false;     // check change FIRST
+        if (!bank.debit(account, amount))    return false;     // then debit
+        if (!dispenser.dispense(amount)) {                     // dispense; roll back if it fails
+            bank.credit(account, amount);
+            return false;
+        }
+        return true;
+    }
+    public void rollback(BankService bank) { bank.credit(account, amount); }
+    public String describe() { return "WITHDRAW " + amount + " from " + account; }
+}
+```
+
+```java
+abstract class DenominationHandler {           // Chain of Responsibility over bins
+    protected final int denomination;
+    protected int count;
+    protected DenominationHandler next;
+    DenominationHandler(int denom, int count) { this.denomination = denom; this.count = count; }
+    void setNext(DenominationHandler next) { this.next = next; }
+
+    /** Returns the amount it could NOT satisfy, after delegating the remainder. */
+    int dispense(int remaining) {
+        int billsNeeded = Math.min(remaining / denomination, count);
+        int dispensedHere = billsNeeded * denomination;
+        int leftover = remaining - dispensedHere;
+        if (leftover == 0) { count -= billsNeeded; return 0; }
+        if (next != null) {
+            int stillOwed = next.dispense(leftover);
+            if (stillOwed == 0) count -= billsNeeded;          // commit only if fully satisfiable
+            return stillOwed;
+        }
+        return leftover;                                       // cannot make exact change
+    }
+}
+```
+
+## 6. Design patterns used
+
+- **State** — `IdleState → CardInsertedState → AuthenticatedState` encode the kiosk lifecycle; each state allows only its legal operations and the default methods reject the rest. No boolean-flag soup.
+- **Command** — each `Transaction` is a self-contained, loggable, reversible object. This is what makes the audit trail and rollback natural, and would enable replay.
+- **Chain of Responsibility** — `CashDispenser` walks the denomination handlers; each dispenses what it can and delegates the remainder, failing cleanly when exact change is impossible.
+- **Strategy** — the denomination-selection policy (greedy largest-first vs minimize-bills vs balance-the-bins) is pluggable; greedy is the default link ordering.
+- **Singleton** — one `BankService` gateway (or `ATM` per kiosk).
+
+## 7. Trade-offs and alternatives
+
+- **State objects vs enum + switch.** State classes give compile-time safety and one place per transition; an `enum` with a `switch` is terser but re-centralizes the logic the pattern aimed to distribute. For a fixed, small lifecycle the enum is defensible.
+- **Check change before debit.** Withdraw checks `canDispense` *before* `debit`, then rolls back the credit if the physical dispense fails. The ordering matters: never leave the customer debited without cash. In a real system the debit + dispense would sit inside a transactional saga.
+- **Greedy denomination is not always optimal.** Greedy largest-first can fail to make change that a non-greedy split would (classic coin-change). For real ATMs the bins are designed so greedy works; otherwise a DP/backtracking allocator is needed — call this out.
+- **Money as `int` cents.** Using `int` minor units avoids floating-point error; `BigDecimal` is the production alternative for currencies with sub-cent precision.
+
+## 8. Common follow-up questions
+
+- **Denomination optimization** — replace greedy with a backtracking/DP allocator when bins can't guarantee greedy change.
+- **Daily withdrawal limits** — `BankService` tracks per-account daily totals; the `WithdrawTransaction` consults a limit policy before debiting.
+- **Multi-bank** — `BankService` becomes an interface behind a router keyed by card BIN; auth and debit dispatch to the issuing bank's adapter.
+- **Audit trail** — the `TransactionLog` is append-only and persisted; pair with reversible Commands for dispute resolution.
+- **Offline mode** — queue Commands locally with conservative limits when the bank link is down, reconcile on reconnect (eventual consistency).
+- **Fraud hooks** — an Observer/listener on each executed Command feeds a fraud-scoring service without coupling it to the transaction logic.
+
+## 9. What interviewers are really probing
+
+<ProbeNote>
+That you (1) reached for **State** to make illegal transitions impossible rather than guarding with flags, (2) kept the **ledger in `BankService`** and treated the ATM as a stateful client, (3) modeled operations as **Commands** so logging, rollback, and replay fall out naturally, and (4) spotted the **debit-but-no-cash failure** and ordered the steps (check change → debit → dispense → roll back on failure) to keep money atomic. Naming the greedy-change limitation and the offline reconciliation problem unprompted is the senior signal.
+</ProbeNote>

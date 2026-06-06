@@ -1,0 +1,40 @@
+**Problem.** Evaluate an arithmetic expression in **Reverse Polish Notation** (postfix), given as tokens. Operators `+ - * /` are binary; division truncates toward zero. Example: `["2","1","+","3","*"]` → `(2+1)*3` = `9`.
+
+## Why a stack is the natural fit
+
+RPN was *designed* for stack evaluation — it is how stack-based calculators and the JVM bytecode interpreter work. There are no parentheses and no precedence rules to parse: operands pile up, and each operator consumes the **top two** values and pushes the result back. No brute-force/optimal split here — the stack solution is *the* solution, in a single O(n) pass.
+
+```java
+int evalRPN(String[] tokens) {
+    Deque<Integer> stack = new ArrayDeque<>();
+    for (String t : tokens) {
+        switch (t) {
+            case "+" -> stack.push(stack.pop() + stack.pop());
+            case "*" -> stack.push(stack.pop() * stack.pop());
+            case "-" -> {
+                int b = stack.pop(), a = stack.pop();   // order matters!
+                stack.push(a - b);
+            }
+            case "/" -> {
+                int b = stack.pop(), a = stack.pop();
+                stack.push(a / b);                       // Java int / truncates toward 0
+            }
+            default -> stack.push(Integer.parseInt(t));  // operand
+        }
+    }
+    return stack.pop();   // the single remaining value is the answer
+}
+```
+
+<ComplexityTable rows={[
+  {op: "evalRPN", best: "O(n)", average: "O(n)", worst: "O(n)", note: "one pass; each token is O(1)"},
+  {op: "space", best: "O(1)", average: "O(n)", worst: "O(n)", note: "stack holds pending operands"},
+]} />
+
+<Callout kind="warn" title="Operand order for non-commutative operators">
+`+` and `*` are commutative, so the pop order does not matter. For `-` and `/` it absolutely does: the **first** popped value is the right-hand operand. Compute `a - b` and `a / b` where `b` is popped first. Swapping them is the single most common bug in this problem.
+</Callout>
+
+<ProbeNote>
+Beyond operand order, mention Java's integer division semantics — `/` truncates toward zero, which matches the usual RPN spec, but say it out loud. If asked to extend this to *infix* expressions, that is the **shunting-yard** algorithm: a second stack for operators plus precedence comparison converts infix to postfix, then you reuse exactly this evaluator.
+</ProbeNote>

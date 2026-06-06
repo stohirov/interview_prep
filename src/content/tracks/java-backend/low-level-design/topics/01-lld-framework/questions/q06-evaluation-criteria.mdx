@@ -1,0 +1,45 @@
+Knowing the rubric lets you spend your 45 minutes on what scores. Across companies (Amazon, EPAM, the big product firms) LLD rounds converge on roughly the same dimensions.
+
+## The rubric interviewers grade against
+
+| Dimension | What earns marks | What loses marks |
+| --- | --- | --- |
+| **Requirements & scoping** | Clarifies before coding; states assumptions | Jumps to code; builds the wrong thing |
+| **OO modeling** | Cohesive classes, SRP, composition over inheritance | God class; anemic/procedural model |
+| **Abstractions & extensibility** | Interfaces at the seams; Open/Closed | Everything concrete; can't add a type without edits |
+| **Patterns** | Right pattern, justified by a real axis of change | No patterns, or decorative ones |
+| **Correctness & concurrency** | Working core; spots the races | Compiles-but-wrong; ignores shared state |
+| **Trade-offs & communication** | Discusses alternatives; thinks out loud | Silent; one option presented as the only one |
+
+## How the score maps to level
+
+<Diagram caption="The same problem, three outcomes">{`JUNIOR      A working model, but a God class and if/else type ladders.
+            Patterns missing or misapplied. No concurrency thought.
+
+MID         Clean entities, SRP, 1-2 well-justified patterns,
+            extensible at the obvious seam. Solid but prompted.
+
+SENIOR      All of mid, PLUS: spots the race unprompted, names
+            trade-offs and alternatives, designs for the follow-up
+            before it's asked, and communicates continuously.`}</Diagram>
+
+## The dimensions that move you up a level
+
+Modeling and a working core get you to "competent." What pushes you into **senior** territory:
+
+- **Proactive trade-off talk** — "I could allocate by scanning floors, but a per-type free-spot queue makes it O(1); for this scale the scan is fine." You volunteer the alternative *and* the choice.
+- **Concurrency awareness** — you guard shared state and name the race without being prompted.
+- **Designing for change** — the new vehicle type / pricing scheme / channel plugs in via an interface, not an edit.
+- **Communication** — you narrate decisions so the interviewer can follow your reasoning even where the code is incomplete.
+
+<Callout kind="tip" title="Think out loud — it's literally graded">
+Communication is an explicit rubric line at most companies. A silent candidate with a great design often scores below a talkative candidate with a good one, because the interviewer can only grade what they can observe. Verbalize every fork in the road and why you took it.
+</Callout>
+
+## What "done" looks like
+
+You're not graded on finishing every follow-up. A complete core flow, clean seams, justified patterns, a named concurrency concern, and a clear trade-off discussion is a strong pass — even with stubs where the deferred features would plug in.
+
+<ProbeNote>
+This is tagged behavioral because the round is as much about *how you collaborate* as what you produce. Interviewers note whether you take hints gracefully, defend boundaries with reasons (not stubbornness), and reason transparently. Treat the interviewer as a teammate pairing with you, not an examiner.
+</ProbeNote>

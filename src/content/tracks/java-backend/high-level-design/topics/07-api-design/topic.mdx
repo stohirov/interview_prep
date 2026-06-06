@@ -1,0 +1,24 @@
+The API is the contract between your service and everyone who calls it — clients, partners, and other services. In an HLD round, API design rarely gets a whole question to itself, but it shows up *inside* almost every design: "what does the write path look like?", "how does the client get real-time updates?", "how do you page through results?". Strong, idempotent, evolvable contracts are a senior signal; sloppy ones invite hours of integration pain later.
+
+## The dimensions that matter
+
+- **Protocol / style** — **REST** over HTTP is the lingua franca for public and resource-shaped APIs; **gRPC** is the high-throughput, strongly-typed choice for internal service-to-service calls; **GraphQL** solves client-driven aggregation and over-/under-fetching.
+- **Idempotency** — whether retrying a request is safe. This is *the* property that makes a distributed system survivable, because networks force retries and you cannot tell a lost response from a lost request.
+- **Real-time transport** — when the server needs to *push* to the client: **WebSockets** (full-duplex), **SSE** (server→client stream), or **long polling** (the compatible fallback).
+- **Evolution** — **versioning** (URL vs header) so you can change the contract without breaking existing callers, and **pagination** (offset vs cursor) so a result set that grows doesn't return megabytes or drift under concurrent writes.
+
+## REST done right
+
+REST is more than "JSON over HTTP." The senior version: model **resources** as nouns (`/orders/42`), use **HTTP methods** for verbs (`GET`/`PUT`/`POST`/`PATCH`/`DELETE`), lean on **status codes** as the protocol (`200`/`201`/`204`/`400`/`404`/`409`/`429`/`503`), and respect HTTP **semantics** — safe methods don't mutate, idempotent methods can be retried, and responses declare their cacheability.
+
+<Callout kind="tip" title="The idempotency reflex">
+Any time you describe a write path, state whether it is idempotent and how a retry behaves. For a non-idempotent `POST` (create order, charge card), introduce an **idempotency key** the client generates so the server can dedupe. Interviewers listen for this specifically.
+</Callout>
+
+## REST vs gRPC vs GraphQL — the one-liner
+
+REST for public, cacheable, resource-shaped APIs; **gRPC** for internal high-throughput, low-latency RPC with a strict schema (Protobuf) and streaming; **GraphQL** when many heterogeneous clients need to shape their own responses and you'd otherwise drown in custom endpoints or over-fetching. None is universally "best" — they optimize different axes.
+
+## What the questions cover
+
+The questions drill the four highest-yield sub-topics: which HTTP methods are idempotent and why it matters for retries; when to reach for REST vs gRPC vs GraphQL (including GraphQL's over-fetch and N+1 traps); the real-time transport trade-offs; and how to version and paginate an API that has to keep evolving.

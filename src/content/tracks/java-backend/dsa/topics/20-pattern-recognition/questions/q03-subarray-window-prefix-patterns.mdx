@@ -1,0 +1,50 @@
+Problems about a **contiguous subarray** or **substring satisfying a property P** almost always reduce to one of two techniques: **sliding window** or **prefix sum (+ hash map)**. The discriminating cue is whether the property is *monotone* as the window grows.
+
+## The decision table
+
+<ComplexityTable rows={[
+  {op: "When you see…", best: "…use", average: "Complexity", worst: "Why"},
+  {op: "Longest/shortest window, property monotone", best: "sliding window (two pointers)", average: "O(n)", worst: "grow right, shrink left"},
+  {op: "Fixed-size window aggregate", best: "fixed sliding window", average: "O(n)", worst: "slide and adjust"},
+  {op: "Count subarrays with exact sum K (negatives allowed)", best: "prefix sum + hash map", average: "O(n)", worst: "window fails on negatives"},
+  {op: "Range-sum queries (static array)", best: "prefix sum array", average: "O(1) per query", worst: "precompute O(n)"},
+  {op: "Count subarrays sum in [L, R]", best: "atMost(R) - atMost(L-1) sliding window", average: "O(n)", worst: "only if non-negative"},
+]} />
+
+## When sliding window works
+
+A window works when the property is **monotone**: extending the window can only push it toward (or away from) validity in one direction, so shrinking from the left restores validity. Examples: longest substring without repeating characters, minimum window substring, longest subarray with at most K distinct elements. All **non-negative** "sum ≤ target" problems qualify — adding elements only increases the sum.
+
+```java
+// Template: longest window satisfying P
+int left = 0;
+for (int right = 0; right < n; right++) {
+    add(arr[right]);
+    while (!valid()) { remove(arr[left]); left++; }   // shrink until valid
+    best = Math.max(best, right - left + 1);
+}
+```
+
+## When you must use prefix sum + hash map
+
+The moment **negative numbers** appear in a "subarray sums to exactly K" problem, the window breaks — adding an element can *decrease* the sum, so there's no monotone shrink condition. Instead, use prefix sums: `sum(i..j) = prefix[j] - prefix[i-1]`. Store running prefix sums in a hash map; for each `prefix[j]`, the count of earlier prefixes equal to `prefix[j] - K` is the number of subarrays ending at `j` with sum `K`.
+
+```java
+// Subarray Sum Equals K (works with negatives)
+Map<Long, Integer> seen = new HashMap<>();
+seen.put(0L, 1);                       // empty prefix
+long prefix = 0; int count = 0;
+for (int x : nums) {
+    prefix += x;
+    count += seen.getOrDefault(prefix - K, 0);   // earlier prefix that makes sum K
+    seen.merge(prefix, 1, Integer::sum);
+}
+```
+
+## The recognition rule
+
+- "Longest/shortest contiguous window where P holds" + property is monotone → **sliding window**.
+- "Count/find subarrays summing to exactly K" + negatives possible → **prefix sum + hash map**.
+- "Many range-sum queries on a static array" → **prefix sum array** for O(1) queries.
+
+<ProbeNote>The make-or-break insight: **negatives break the sliding window**. State it explicitly — "since the array can contain negatives, adding an element can lower the sum, so there's no monotone shrink condition; I'll use prefix sums with a hash map." That single sentence is the clearest senior signal in this family. For "at most K" non-negative counting, the `atMost(R) - atMost(L-1)` window trick is the slick extension.</ProbeNote>

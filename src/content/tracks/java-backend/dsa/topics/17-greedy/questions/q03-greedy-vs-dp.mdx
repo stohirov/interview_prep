@@ -1,0 +1,32 @@
+Greedy and dynamic programming both require **optimal substructure**. The deciding question is whether a *single local choice* is provably safe, or whether you must explore multiple choices and combine their results.
+
+## The decision table
+
+<ComplexityTable rows={[
+  {op: "Local choice is provably optimal", best: "Greedy", average: "one pass, O(1) state", worst: "wrong if greedy-choice property fails"},
+  {op: "Choice depends on future subproblems", best: "DP", average: "memoize / tabulate", worst: "higher time & space"},
+  {op: "Need to count all ways or all solutions", best: "DP (or backtracking)", average: "greedy can't count", worst: "—"},
+]} />
+
+## How to tell them apart
+
+- **Greedy** — you can argue (exchange argument) that committing to the best-looking option now never blocks a better future. One sort + one sweep, O(1) or O(log n) extra state.
+- **DP** — the value of a choice depends on subproblem results you can't evaluate yet, so you try all choices and keep the best. Overlapping subproblems make memoization pay off.
+
+## The classic contrast: knapsack
+
+- **Fractional knapsack** is greedy: take items by descending value/weight, splitting the last one. The greedy choice is safe because you can always fill the remaining capacity optimally.
+- **0/1 knapsack** is DP: you can't split items, so taking the best ratio item can lock out a better whole-item combination. You must consider take-vs-skip for every item — `dp[i][w]`.
+
+## The coin-change tell
+
+- US/euro denominations → greedy (largest coin first) happens to be optimal, but only because of the specific denomination structure.
+- Arbitrary denominations like `{1, 3, 4}`, target `6` → greedy gives `4+1+1` (3 coins), DP gives `3+3` (2 coins). **Coin Change is a DP problem** — never assume greedy.
+
+## Practical heuristic for the interview
+
+1. Try greedy first — it's simpler and faster.
+2. Immediately stress-test it with a small adversarial input.
+3. If you find a counterexample, switch to DP. If you can sketch an exchange-argument proof, commit to greedy.
+
+<ProbeNote>The phrase interviewers want: "greedy if I can prove one local choice is always safe; DP if a choice's payoff depends on subproblems I haven't solved yet." Back it with the fractional-vs-0/1 knapsack split and the `{1,3,4}` coin counterexample. If you're unsure, DP is the safe default — it's a superset of what greedy can solve.</ProbeNote>

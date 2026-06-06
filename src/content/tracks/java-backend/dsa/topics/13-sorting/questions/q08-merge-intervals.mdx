@@ -1,0 +1,36 @@
+**Problem.** Given a list of intervals `[start, end]`, merge all overlapping intervals and return the non-overlapping result. E.g. `[[1,3],[2,6],[8,10],[15,18]]` → `[[1,6],[8,10],[15,18]]`.
+
+## Brute force — repeatedly merge pairs, O(n²)
+
+Scan for any overlapping pair, merge them, restart. Correct but quadratic and fiddly — the sort-first approach dominates it.
+
+## Optimal — sort by start, then sweep, O(n log n)
+
+**Sort the intervals by start time.** Once sorted, any interval that overlaps a given one must be adjacent in the order, so a single left-to-right sweep suffices: extend the current interval's end if the next one starts within it; otherwise close it out and open a new one.
+
+```java
+int[][] merge(int[][] intervals) {
+    Arrays.sort(intervals, (a, b) -> Integer.compare(a[0], b[0]));  // by start
+    List<int[]> out = new ArrayList<>();
+    int[] cur = intervals[0];
+    out.add(cur);
+    for (int i = 1; i < intervals.length; i++) {
+        int[] next = intervals[i];
+        if (next[0] <= cur[1]) {                 // overlaps -> extend in place
+            cur[1] = Math.max(cur[1], next[1]);  // max: next may be fully inside cur
+        } else {                                 // disjoint -> start a new interval
+            cur = next;
+            out.add(cur);
+        }
+    }
+    return out.toArray(new int[0][]);
+}
+```
+
+**O(n log n)** time (dominated by the sort), **O(n)** for the output (O(log n) auxiliary beyond it).
+
+<Callout kind="warn" title="Two subtle points">
+Use `Math.max(cur[1], next[1])` when extending — a later interval can be *entirely contained* in the current one (`[1,10]` then `[2,3]`), and blindly taking `next[1]` would shrink the range. Also decide whether touching intervals like `[1,2]` and `[2,3]` count as overlapping; `<=` merges them, `<` keeps them separate — clarify with the interviewer.
+</Callout>
+
+<ProbeNote>The whole problem hinges on the insight "sort by start, then overlaps are adjacent." That's the reusable pattern behind Insert Interval, Meeting Rooms, and Non-overlapping Intervals. Mention the contained-interval edge case (`Math.max`) and the touching-boundary ambiguity unprompted.</ProbeNote>

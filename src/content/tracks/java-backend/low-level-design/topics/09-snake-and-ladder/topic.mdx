@@ -1,0 +1,16 @@
+**Snake & Ladder** is a deliberately small problem — a 5-to-10-minute warm-up or a screening question — and that is exactly why it is dangerous. The domain is so simple that the interviewer is no longer testing *whether* you can model it; they are testing whether you reach for the right abstractions even when the problem does not force you to. Over-engineering it with five patterns is as much a red flag as under-engineering it into one `main()` method.
+
+## What the interviewer is testing
+
+- Can you find clean **entity boundaries** in a trivially small domain — Board, Dice, Player, Game — without inventing classes that earn nothing?
+- Do you model snakes and ladders **uniformly** as "jumps" (start → end) rather than two special-cased branches?
+- Can you keep the **turn loop** (the `Game` engine) free of rules that belong to the `Board` or `Dice`?
+- Do you spot the natural seams for extension — a pluggable `Dice` (fair vs loaded), an `Observer` for move events — and apply them *only* where they add value?
+
+## How to frame it
+
+Clarify scope fast: board size (typically 100), number of players, exact-roll-to-win or overshoot-allowed, single or multiple dice. State a light non-functional bar: extensible dice behavior and a clean, testable turn loop.
+
+Then lay out the model. A **Board** is a sized grid holding a map of jumps (a `Snake` sends you down, a `Ladder` sends you up — both are just `start → end` entries). A **Dice** rolls a value behind an interface so a fair die and a loaded/weighted die interchange. Each **Player** has a current position. The **Game** holds the turn order, runs the loop, applies jumps, and declares a winner. **Observers** (a logger, a UI) can subscribe to position changes.
+
+Drive the loop: **player rolls dice → advance position → if a jump starts there, teleport to its end → if landed on the final cell, win → else next player.** The worked solution follows the full 9-section template. The senior move here is restraint: model jumps uniformly, hide dice behind a Strategy, and stop.

@@ -1,0 +1,47 @@
+**Problem.** Given a `rows × cols` grid of heights, travel from the top-left to the bottom-right moving 4-directionally. A path's **effort** is the *maximum* absolute height difference between consecutive cells along it. Return the minimum effort over all paths. The cost is a **max along the path**, not a sum — this is a **minimax** shortest path, solved by Dijkstra with a tweaked relaxation.
+
+## Brute force — binary search on the answer + BFS, O(rows·cols·log range)
+
+Binary-search the effort threshold `t`; for each `t`, BFS using only edges with difference ≤ `t` and check if the target is reachable. Clean and a valid answer, but Dijkstra does it in one pass.
+
+## Optimal — Dijkstra (minimax), O(rows·cols·log(rows·cols))
+
+Treat each cell as a node, each adjacency as an edge weighted by the height difference. The "distance" to a cell is the **minimum possible max-edge** to reach it. Relaxation takes a `max` instead of a sum:
+
+```java
+public int minimumEffortPath(int[][] heights) {
+    int R = heights.length, C = heights[0].length;
+    int[][] effort = new int[R][C];
+    for (int[] row : effort) Arrays.fill(row, Integer.MAX_VALUE);
+    effort[0][0] = 0;
+
+    int[][] dirs = {{1,0},{-1,0},{0,1},{0,-1}};
+    PriorityQueue<int[]> pq = new PriorityQueue<>((a, b) -> a[0] - b[0]); // {effort, r, c}
+    pq.add(new int[]{0, 0, 0});
+
+    while (!pq.isEmpty()) {
+        int[] top = pq.poll();
+        int e = top[0], r = top[1], c = top[2];
+        if (e > effort[r][c]) continue;                    // stale entry
+        if (r == R - 1 && c == C - 1) return e;            // target settled -> done
+
+        for (int[] d : dirs) {
+            int nr = r + d[0], nc = c + d[1];
+            if (nr < 0 || nr >= R || nc < 0 || nc >= C) continue;
+            int diff = Math.abs(heights[nr][nc] - heights[r][c]);
+            int nextEffort = Math.max(e, diff);            // minimax relaxation
+            if (nextEffort < effort[nr][nc]) {
+                effort[nr][nc] = nextEffort;
+                pq.add(new int[]{nextEffort, nr, nc});
+            }
+        }
+    }
+    return 0; // single-cell grid
+}
+```
+
+The only change from standard Dijkstra is `Math.max(e, diff)` in place of `e + weight`. Dijkstra's greedy correctness survives because `max` is **monotone** — extending a path never lowers its max-edge — so the settle-once invariant still holds, exactly as it relies on non-negative weights in the additive case. We can return the instant the target pops.
+
+<ProbeNote>
+The insight to verbalize: this is shortest path where the path cost is a **max over edges**, and Dijkstra generalizes to any monotone aggregation, not just sums. Mention the binary-search-on-answer alternative to show range. Edge cases: a 1×1 grid (effort 0) and a single row/column.
+</ProbeNote>

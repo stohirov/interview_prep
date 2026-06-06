@@ -1,0 +1,35 @@
+Many LLD problems hide a concurrency requirement in plain sight: two cars reach the gate at once, two users book the same seat, many threads hit the cache. Senior candidates are expected to *notice* the shared mutable state and reach for the right tool without being told. This topic is the practical concurrency toolkit for the LLD round — just enough to write correct, thread-safe class designs, not a full JMM treatise.
+
+## The one mental model
+
+Every concurrency bug in LLD reduces to **unguarded shared mutable state**. The fix is always one of three moves:
+
+<Diagram caption="The three ways to make shared state safe">{`1. DON'T SHARE      thread-confinement, copies
+2. DON'T MUTATE     immutability, final fields, value objects
+3. GUARD MUTATION   synchronized / locks / atomics / concurrent collections`}</Diagram>
+
+Reach for immutability first — an immutable object is automatically thread-safe and needs no locks. Only guard what must genuinely change.
+
+## The classic LLD race
+
+The recurring trap is **check-then-act**: a thread reads state, decides, then acts — but another thread slips in between. Two cars both see a spot free and both take it; two users both see a seat available and both book it.
+
+```java
+if (spot.isFree()) {   // T1 and T2 both read true
+    spot.occupy();     // both occupy the same spot — corrupt
+}
+```
+
+Making the check and the act **atomic** (a synchronized region, a compare-and-set, or a concurrent collection's atomic method) is the fix interviewers look for — and naming the race *before* being prompted is the senior signal.
+
+## The toolkit you'll use
+
+- **`synchronized` / `ReentrantLock`** — coarse mutual exclusion; the default.
+- **`ReadWriteLock` / `StampedLock`** — many readers, few writers.
+- **`ConcurrentHashMap`, `CopyOnWriteArrayList`, `BlockingQueue`** — concurrent collections that do the locking for you.
+- **`AtomicInteger` / `AtomicReference`** — lock-free counters and CAS.
+- **Immutability** — the lock you never have to take.
+
+## How to use this topic
+
+The questions below cover *when* the interviewer expects thread-safety, the coarse-versus-fine locking trade-off, the concurrent-collections toolkit with when-to-use guidance, and the canonical thread-safe Singleton (the five idioms with code). Cross-reference the Collections module for the concurrent-collection internals; here the focus is choosing the right tool inside a class design under interview time pressure.

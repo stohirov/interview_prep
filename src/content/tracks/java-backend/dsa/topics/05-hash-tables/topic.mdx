@@ -1,0 +1,31 @@
+A **hash table** maps keys to values in expected **O(1)** time by running each key through a hash function to pick a bucket. It is the single most-used data structure in interviews because so many problems reduce to "have I seen this before?" or "how many times have I seen this?" — both O(1) lookups.
+
+## The core idea
+
+Compute `hash(key)`, fold it into an array index (`index = hash & (capacity - 1)` when capacity is a power of two), and store the entry in that bucket. Two keys can land in the same bucket — a **collision** — so each bucket holds more than one entry.
+
+## Collision resolution
+
+- **Separate chaining** — each bucket is a linked list (or, in Java's `HashMap`, a red-black tree once a bucket exceeds 8 entries and capacity ≥ 64). This is what the JDK uses.
+- **Open addressing** — on collision, probe for the next free slot (linear, quadratic, or double hashing). More cache-friendly, no per-entry node overhead, but suffers from clustering and needs tombstones on delete.
+
+## Load factor & rehashing
+
+The **load factor** (`size / capacity`, default `0.75` in `HashMap`) bounds how full the table gets. When `size > capacity * loadFactor`, the table **doubles** and every entry is redistributed. This keeps chains short so lookups stay near O(1) amortized.
+
+<Callout kind="tip" title="Java standard library mapping">
+- **`HashMap` / `HashSet`** — general-purpose, unordered, allows one null key. The default choice.
+- **`LinkedHashMap`** — preserves insertion (or access) order; access-order mode gives you an LRU cache in a few lines.
+- **`TreeMap` / `TreeSet`** — red-black tree, sorted, O(log n), use when you need ordering or range queries (`floor`, `ceiling`, `subMap`).
+- **`ConcurrentHashMap`** — lock-striped, thread-safe, no null keys/values.
+</Callout>
+
+## A good hash function
+
+Spreads keys uniformly so every bucket is equally likely (the **avalanche** property — flipping one input bit flips ~half the output bits). `HashMap` defends against weak `hashCode()`s by mixing the high bits down: `h ^ (h >>> 16)`. A pathological hash (everything to one bucket) degrades lookups to O(n) — or O(log n) in modern Java thanks to treeified buckets.
+
+## When *not* to use a hash table
+
+When you need **order** (sorted iteration, nearest-key, range queries) reach for a `TreeMap`; when you need **prefix** queries reach for a trie. A hash table throws ordering away in exchange for speed.
+
+The interview problems below — Two Sum, Group Anagrams, Subarray Sum = K, LRU Cache — are all the same move: trade O(n) space for an O(1) lookup that collapses a nested loop into a single pass.

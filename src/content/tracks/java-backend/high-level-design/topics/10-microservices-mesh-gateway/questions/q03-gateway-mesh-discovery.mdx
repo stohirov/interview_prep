@@ -1,0 +1,58 @@
+## API gateway, service mesh, and service discovery — who does what
+
+These three are routinely conflated. The clean mental model: they operate on **different traffic and different concerns**. The gateway handles **north-south** traffic (external clients in); the mesh handles **east-west** traffic (service-to-service); discovery is the lookup mechanism both rely on to find where instances currently are.
+
+<Mermaid caption="Gateway sits at the edge (north-south); the mesh governs internal traffic (east-west)">{`graph TB
+    Client[External Client] -->|north-south| GW[API Gateway]
+    GW --> SA[Service A<br/>+ sidecar]
+    SA <-->|east-west, via mesh| SB[Service B<br/>+ sidecar]
+    SB <-->|east-west, via mesh| SC[Service C<br/>+ sidecar]
+    SA -.lookup.-> D[(Service Discovery)]
+    SB -.lookup.-> D
+    GW -.lookup.-> D`}</Mermaid>
+
+### API gateway — the single front door for external clients
+
+Responsibilities concentrated at the edge, so individual services don't each re-implement them:
+
+- **Routing** requests to the right backend service by path/host/header.
+- **Authentication & authorization** — validate the token once at the edge.
+- **TLS termination** for inbound external traffic.
+- **Rate limiting & throttling** per client/key (see the rate-limiting topic).
+- **Request aggregation / BFF** — fan out to several services and compose one response for a client (notably mobile).
+- **Cross-cutting concerns** — request logging, CORS, response caching, API versioning.
+
+Examples: Kong, NGINX, Spring Cloud Gateway, AWS API Gateway. There is **one** logical gateway in front of the system (horizontally scaled).
+
+### Service mesh — governing internal service-to-service traffic
+
+A mesh pushes networking concerns *out of application code* into a **sidecar proxy** (e.g., Envoy) deployed next to every service instance. The app just makes a normal call; the sidecar transparently handles:
+
+- **mTLS** — automatic mutual TLS and identity between services (zero-trust internal network).
+- **Resilience** — retries, timeouts, **circuit breaking**, outlier ejection.
+- **Traffic shaping** — canary/blue-green, weighted routing, fault injection for testing.
+- **Observability** — uniform metrics and trace context for every internal hop, with no app changes.
+
+Examples: **Istio** (Envoy-based, feature-rich, heavier) and **Linkerd** (lighter, simpler, purpose-built for Kubernetes). The key idea: it solves the *same* resilience problems for *every* service without each one importing a library — language-agnostic, operator-controlled.
+
+### Service discovery — finding instances that keep moving
+
+In an autoscaling, ephemeral world, instance IPs constantly change. Discovery answers "where is service B right now?"
+
+- **Client-side discovery** — the client queries a registry (e.g., **Netflix Eureka**), gets the list of healthy instances, and load-balances itself (Ribbon-style). The client owns balancing logic; the registry must be highly available.
+- **Server-side discovery** — the client calls a stable virtual address; a load balancer / platform DNS resolves it to a live instance. In **Kubernetes**, a Service's DNS name plus kube-proxy *is* server-side discovery — which is why teams on Kubernetes rarely run Eureka anymore.
+
+| Aspect | Client-side (Eureka) | Server-side (k8s DNS / LB) |
+|---|---|---|
+| Who load-balances | The client | The platform LB / proxy |
+| Client complexity | Higher — registry-aware client | Lower — just call a DNS name |
+| Coupling | Client tied to the registry | Client knows only a stable name |
+| Typical home | Spring Cloud / Netflix stack | Kubernetes-native systems |
+
+<Callout kind="info" title="Gateway vs mesh — north-south vs east-west">
+The cleanest distinction: the **gateway** is the door external traffic comes through (north-south); the **mesh** governs traffic *between* services already inside (east-west). They overlap (both can do retries, mTLS, observability) but are positioned differently and are complementary, not alternatives. In a service mesh, discovery is usually built in via the sidecars and control plane.
+</Callout>
+
+<ProbeNote>
+The interviewer wants you to keep the three roles distinct and explain *why* each exists. The crispest signal is the north-south (gateway) vs east-west (mesh) framing, plus naming a concrete tool per role (Kong/Spring Cloud Gateway; Istio/Linkerd; Eureka vs Kubernetes DNS) and noting the mesh pulls resilience out of app code into sidecars.
+</ProbeNote>

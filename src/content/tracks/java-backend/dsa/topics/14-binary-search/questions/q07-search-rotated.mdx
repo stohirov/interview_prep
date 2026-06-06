@@ -1,0 +1,38 @@
+**Problem.** A sorted array was rotated at an unknown pivot (e.g. `[4,5,6,7,0,1,2]`). Find a target's index in O(log n), or return `-1`. Assume distinct values.
+
+## Why plain binary search breaks
+
+The array isn't globally sorted, so comparing `nums[mid]` to `target` alone doesn't tell you which half to drop. But here's the key fact: **at least one side of `mid` is always still sorted**. Identify the sorted side, check whether `target` falls inside its range, and recurse accordingly.
+
+## Optimal — one modified binary search, O(log n)
+
+```java
+int search(int[] nums, int target) {
+    int lo = 0, hi = nums.length - 1;
+    while (lo <= hi) {
+        int mid = lo + (hi - lo) / 2;
+        if (nums[mid] == target) return mid;
+
+        if (nums[lo] <= nums[mid]) {                 // LEFT half [lo..mid] is sorted
+            if (nums[lo] <= target && target < nums[mid]) hi = mid - 1;  // target in left
+            else lo = mid + 1;                       // otherwise search right
+        } else {                                     // RIGHT half [mid..hi] is sorted
+            if (nums[mid] < target && target <= nums[hi]) lo = mid + 1;  // target in right
+            else hi = mid - 1;                       // otherwise search left
+        }
+    }
+    return -1;
+}
+```
+
+**O(log n)** time, **O(1)** space — still one halving search, just with a branch to pick the sorted side.
+
+## The reasoning to verbalize
+
+`nums[lo] <= nums[mid]` means the left half has no pivot, so it's sorted ascending; then `target` is in the left half *iff* it lies in `[nums[lo], nums[mid])`. Otherwise the **right** half must contain the pivot but is itself sorted on the other side, and the same range test applies. Each step still discards half the array.
+
+<Callout kind="warn" title="The boundary comparisons">
+Use `<=` in `nums[lo] <= nums[mid]` so a two-element window (where `lo == mid`) is treated as sorted. And the range checks are **half-open** (`target < nums[mid]`, `target <= nums[hi]`) because `nums[mid] != target` is already established — getting these inequalities right is where rotated-array solutions usually break. With **duplicates**, `nums[lo] == nums[mid]` becomes ambiguous and you must add an `lo++` fallback, degrading the worst case to O(n).
+</Callout>
+
+<ProbeNote>The one insight to lead with: "one half is always sorted." Determine which (via `nums[lo] <= nums[mid]`), test whether the target lies within that sorted half's range, and shrink. Mention the duplicates variant (Search in Rotated Sorted Array II) drops to O(n) worst case because equal endpoints destroy the "which half is sorted" signal.</ProbeNote>

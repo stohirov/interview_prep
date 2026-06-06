@@ -1,0 +1,41 @@
+## Time budgeting a 60-minute round
+
+A typical HLD round is 45–60 minutes, of which the interviewer usually reserves the first ~5 for introductions and the last ~5 for your questions — leaving roughly **50 minutes of design time**. Most candidates who fail do so not because they lacked knowledge but because they mismanaged the clock: 25 minutes on the data model, then no time for the deep dive that actually scores senior.
+
+### A workable budget (50 design minutes)
+
+| Phase | Time | What you produce |
+|---|---|---|
+| Requirements & clarification | ~8 min | Functional + non-functional + scale, scope cut |
+| Capacity estimation | ~7 min | DAU → QPS → storage → bandwidth; what it forces |
+| High-level design | ~15 min | Box diagram, API contract, data model |
+| Deep dive(s) | ~15–18 min | 1–2 hard parts, failure modes, trade-offs |
+| Wrap-up | ~3–5 min | Recap, bottlenecks, "what I'd do next" |
+
+<Diagram caption="Where the 50 minutes go">{`
+| Requirements |  Est  |    High-level design    |      Deep dive       | Wrap |
+|    ~8 min    | ~7 min |        ~15 min          |       ~15-18 min     | ~5min|
+0------------8-------15------------------30---------------------48--------53
+`}</Diagram>
+
+### Rules that keep you on time
+
+- **Time-box visibly.** "I've spent enough on the data model; let me move to the deep dive." This narration is itself a senior signal — it shows self-awareness about scope.
+- **Reserve half the clock for the deep dive.** The first half (requirements → high-level design) is table stakes; the deep dive is where you differentiate. Don't let the diagram eat it.
+- **Let the interviewer steer.** They will often interrupt to redirect you. Follow them — they are pointing you at what they want to score. Fighting the redirect wastes time.
+- **Don't gold-plate the API.** Three or four representative endpoints are plenty. Listing every CRUD route burns minutes for no signal.
+- **Park tangents.** "I'll note rate limiting as a follow-up and come back if we have time." Acknowledging without diving keeps momentum.
+
+<Callout kind="warn" title="The two most common time sinks">
+(1) Over-detailing the API or schema — you don't need every field. (2) Going deep on a component the interviewer didn't ask about. Both eat the deep-dive budget where senior signal actually lives.
+</Callout>
+
+### Style differences
+
+- **FAANG** — expect the interviewer to spend most of the round in the deep dive and to drive it. Budget accordingly; get through requirements and high-level design briskly so there's room.
+- **EU / contracting** — more conversational; they may linger on trade-offs and cost. Leave slack to discuss alternatives.
+- **Regional (EPAM / Uzum)** — they often want a complete, clean walk-through of the high-level design and schema, so don't shortchange that phase to chase a deep dive they didn't ask for.
+
+<ProbeNote>
+The interviewer is assessing whether you can prioritize under time pressure — the same skill the job needs. Announcing your plan ("I'll spend about 15 minutes here, then move on") and sticking to it signals that you scope and ship rather than perfect one corner.
+</ProbeNote>

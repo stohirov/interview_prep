@@ -1,0 +1,39 @@
+"Find the **K largest** (or smallest, or most frequent) elements" is a pattern, not a one-off. The reflex answer — sort everything and take the first `k` — is O(n log n). When `k ≪ n`, a **heap of size k** does it in **O(n log k)**, and works on a stream you can't fully hold in memory.
+
+## The counterintuitive part: use a MIN-heap for the K LARGEST
+
+To track the K *largest*, keep a **min-heap of size k**. Its root is the *smallest of your current winners* — the weakest survivor. For each new element:
+
+- if the heap has fewer than `k`, add it;
+- otherwise, if the new element beats the root (the weakest winner), evict the root and add the new one.
+
+What remains is exactly the K largest. (For the K *smallest*, mirror it with a max-heap.)
+
+<Diagram caption="Min-heap of size k=3 tracking the largest seen so far.">{`  stream: 5 1 8 3 9 ...
+  heap (min, size 3):  [5,8,9]   root = 5 = weakest winner
+  next = 3  ->  3 < 5, ignore
+  next = 7  ->  7 > 5, evict 5, insert 7  ->  [7,8,9]`}</Diagram>
+
+```java
+int[] kLargest(int[] nums, int k) {
+    PriorityQueue<Integer> heap = new PriorityQueue<>();  // MIN-heap of size k
+    for (int x : nums) {
+        heap.offer(x);
+        if (heap.size() > k) heap.poll();   // drop the weakest winner
+    }
+    int[] out = new int[k];
+    for (int i = k - 1; i >= 0; i--) out[i] = heap.poll();  // ascending
+    return out;
+}
+```
+
+## Why O(n log k) beats sorting
+
+Each of `n` elements does at most one O(log k) offer/poll. The heap never exceeds `k`, so memory is O(k), not O(n) — decisive for huge or streaming inputs. Full sort is O(n log n) time and O(n) space, wasteful when you only want a few.
+
+## When NOT to use it
+
+- **k ≈ n:** O(n log k) ≈ O(n log n) — just sort.
+- **Bounded keys / frequencies:** QuickSelect (O(n) average) or bucket sort (O(n)) can beat the heap; volunteer these as alternatives.
+
+<ProbeNote>The signature insight interviewers listen for: *min-heap for the K largest* (root = weakest winner you'd evict). State O(n log k) time, O(k) space, and the streaming advantage. Then mention QuickSelect (O(n) avg, in-memory) and bucket sort (bounded keys) as the cases where you'd skip the heap.</ProbeNote>

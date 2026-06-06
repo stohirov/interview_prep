@@ -1,0 +1,47 @@
+**Problem.** Given the head of a linked list, determine whether it contains a cycle, and if so return the node where the cycle begins (else `null`).
+
+## Brute force — O(n) time, O(n) space
+
+Walk the list, storing each visited node in a `HashSet`. The first node you see twice is the cycle's entry; if you reach `null`, there is no cycle.
+
+```java
+ListNode detectCycleSet(ListNode head) {
+    Set<ListNode> seen = new HashSet<>();
+    for (ListNode n = head; n != null; n = n.next)
+        if (!seen.add(n)) return n;   // add returns false if already present
+    return null;
+}
+```
+
+Correct and easy, but O(n) extra space.
+
+## Optimal — Floyd's two-pointer, O(n) time, O(1) space
+
+First detect the cycle with tortoise (`+1`) and hare (`+2`). If they meet, there is a cycle. Then reset one pointer to the head and advance both one step at a time: they meet at the entry, because the head-to-entry distance equals the meeting-point-to-entry distance (see q03 for the `a = k·c − b` derivation).
+
+```java
+ListNode detectCycle(ListNode head) {
+    ListNode slow = head, fast = head;
+    while (fast != null && fast.next != null) {
+        slow = slow.next;            // +1
+        fast = fast.next.next;       // +2
+        if (slow == fast) {          // cycle confirmed
+            ListNode p = head;
+            while (p != slow) {      // walk both at +1 until they meet
+                p = p.next;
+                slow = slow.next;
+            }
+            return p;                // cycle entry
+        }
+    }
+    return null;                     // fast hit null → no cycle
+}
+```
+
+<Callout kind="warn" title="Loop guard">
+The condition must be `fast != null && fast.next != null` and in that order — short-circuit evaluation prevents a `NullPointerException` when `fast` is already `null`. Checking only `fast.next` crashes on an even-length acyclic list.
+</Callout>
+
+<ProbeNote>
+State both solutions and lead with the space difference: HashSet is O(n) space, Floyd's is O(1). The "find the start" half is the real test — if you can only detect presence, you have done half the question. Compare node identity (`==`), never values; values can repeat without a cycle.
+</ProbeNote>

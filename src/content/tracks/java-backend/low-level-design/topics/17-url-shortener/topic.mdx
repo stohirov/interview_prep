@@ -1,0 +1,17 @@
+A **URL shortener** (TinyURL, bit.ly) maps a long URL to a short, unique code and back again. As a full system it is a famous HLD problem — billions of redirects, global low-latency reads, sharded storage. This topic is deliberately the **LLD slice**: the class model and, above all, the **encoding strategy** that turns an ID into a short code. Scaling, caching, and geo-distribution are deferred to the **HLD module**.
+
+That focus is exactly what makes it a good class-design exercise. The interesting decision — how do you generate the short code? — has three textbook answers (counter + base62, random/hash, or a hybrid), each with a different collision profile, so it maps cleanly onto the **Strategy pattern**.
+
+## What the interviewer is testing
+
+- Can you separate the three concerns: **encoding** (id → code), **storage** (the repository), and **orchestration** (the service)?
+- Do you understand why **base62 over an incrementing counter** is collision-free, while **hashing the URL** is not — and how you'd handle the collision when it happens?
+- Can you keep the design extensible so a new encoding scheme (or custom aliases) drops in without rewriting the service?
+
+## How to frame it
+
+Start by **clarifying scope**: read-heavy (redirects ≫ creations), short-code length and alphabet, whether custom aliases and expiration are in scope, and that horizontal scaling is an HLD concern you'll name but not design here.
+
+Then drive the flow: **shorten(longUrl) → IDGenerator produces a unique id → EncoderStrategy turns it into a code → repository stores code ↔ longUrl → return code.** Resolution is the reverse: **resolve(code) → repository lookup → longUrl (or 404/expired).** Put encoding behind an `EncoderStrategy` interface, make the `URLShortener` service a **Singleton** (or a Spring bean), and use a small **Factory** to select the strategy by configuration.
+
+The senior move is to be precise about collisions: a counter-driven base62 encoder is unique by construction (the id is unique), whereas a hash/random encoder needs a uniqueness check and a retry-with-salt loop. Saying that out loud separates you from candidates who hash and hope.

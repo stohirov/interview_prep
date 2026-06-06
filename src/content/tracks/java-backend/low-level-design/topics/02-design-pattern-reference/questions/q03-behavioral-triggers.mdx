@@ -1,0 +1,104 @@
+Behavioral patterns answer "how do objects interact and divide responsibility?" These are the workhorses of LLD rounds — Strategy, Observer, and State appear in a majority of the classic problems. (Full theory: OOP module's *behavioral patterns* topic.)
+
+## Quick map
+
+| Pattern | LLD trigger phrase | Reach for it when |
+| --- | --- | --- |
+| **Strategy** | "the *algorithm* varies (pricing, matching, eviction)" | Interchangeable algorithms, chosen at runtime |
+| **Observer** | "*notify* many parties when something changes" | One-to-many event broadcast |
+| **State** | "behavior depends on *which state* it's in" | An object with a lifecycle / state machine |
+| **Template Method** | "same *skeleton*, steps differ per subtype" | Fixed algorithm, pluggable steps |
+| **Command** | "*encapsulate a request* for queue/undo/log" | Actions as first-class objects |
+| **Chain of Responsibility** | "pass a request along until someone *handles* it" | Ordered handlers, fallback, pipelines |
+
+## Strategy — swappable algorithm
+
+The most common LLD pattern. Trigger: "pricing can be hourly or flat," "eviction is LRU or LFU," "matching is nearest or surge."
+
+```java
+interface PricingStrategy { double price(Ticket t, Instant exit); }
+class HourlyPricing  implements PricingStrategy { /* ... */ }
+class WeekendPricing implements PricingStrategy { /* ... */ }
+
+class ParkingLot {
+    private PricingStrategy pricing;          // injected, swappable
+    void setPricing(PricingStrategy p) { this.pricing = p; }
+}
+```
+
+## Observer — broadcast on change
+
+Trigger: "displays / waiting users should be notified when a spot frees up."
+
+```java
+interface SpotObserver { void onAvailable(SpotType type); }
+class Floor {
+    private final List<SpotObserver> observers = new CopyOnWriteArrayList<>();
+    void release(Spot s) {
+        s.free();
+        observers.forEach(o -> o.onAvailable(s.type()));   // notify all
+    }
+}
+```
+
+## State — behavior per lifecycle stage
+
+Trigger: "a vending machine is Idle / HasMoney / Dispensing" or "an order is Placed / Paid / Shipped." Replaces a giant `switch(state)`.
+
+```java
+interface VendingState { VendingState insertCoin(); VendingState dispense(); }
+class IdleState     implements VendingState { /* coin -> HasMoneyState */ }
+class HasMoneyState implements VendingState { /* dispense -> IdleState */ }
+
+class VendingMachine {
+    private VendingState state = new IdleState();
+    void insertCoin() { state = state.insertCoin(); }   // transition
+}
+```
+
+## Template Method — fixed skeleton, varied steps
+
+Trigger: "every report does load → process → format, but each type formats differently."
+
+```java
+abstract class ReportGenerator {
+    final void generate() { load(); process(); format(); }  // fixed order
+    abstract void format();                                  // subclass varies this
+    void load() { /* shared */ }  void process() { /* shared */ }
+}
+```
+
+## Command — request as an object
+
+Trigger: "undo/redo," "queue the action," "log and replay." Each action becomes an object with `execute()`/`undo()`.
+
+```java
+interface Command { void execute(); void undo(); }
+class MoveCommand implements Command {
+    public void execute() { piece.moveTo(target); }
+    public void undo()    { piece.moveTo(origin); }
+}   // a Stack<Command> gives you undo
+```
+
+## Chain of Responsibility — pass until handled
+
+Trigger: "try email, then SMS, then push," "dispense $100s then $50s then $20s," "auth → rate-limit → log."
+
+```java
+abstract class Handler {
+    protected Handler next;
+    Handler setNext(Handler n) { this.next = n; return n; }
+    void handle(Request r) {
+        if (canHandle(r)) process(r);
+        else if (next != null) next.handle(r);   // pass along
+    }
+}
+```
+
+<Callout kind="info" title="Strategy vs State — the classic confusion">
+Both swap an object that implements an interface. **Strategy** is chosen by the *client* and usually doesn't change itself. **State** transitions *itself* to the next state based on events, and the object's behavior changes as a side effect. If the object decides its own next behavior, it's State.
+</Callout>
+
+<ProbeNote>
+Strategy, Observer, and State are the highest-yield patterns to have at your fingertips — they cover pricing/allocation, notifications, and lifecycle machines, which appear across the parking lot, elevator, vending machine, and booking problems. Naming the right one with its trigger phrase is a fast, reliable senior signal.
+</ProbeNote>

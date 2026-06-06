@@ -1,0 +1,29 @@
+Three recurring phrasings each point at a specific structure. Recognizing them instantly is the skill being tested.
+
+## The decision table
+
+<ComplexityTable rows={[
+  {op: "When you see…", best: "…use", average: "Complexity", worst: "Note"},
+  {op: "K-th largest / smallest (static array)", best: "QuickSelect or heap of size K", average: "O(n) avg / O(n log k)", worst: "QuickSelect O(n²) worst"},
+  {op: "Top-K from a stream", best: "min-heap of size K", average: "O(n log k)", worst: "can't QuickSelect a stream"},
+  {op: "Running / streaming median", best: "two heaps (max-heap + min-heap)", average: "O(log n) per insert", worst: "rebalance after each add"},
+  {op: "Find a cycle / cycle start", best: "Floyd's tortoise & hare", average: "O(n) time, O(1) space", worst: "or hash set if space is free"},
+]} />
+
+## K-th largest / smallest
+
+- **Static array, one query:** **QuickSelect** — partition like QuickSort but recurse into only the side containing the k-th element, O(n) average. Or a **heap of size K**: O(n log k), with a worst case better than QuickSelect's O(n²).
+- **The choice:** QuickSelect when you can mutate the array and want best average time; heap when input streams in or you want a guaranteed bound.
+
+## Running median
+
+- **Two heaps:** a **max-heap** holding the smaller half and a **min-heap** holding the larger half, kept balanced in size. The median is the top of the larger heap (odd count) or the average of both tops (even count). Each insert is O(log n); read is O(1).
+- The cue is **"median that updates as data arrives"** — a single sorted structure would be O(n) per insert; two heaps make it O(log n).
+
+## Find the cycle
+
+- **Floyd's tortoise and hare:** slow pointer moves one step, fast moves two; they meet inside the cycle. To find the cycle's *start*, reset one pointer to the head and advance both one step until they meet again. O(n) time, **O(1) space**.
+- Applies to linked lists *and* implicit sequences (Happy Number, Find the Duplicate Number — where array values are treated as next-pointers).
+- A hash set also detects cycles in O(n) time but O(n) space — use it only when space is cheap and code clarity matters.
+
+<ProbeNote>These three phrasings are near-instant tells. The senior nuances: QuickSelect (O(n) avg, mutates) vs heap (O(n log k), streaming-safe) for k-th element; two heaps with size-balancing for running median; and Floyd's for O(1)-space cycle detection — including the "reset to head" trick to locate the cycle *start*, which extends to Find the Duplicate Number.</ProbeNote>

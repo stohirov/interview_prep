@@ -1,0 +1,26 @@
+A\* is **Dijkstra with a sense of direction**. Both pull the most promising frontier node from a priority queue and relax its neighbors. The only difference is the **priority key**:
+
+- **Dijkstra** orders by `g(n)` — the cheapest known cost *from the source* to `n`. It expands outward uniformly in every direction, like a circle growing around the start.
+- **A\*** orders by `f(n) = g(n) + h(n)`, where `h(n)` is a **heuristic estimate** of the cost remaining *to the target*. It biases the search toward the goal, expanding an ellipse stretched along the source→target axis.
+
+When `h(n) = 0` for all nodes, A\* **degenerates exactly into Dijkstra**.
+
+## When the heuristic helps
+
+A\* shines when you have **one target** and a cheap, informative estimate of remaining cost. On a grid or map, **straight-line (Euclidean) or Manhattan distance** is a natural `h` — it never exaggerates, so it is safe, yet it sharply prunes the frontier. The result is the same optimal path while touching far fewer nodes. This is why game and map pathfinding use A\*, not Dijkstra.
+
+## Correctness conditions
+
+- **Admissible** — `h(n)` never *overestimates* the true remaining cost. Guarantees A\* returns an **optimal** path.
+- **Consistent (monotone)** — `h(n) ≤ cost(n, m) + h(m)` for every edge. Guarantees each node is settled **once** (no reopening), so A\* stays efficient.
+
+An inadmissible heuristic makes A\* faster but can return a **suboptimal** path. A heuristic of 0 is trivially admissible — that is the Dijkstra fallback.
+
+## When Dijkstra is the better choice
+
+- **No good heuristic exists** — abstract graphs (social networks, dependency graphs) have no geometric distance to estimate from, so `h` would be 0 and A\* buys nothing.
+- **You need many targets / all distances** from the source — A\*'s goal bias is wasted; Dijkstra computes them all in one run.
+
+<ProbeNote>
+Lead with "A\* is Dijkstra plus a heuristic; key is f = g + h." Define **admissible** (optimality) and **consistent** (no reopen) precisely — interviewers probe whether you know an overestimating heuristic sacrifices optimality. Closing point: A\* needs a single goal *and* a meaningful distance estimate; without both, use Dijkstra.
+</ProbeNote>

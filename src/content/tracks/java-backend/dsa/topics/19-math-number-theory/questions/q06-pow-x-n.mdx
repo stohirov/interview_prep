@@ -1,0 +1,56 @@
+**Problem.** Implement `pow(x, n)` computing `x` raised to the integer power `n`, handling **negative exponents** and the **`Integer.MIN_VALUE` overflow** trap.
+
+## Naive — O(n)
+
+Multiply `x` by itself `n` times. For `n` up to `2^31` this times out — the interview wants the O(log n) version.
+
+## Binary exponentiation — O(log n)
+
+Square the base while halving the exponent, accumulating into the result when the current exponent bit is `1`:
+
+```java
+double myPow(double x, int n) {
+    long exp = n;                 // widen FIRST: -Integer.MIN_VALUE overflows int
+    if (exp < 0) {
+        x = 1 / x;                // x^(-n) = (1/x)^n
+        exp = -exp;
+    }
+    double result = 1.0;
+    while (exp > 0) {
+        if ((exp & 1) == 1)       // current bit set -> fold base into result
+            result *= x;
+        x *= x;                   // square base for the next bit
+        exp >>= 1;
+    }
+    return result;
+}
+```
+
+Each iteration consumes one bit of `exp`, so it runs in **O(log n)** multiplications.
+
+## The overflow trap — why `long exp = n` comes first
+
+`Integer.MIN_VALUE` is `-2^31`, but `Integer.MAX_VALUE` is only `2^31 - 1`. So `-Integer.MIN_VALUE` **overflows `int`** — it can't be represented. If you negate `n` while it's still an `int`, the code silently breaks for that one input. Widening to `long` *before* negating avoids it entirely. This is the single most-tested detail in this problem.
+
+## Negative-exponent handling
+
+`x^(-n) = (1/x)^n`. Invert the base once, flip the exponent's sign, and the same loop handles it. (`x = 0` with a negative exponent is undefined/infinity — clarify with the interviewer if it's in scope.)
+
+## Recursive alternative
+
+```java
+double myPow(double x, long n) {
+    if (n == 0) return 1.0;
+    double half = myPow(x, n / 2);
+    return (n % 2 == 0) ? half * half : half * half * x;
+}
+```
+
+Same O(log n) but uses O(log n) stack; the iterative version is O(1) space and the safer default.
+
+<ComplexityTable rows={[
+  {op: "Naive multiply", best: "O(n)", average: "O(n)", worst: "O(n)", note: "times out for large n"},
+  {op: "Binary exponentiation", best: "O(log n)", average: "O(log n)", worst: "O(log n)", note: "O(1) space iterative"},
+]} />
+
+<ProbeNote>The `Integer.MIN_VALUE` negation overflow is *the* gotcha — widen to `long` before flipping the sign and the interviewer relaxes. Also be ready for the floating-point follow-up (`x^(-n) = (1/x)^n` introduces rounding) and to discuss `x = 0`, negative-exponent edge behavior. State the O(log n) bound and the bit-walking intuition.</ProbeNote>

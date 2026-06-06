@@ -1,0 +1,60 @@
+## Consistent hashing — the problem it solves, and virtual nodes
+
+### The problem with naive hash sharding
+
+The obvious way to map a key to one of N shards is `shard = hash(key) mod N`. It distributes load evenly — until N changes. **Adding or removing one node changes N, so almost every key remaps to a different shard.** With `mod 4 → mod 5`, roughly 80% of keys move. For a distributed cache that means a near-total cache miss storm; for a database it means moving nearly all the data. Rebalancing should touch a *small* fraction of keys, not most of them.
+
+### The idea: a hash ring
+
+**Consistent hashing** maps both keys *and* nodes onto the same circular hash space (say, 0 to 2³²−1). To find which node owns a key, hash the key and **walk clockwise to the first node** you hit.
+
+<Mermaid caption="Consistent hashing ring: each key is owned by the next node clockwise">{`graph TB
+    K1[key A] --> N1((Node 1))
+    N1 --> N2((Node 2))
+    N2 --> N3((Node 3))
+    N3 --> N1
+    K2[key B] --> N2
+    K3[key C] --> N3`}</Mermaid>
+
+The payoff: when a node is **added**, it only takes over the keys between it and the previous node on the ring; when a node is **removed**, only its keys move to the next node clockwise. **On average just K/N keys move** (K = total keys), instead of nearly all of them.
+
+<Diagram caption="Adding Node 4 only steals the arc between Node 3 and Node 4 — every other key stays put">{`
+   Before:        After adding Node 4:
+
+      N1                 N1
+     /  \\               /  \\
+   N3 -- N2           N3 -- N2
+                        \\
+                         N4   <- only keys in (N3 .. N4] move to N4
+`}</Diagram>
+
+### The problem consistent hashing still has — and virtual nodes
+
+Plain consistent hashing has two weaknesses: with few nodes, the ring positions are **uneven**, so one node may own a much larger arc (and thus more load) than another; and when a node fails, **all** its load dumps onto its single clockwise neighbor.
+
+**Virtual nodes (vnodes)** fix both. Instead of placing each physical node once, place it at **many** positions on the ring (e.g., 100–256 virtual points per physical node, by hashing `node-id#0`, `node-id#1`, …).
+
+<Diagram caption="Each physical node owns many small arcs scattered around the ring">{`
+   Ring with virtual nodes (A, B, C = physical nodes):
+
+        A  C  B  A  B  C  A  C  B  A  B  C
+       (each physical node appears many times, arcs interleaved)
+
+   - Load evens out: many small arcs average to ~equal share per node.
+   - On failure of A: A's many arcs are inherited by MANY different
+     neighbors, spreading the recovery load instead of dumping it on one.
+`}</Diagram>
+
+Benefits of vnodes:
+
+- **Even load** — many small arcs average out, so each physical node gets ~equal share.
+- **Graceful failure** — a failed node's arcs are scattered, so its load is redistributed across *many* survivors, not piled on one.
+- **Heterogeneous capacity** — give a bigger machine more virtual nodes to take proportionally more load.
+
+### Where it's used
+
+Consistent hashing with virtual nodes underpins **Amazon Dynamo / DynamoDB, Cassandra, Riak, memcached client sharding (ketama), and many load balancers** for cache-aware routing. It's the standard answer for "how do you shard a distributed cache or KV store so resharding is cheap?"
+
+<ProbeNote>
+The interviewer wants two things: (1) the *problem* — `hash mod N` remaps almost everything when N changes (cache stampede / massive data movement), and consistent hashing limits movement to ~K/N keys; and (2) *virtual nodes* — why one ring position per node gives uneven load and concentrated failure recovery, and how many vnodes per physical node fix distribution, spread failure load, and allow weighting by capacity. This is a very common Amazon/Google question.
+</ProbeNote>

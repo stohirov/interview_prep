@@ -1,0 +1,32 @@
+A good hash function makes the table behave as if keys were placed in random buckets. Three properties matter.
+
+## 1. Uniform distribution
+
+Every bucket should be equally likely for a random key. Uniformity is what keeps the **expected chain length** at ~1 and lookups at O(1). A skewed hash piles keys into a few buckets, and those buckets degrade toward O(k) (or O(log k) once Java treeifies). Uniformity must hold *for your actual key distribution*, not just in theory — hashing sequential integers with `hashCode() = value` is "uniform" mathematically but maps `0,16,32,48…` all to bucket 0 in a 16-slot table.
+
+## 2. Avalanche effect
+
+Flipping a **single input bit** should flip about **half the output bits**, with the change uncorrelated to the input. Avalanche is what destroys patterns in structured keys (incrementing IDs, similar strings) so that near-identical keys scatter to unrelated buckets instead of clustering.
+
+## 3. Determinism and speed
+
+Same input → same hash, every time (otherwise lookups break), and it must be cheap — a hash that costs more than the lookup it saves is pointless. This is also why cryptographic hashes (SHA-256) are the wrong tool for a `HashMap`: strong avalanche but far too slow.
+
+## Why HashMap mixes the high bits
+
+`HashMap` does not trust your `hashCode()` to avalanche. The bucket index only uses the **low** bits (`(n-1) & hash`), so a `hashCode()` whose entropy lives in the high bits would collide constantly. The fix is one cheap line:
+
+```java
+static final int hash(Object key) {
+    int h;
+    return (key == null) ? 0 : (h = key.hashCode()) ^ (h >>> 16);
+}
+```
+
+XOR-ing the top 16 bits into the bottom 16 spreads high-bit entropy down into the bits that actually choose the bucket — a poor man's avalanche that costs a shift and an XOR.
+
+<Callout kind="warn" title="The equals/hashCode contract">
+Equal objects must produce equal hashes (`a.equals(b)` ⇒ `a.hashCode() == b.hashCode()`). Break this and a key you `put` becomes unfindable on `get` — it hashes to a different bucket. The reverse need not hold: unequal objects *may* share a hash (a collision), which is fine.
+</Callout>
+
+<ProbeNote>Interviewers want "uniform distribution" and "avalanche" named explicitly, plus the insight that `HashMap` defends against weak `hashCode()`s by mixing high bits down because the index masks off the high bits. A great follow-up answer: cryptographic strength is unnecessary and too slow here — you want fast diffusion, not security.</ProbeNote>

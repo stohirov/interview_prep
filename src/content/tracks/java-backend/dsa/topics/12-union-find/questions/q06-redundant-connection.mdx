@@ -1,0 +1,42 @@
+**Problem.** A graph started as a tree on `n` nodes (`1..n`) and had **one extra edge** added, creating exactly one cycle. Given the edges in input order, return the edge that can be removed so the result is a tree — if multiple qualify, return the **last** one in the input. This is **undirected cycle detection**: the redundant edge is the one whose two endpoints are *already connected* when we reach it.
+
+## Brute force — rebuild and DFS per edge, O(n²)
+
+For each edge, build the graph without it and check that the rest is a connected acyclic tree via DFS. Correct but quadratic — and union-find detects the offending edge in a single linear pass.
+
+## Optimal — union-find, O(n · α(n)) time, O(n) space
+
+Process edges left to right, unioning endpoints. The **first** edge whose endpoints already share a root is the cycle-closing edge — and because we scan in input order, it is automatically the *last* such edge in any answer set (there is only one extra edge, so there is exactly one cycle).
+
+```java
+public int[] findRedundantConnection(int[][] edges) {
+    int n = edges.length;                          // nodes are 1..n
+    int[] parent = new int[n + 1];
+    for (int i = 1; i <= n; i++) parent[i] = i;
+
+    for (int[] e : edges) {
+        int ra = find(parent, e[0]), rb = find(parent, e[1]);
+        if (ra == rb) return e;                    // endpoints already joined -> cycle
+        parent[rb] = ra;                           // otherwise merge
+    }
+    return new int[0];                             // unreachable per constraints
+}
+
+private int find(int[] parent, int x) {
+    while (parent[x] != x) {
+        parent[x] = parent[parent[x]];             // path halving
+        x = parent[x];
+    }
+    return x;
+}
+```
+
+Returning `e` the moment `union` would fail gives the correct edge directly. Note the **1-based** node labels: the parent array is sized `n + 1` and initialized from index 1.
+
+## Why "the last one" is automatic
+
+The graph is a tree plus one edge, so there is **exactly one** cycle. The redundant edge is whichever cycle edge appears latest in the input — and scanning in order, the first `union` that fails is precisely that edge, because every earlier edge of the cycle successfully merged distinct components.
+
+<ProbeNote>
+Frame it as undirected cycle detection: the answer is the edge that fails `union`. Mention the 1-based indexing (size `n + 1`). The "return the last" tie-break is satisfied for free by left-to-right scanning given the single-cycle guarantee — be ready to justify that. The directed variant (Redundant Connection II) is a harder follow-up involving in-degree-2 handling.
+</ProbeNote>

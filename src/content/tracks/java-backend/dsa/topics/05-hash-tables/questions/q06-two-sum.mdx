@@ -1,0 +1,43 @@
+**Problem.** Given an array `nums` and a target `t`, return the indices of the two numbers that add up to `t`. Exactly one solution exists, and you may not use the same element twice.
+
+## Brute force — O(n²) time, O(1) space
+
+Check every pair:
+
+```java
+int[] twoSumBrute(int[] nums, int t) {
+    for (int i = 0; i < nums.length; i++)
+        for (int j = i + 1; j < nums.length; j++)
+            if (nums[i] + nums[j] == t) return new int[] {i, j};
+    return new int[0];
+}
+```
+
+Correct, but the nested loop is quadratic — too slow for large inputs.
+
+## Optimal — O(n) time, O(n) space
+
+The insight: for each element `x`, its partner is `t - x`. Instead of *searching* for the partner, store everything you've seen in a hash map (`value → index`) and look the partner up in O(1). One pass:
+
+```java
+int[] twoSum(int[] nums, int t) {
+    Map<Integer, Integer> seen = new HashMap<>();
+    for (int i = 0; i < nums.length; i++) {
+        int need = t - nums[i];
+        Integer j = seen.get(need);
+        if (j != null) return new int[] {j, i};   // partner already seen
+        seen.put(nums[i], i);                      // remember current
+    }
+    return new int[0];
+}
+```
+
+We check *before* inserting, which automatically prevents reusing the same element. The nested loop collapsed into a single pass because the hash map turned the inner "find the partner" search from O(n) into O(1).
+
+<Callout kind="tip" title="Why this is the canonical hash-map problem">
+"Trade space for a constant-time lookup to remove a nested loop" is the move behind Group Anagrams, Subarray Sum = K, Longest Consecutive Sequence, and dozens more. Two Sum is where you internalize it.
+</Callout>
+
+<ProbeNote>
+Edge cases the interviewer watches for: duplicates (`[3,3]`, target `6` — checking before inserting handles it), no solution, and negative numbers (a `HashMap` handles them fine; an array-indexed counter would not). They also want to hear you say "O(n) time, O(n) space" out loud and justify the space trade-off.
+</ProbeNote>

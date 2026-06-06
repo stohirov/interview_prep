@@ -1,0 +1,71 @@
+Creational patterns answer "how do I build this object?" Reach for one when construction is non-trivial: it varies by type, has many optional parameters, or must be controlled. (For full theory, see the OOP module's *creational patterns* topic.)
+
+## Quick map
+
+| Pattern | LLD trigger phrase | Reach for it when |
+| --- | --- | --- |
+| **Factory Method** | "create a *vehicle/spot/notification* by type" | One product hierarchy; type decided at runtime |
+| **Abstract Factory** | "create a *family* of related objects (UI for Mac vs Windows)" | Multiple related products that must stay consistent |
+| **Builder** | "an object with many optional fields / step-by-step construction" | Telescoping constructors; immutable objects |
+| **Singleton** | "one shared *manager/registry/config* for the whole system" | Exactly one instance, globally reachable |
+
+## Factory Method — type → object
+
+Centralizes creation so adding a new type touches one place, not every `new`.
+
+```java
+class VehicleFactory {
+    static Vehicle create(VehicleType type, String plate) {
+        return switch (type) {
+            case CAR        -> new Car(plate);
+            case MOTORCYCLE -> new Motorcycle(plate);
+            case TRUCK      -> new Truck(plate);
+        };
+    }
+}
+```
+
+## Abstract Factory — family → consistent set
+
+When you must produce a whole *family* that has to match. The trigger is "related objects that vary together."
+
+```java
+interface UiFactory { Button button(); Checkbox checkbox(); }
+class MacFactory implements UiFactory {
+    public Button button()     { return new MacButton(); }
+    public Checkbox checkbox() { return new MacCheckbox(); }
+}   // WindowsFactory returns Windows widgets — never a mix
+```
+
+## Builder — many optional fields
+
+Kills telescoping constructors and pairs perfectly with immutability.
+
+```java
+Pizza p = new Pizza.Builder("medium")
+        .cheese(true).pepperoni(true).mushroom(false)
+        .build();
+```
+
+<Callout kind="tip" title="Builder is the most over-applied creational pattern">
+Only reach for Builder when the object has several optional or order-sensitive parameters. For two or three required fields, a plain constructor (or a record) is clearer.
+</Callout>
+
+## Singleton — exactly one instance
+
+Common for a `ParkingLot`, `Logger`, or config registry. The trigger is "one shared X." Be ready for the thread-safety follow-up.
+
+```java
+enum ParkingLot {            // enum = simplest thread-safe singleton
+    INSTANCE;
+    // fields + methods here
+}
+```
+
+<Callout kind="warn" title="Singleton is the most abused pattern of all">
+Singletons are global mutable state — they hurt testability and hide dependencies. Use them sparingly, and prefer the enum or Bill Pugh holder idiom for thread-safety (covered in *thread-safe singleton*). Interviewers often probe whether you know its downsides.
+</Callout>
+
+<ProbeNote>
+The signal here is restraint and justification. Saying "vehicles are created by type and new types are expected, so a factory keeps creation in one place" beats reciting the pattern. And volunteering Singleton's testability cost before the interviewer raises it is a strong senior tell.
+</ProbeNote>

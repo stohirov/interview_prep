@@ -1,0 +1,48 @@
+**Problem.** Given an `m × n` board of `'X'` and `'O'`, **capture** every region of `'O'`s that is completely surrounded by `'X'` by flipping those `'O'`s to `'X'`. A region is *not* captured if any of its cells touches the board **border**. Mutate the board in place.
+
+## The key insight — work from the border inward
+
+Instead of finding surrounded regions (hard — you'd have to prove a region never reaches the edge), find the **survivors**: any `'O'` connected to a border `'O'` is safe. Everything else is, by definition, surrounded. So:
+
+1. From every `'O'` **on the border**, flood-fill its whole region and mark it with a temporary sentinel `'#'` (these escape capture).
+2. Sweep the board: remaining `'O'`s were never reached from the border → flip them to `'X'` (captured). Restore each `'#'` back to `'O'`.
+
+This is the same border-anchored multi-source idea as Pacific-Atlantic, run once.
+
+## Approach — DFS from the border, O(m·n) time, O(m·n) space
+
+```java
+public void solve(char[][] board) {
+    if (board.length == 0) return;
+    int m = board.length, n = board[0].length;
+
+    for (int r = 0; r < m; r++) {            // left & right columns
+        mark(board, r, 0);
+        mark(board, r, n - 1);
+    }
+    for (int c = 0; c < n; c++) {            // top & bottom rows
+        mark(board, 0, c);
+        mark(board, m - 1, c);
+    }
+
+    for (int r = 0; r < m; r++)
+        for (int c = 0; c < n; c++) {
+            if (board[r][c] == 'O') board[r][c] = 'X';   // surrounded -> capture
+            else if (board[r][c] == '#') board[r][c] = 'O'; // border-connected -> restore
+        }
+}
+
+private void mark(char[][] board, int r, int c) {
+    if (r < 0 || c < 0 || r >= board.length || c >= board[0].length
+            || board[r][c] != 'O') return;   // off-grid, 'X', or already '#'
+    board[r][c] = '#';                        // sentinel: connected to border, safe
+    mark(board, r + 1, c);
+    mark(board, r - 1, c);
+    mark(board, r, c + 1);
+    mark(board, r, c - 1);
+}
+```
+
+Two linear passes plus a flood-fill that touches each cell once: **O(m·n)** time, **O(m·n)** worst-case recursion-stack space.
+
+<ProbeNote>The trick is inverting the question — it's far easier to mark the *unsurrounded* (border-reachable) cells than to verify a region is fully enclosed. The temporary `'#'` sentinel keeps the three cell states apart during the second pass; restore it at the end. Same border-anchored pattern as Pacific-Atlantic. On very large boards, switch the recursive flood-fill to a BFS queue to avoid stack overflow.</ProbeNote>

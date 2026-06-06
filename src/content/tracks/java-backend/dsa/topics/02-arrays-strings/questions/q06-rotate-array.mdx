@@ -1,0 +1,54 @@
+**Problem.** Rotate an array to the right by `k` steps, **in place** with O(1) extra space. For `[1,2,3,4,5,6,7]`, `k = 3` gives `[5,6,7,1,2,3,4]`.
+
+## Brute force — O(n) time, O(n) space
+
+Copy each element to its destination in a new array:
+
+```java
+void rotateExtra(int[] a, int k) {
+    int n = a.length;
+    k %= n;
+    int[] out = new int[n];
+    for (int i = 0; i < n; i++) out[(i + k) % n] = a[i];
+    System.arraycopy(out, 0, a, 0, n);
+}
+```
+
+Clear, but uses O(n) extra space — and a rotate-by-one-k-times approach is O(n·k), far worse.
+
+## Optimal — O(n) time, O(1) space (triple reverse)
+
+The key insight: a right-rotation by `k` splits the array into two blocks — the last `k` elements and the first `n − k` — and **swaps their order**. Reversing the whole array flips both block order *and* the internal order of each block; reversing each block back fixes the internal order. Three reversals, all in place:
+
+```java
+public void rotate(int[] a, int k) {
+    int n = a.length;
+    k %= n;                       // k may exceed n
+    if (k == 0) return;
+    reverse(a, 0, n - 1);         // whole array
+    reverse(a, 0, k - 1);         // first k
+    reverse(a, k, n - 1);         // rest
+}
+
+private void reverse(int[] a, int i, int j) {
+    while (i < j) {
+        int tmp = a[i]; a[i] = a[j]; a[j] = tmp;
+        i++; j--;
+    }
+}
+```
+
+Walking through `[1,2,3,4,5,6,7]`, `k = 3`:
+
+<Diagram caption="Triple-reverse rotation, k = 3">{`start:          1 2 3 4 5 6 7
+reverse all:    7 6 5 4 3 2 1
+reverse [0,2]:  5 6 7 4 3 2 1
+reverse [3,6]:  5 6 7 1 2 3 4   <- rotated`}</Diagram>
+
+Each element is touched a constant number of times across the three reversals → O(n) time, O(1) space.
+
+<Callout kind="warn" title="Always take k mod n">
+If `k >= n` the rotation wraps; `k %= n` normalizes it. Forgetting this is the most common bug — `reverse(a, 0, k - 1)` would go out of bounds. Note this is a *right* rotation; a left rotation by k is the same as a right rotation by `n − k`.
+</Callout>
+
+<ProbeNote>The triple-reverse trick is what they're testing — be able to explain *why* it works (reverse-all swaps the two blocks' positions; reversing each block restores internal order), not just memorize it. Must-haves: `k %= n`, the O(1)-space claim, and clarity on rotation direction. The cyclic-replacement (juggling) algorithm is an alternative O(n)/O(1) answer but is fiddlier with its gcd cycle count — reverse is cleaner to derive live.</ProbeNote>

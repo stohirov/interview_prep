@@ -1,0 +1,58 @@
+**Problem.** Given two strings, return the minimum number of single-character **insertions, deletions, or substitutions** to turn one into the other (the Levenshtein distance). `"horse" → "ros"` is 3.
+
+## The recurrence
+
+State `dp[i][j]` = min edits to convert the first `i` chars of `a` into the first `j` chars of `b`. If the last characters match, no edit is needed; otherwise take the cheapest of the three operations:
+
+```
+if a[i-1] == b[j-1]:  dp[i][j] = dp[i-1][j-1]                 // free, characters align
+else: dp[i][j] = 1 + min(
+        dp[i-1][j],      // delete a[i-1]
+        dp[i][j-1],      // insert b[j-1]
+        dp[i-1][j-1])    // substitute
+```
+
+Base cases are non-trivial: `dp[i][0] = i` (delete all `i` chars), `dp[0][j] = j` (insert all `j` chars). A naive recursion branches three ways per call → O(3^(m+n)); the DP is O(m·n).
+
+## O(m·n) tabulation
+
+```java
+int minDistance(String a, String b) {
+    int m = a.length(), n = b.length();
+    int[][] dp = new int[m + 1][n + 1];
+    for (int i = 0; i <= m; i++) dp[i][0] = i;   // delete to empty
+    for (int j = 0; j <= n; j++) dp[0][j] = j;   // insert from empty
+    for (int i = 1; i <= m; i++)
+        for (int j = 1; j <= n; j++)
+            dp[i][j] = a.charAt(i - 1) == b.charAt(j - 1)
+                ? dp[i - 1][j - 1]
+                : 1 + Math.min(dp[i - 1][j - 1],
+                      Math.min(dp[i - 1][j], dp[i][j - 1]));
+    return dp[m][n];
+}
+```
+
+## Space optimization — O(n)
+
+`dp[i][j]` reads only the previous row and the current row's left neighbor, so two 1D arrays suffice:
+
+```java
+int minDistance(String a, String b) {
+    int m = a.length(), n = b.length();
+    int[] prev = new int[n + 1], cur = new int[n + 1];
+    for (int j = 0; j <= n; j++) prev[j] = j;
+    for (int i = 1; i <= m; i++) {
+        cur[0] = i;
+        for (int j = 1; j <= n; j++)
+            cur[j] = a.charAt(i - 1) == b.charAt(j - 1)
+                ? prev[j - 1]
+                : 1 + Math.min(prev[j - 1], Math.min(prev[j], cur[j - 1]));
+        int[] tmp = prev; prev = cur; cur = tmp;
+    }
+    return prev[n];
+}
+```
+
+<ProbeNote>
+The three transitions map to concrete operations — be ready to say "this branch is a deletion, this an insertion, this a substitution." The most-missed detail is the base-case initialization (`dp[i][0]=i`, `dp[0][j]=j`); leaving them as zero is a classic bug. Real-world hooks: spell-checkers, DNA alignment (where substitution can carry a different cost), and `git diff`.
+</ProbeNote>

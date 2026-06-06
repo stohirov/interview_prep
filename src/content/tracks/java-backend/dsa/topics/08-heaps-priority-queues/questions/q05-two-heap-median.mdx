@@ -1,0 +1,43 @@
+The **median** of a stream is the middle of the sorted data. Re-sorting on every insert is O(n log n) per query; the **two-heap technique** keeps it at O(log n) insert, O(1) query by splitting the data into two balanced halves.
+
+## The idea
+
+Maintain two heaps straddling the median:
+
+- a **max-heap `lo`** holding the smaller half — its root is the *largest* of the small values,
+- a **min-heap `hi`** holding the larger half — its root is the *smallest* of the large values.
+
+The two roots are the elements nearest the middle, so the median is one of them (odd `n`) or their average (even `n`).
+
+<Diagram caption="The two roots sit on either side of the median.">{`   lo (max-heap)        hi (min-heap)
+   smaller half         larger half
+        [.. 4]   <-->   [6 ..]
+          ^                ^
+       max of lo        min of hi
+   median = avg(4, 6) = 5  (even n)
+   median = 4 if lo has one extra (odd n)`}</Diagram>
+
+## Two invariants to maintain on every insert
+
+1. **Ordering:** every element in `lo` ≤ every element in `hi`. Enforce by adding to one heap then moving its root to the other if it's out of place.
+2. **Balance:** the sizes differ by at most 1. Rebalance by moving a root across when one side grows too large.
+
+```java
+void addNum(int x, PriorityQueue<Integer> lo, PriorityQueue<Integer> hi) {
+    lo.offer(x);              // 1. push to max-heap (smaller half)
+    hi.offer(lo.poll());      // 2. funnel its largest into the min-heap -> ordering
+    if (hi.size() > lo.size())
+        lo.offer(hi.poll());  // 3. keep lo >= hi in size -> balance
+}
+double median(PriorityQueue<Integer> lo, PriorityQueue<Integer> hi) {
+    return lo.size() > hi.size()
+        ? lo.peek()                               // odd: extra sits in lo
+        : (lo.peek() + hi.peek()) / 2.0;          // even: average the roots
+}
+```
+
+## Cost
+
+Insert is O(log n) (heap offers/polls); median is O(1) (two `peek`s). Memory is O(n). This is strictly better than any sort-per-query approach and is the canonical answer to "Find Median from Data Stream."
+
+<ProbeNote>Name both invariants — *ordering* (max of lo ≤ min of hi) and *balance* (sizes within 1) — and show the add-then-funnel-then-rebalance dance that maintains them in three lines. Mention O(log n) insert / O(1) query. A common slip is averaging with integer division; use `2.0`.</ProbeNote>

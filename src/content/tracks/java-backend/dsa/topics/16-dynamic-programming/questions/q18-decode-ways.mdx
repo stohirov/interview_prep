@@ -1,0 +1,45 @@
+**Problem.** A message of digits is encoded `A→1 … Z→26`. Count how many ways it decodes. `"226" → 3` (`"BZ"`, `"VF"`, `"BBF"`). Leading zeros are invalid (`"06"` is not `6`).
+
+## Insight — a constrained Fibonacci
+
+To decode the prefix ending at position `i`, the last symbol is either:
+
+- **One digit** `s[i-1]`, valid if it is `1–9` — contributes `dp[i-1]` ways.
+- **Two digits** `s[i-2..i-1]`, valid if the pair is `10–26` — contributes `dp[i-2]` ways.
+
+```
+dp[i] = (s[i-1] valid ? dp[i-1] : 0) + (s[i-2..i-1] valid ? dp[i-2] : 0)
+```
+
+Same shape as Fibonacci, but each term is gated by a validity check. The zero rules are the whole difficulty: a `'0'` can only survive as part of `"10"` or `"20"`.
+
+## Optimal — O(n) time, O(1) space
+
+```java
+int numDecodings(String s) {
+    if (s.isEmpty() || s.charAt(0) == '0') return 0;
+    int prev2 = 1, prev1 = 1;                 // dp[0]=1 (empty), dp[1]=1 (valid first digit)
+    for (int i = 2; i <= s.length(); i++) {
+        int cur = 0;
+        char one = s.charAt(i - 1);
+        if (one != '0') cur += prev1;          // single-digit decode 1..9
+        int two = (s.charAt(i - 2) - '0') * 10 + (one - '0');
+        if (two >= 10 && two <= 26) cur += prev2;  // two-digit decode 10..26
+        prev2 = prev1;
+        prev1 = cur;
+    }
+    return prev1;
+}
+```
+
+`dp[i]` reads only the two preceding values, so two scalars replace the array.
+
+<Callout kind="warn" title="The zero traps">
+- A standalone `'0'` (e.g. `"30"`, `"100"`) is undecodable → the path dies (`cur` stays 0, returning 0 overall).
+- `"06"` ≠ `"6"`: a leading zero in a two-digit group makes it `< 10`, so the `two >= 10` guard rejects it.
+- An empty string and a string starting with `'0'` are zero ways — guard up front.
+</Callout>
+
+<ProbeNote>
+Recognizing this as "Fibonacci with validity guards" gets you to the O(1) solution fast, but the zero edge cases are where candidates lose points — walk through `"0"`, `"06"`, `"10"`, `"100"`, `"27"` explicitly. The `two >= 10` lower bound (not just `<= 26`) is what rejects leading-zero pairs. A common follow-up is `"*"` wildcards (Decode Ways II), which multiplies the counts per branch.
+</ProbeNote>

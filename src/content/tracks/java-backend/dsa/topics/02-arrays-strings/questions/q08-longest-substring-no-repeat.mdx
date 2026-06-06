@@ -1,0 +1,49 @@
+**Problem.** Given a string, find the length of the **longest substring without repeating characters**. For `"abcabcbb"` the answer is `3` (`"abc"`); for `"bbbbb"` it's `1`. *Substring* means contiguous — this is a sliding-window problem.
+
+## Brute force — O(n²) (or O(n³)) time
+
+Check every substring for uniqueness:
+
+```java
+int longestBrute(String s) {
+    int best = 0;
+    for (int i = 0; i < s.length(); i++) {
+        Set<Character> seen = new HashSet<>();
+        for (int j = i; j < s.length(); j++) {
+            if (!seen.add(s.charAt(j))) break;   // duplicate -> stop this start
+            best = Math.max(best, j - i + 1);
+        }
+    }
+    return best;
+}
+```
+
+The outer/inner loops make it O(n²) time. We recheck overlapping ranges over and over — that's the waste a sliding window removes.
+
+## Optimal — O(n) time, O(min(n, alphabet)) space
+
+A **variable-size sliding window** `[left, right]` holds the current repeat-free run. Store each character's **last seen index**. When `right` lands on a character already inside the window, jump `left` just past its previous occurrence — never backward, so the window only moves forward:
+
+```java
+public int lengthOfLongestSubstring(String s) {
+    Map<Character, Integer> lastSeen = new HashMap<>();
+    int best = 0, left = 0;
+    for (int right = 0; right < s.length(); right++) {
+        char c = s.charAt(right);
+        if (lastSeen.containsKey(c) && lastSeen.get(c) >= left) {
+            left = lastSeen.get(c) + 1;          // shrink past the duplicate
+        }
+        lastSeen.put(c, right);
+        best = Math.max(best, right - left + 1);
+    }
+    return best;
+}
+```
+
+The `lastSeen.get(c) >= left` check is the crux: a stale index *outside* the current window must be ignored, otherwise `left` could jump backward and break the invariant. Each of `left` and `right` advances at most n times → O(n) total. Space is bounded by the alphabet size (e.g. an `int[128]` indexed by ASCII can replace the map for a tighter constant).
+
+<Callout kind="tip" title="The 'jump left' optimization">
+Naively you'd contract `left` one step at a time while a duplicate exists — still O(n) amortized, and easier to reason about. Storing the last index lets `left` *jump* directly, doing it in one move. Both are O(n); the jump is the cleaner senior answer but mention the simpler shrink-loop if you want to derive it safely.
+</Callout>
+
+<ProbeNote>Key points: it's a *contiguous* substring (window), not a subsequence; the window only moves forward (`left` never decreases — the `>= left` guard enforces this); O(n) time. Watch the off-by-one in `right - left + 1` and the stale-index bug. Mentioning a fixed `int[128]`/`int[256]` array instead of a `HashMap` shows you think about constants.</ProbeNote>

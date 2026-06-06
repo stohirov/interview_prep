@@ -1,0 +1,51 @@
+**Problem.** Design an algorithm to **serialize** a binary tree to a string and **deserialize** that string back into the identical tree. Any encoding works as long as `deserialize(serialize(t))` reconstructs `t`.
+
+## Why structure alone isn't enough
+
+A single traversal of values is *ambiguous* unless you also encode the **shape** — specifically the null children. `[1, 2]` could be `1` with left child `2`, or `1` with right child `2`. The fix: emit an explicit **null marker** for every absent child. With those markers, a single preorder is enough to rebuild the tree unambiguously.
+
+## Optimal — preorder with null markers, O(n) both ways
+
+**Serialize** with preorder (node, left, right), writing a sentinel (`#`) for nulls, values separated by commas:
+
+```java
+private static final String NULL = "#", SEP = ",";
+
+String serialize(TreeNode root) {
+    StringBuilder sb = new StringBuilder();
+    buildString(root, sb);
+    return sb.toString();
+}
+private void buildString(TreeNode n, StringBuilder sb) {
+    if (n == null) { sb.append(NULL).append(SEP); return; }
+    sb.append(n.val).append(SEP);     // node
+    buildString(n.left,  sb);         // left
+    buildString(n.right, sb);         // right
+}
+```
+
+**Deserialize** by consuming tokens in the *same* preorder. A queue of tokens, read left to right, exactly replays the construction: read a value, recurse to build its left subtree, then its right.
+
+```java
+TreeNode deserialize(String data) {
+    Queue<String> tokens = new ArrayDeque<>(Arrays.asList(data.split(SEP)));
+    return build(tokens);
+}
+private TreeNode build(Queue<String> tokens) {
+    String t = tokens.poll();
+    if (NULL.equals(t)) return null;             // a null child
+    TreeNode n = new TreeNode(Integer.parseInt(t));
+    n.left  = build(tokens);                     // consume left subtree
+    n.right = build(tokens);                     // then right subtree
+    return n;
+}
+```
+
+The token order produced by serialize is precisely the order deserialize consumes — that symmetry is what makes it work. Both directions touch each node (and each null slot) once: **O(n) time**, **O(n)** for the string plus O(h) recursion.
+
+<ComplexityTable rows={[
+  {op: "Serialize (preorder)", best: "O(n)", average: "O(n)", worst: "O(n)", note: "O(n) output, O(h) stack"},
+  {op: "Deserialize (preorder)", best: "O(n)", average: "O(n)", worst: "O(n)", note: "O(n) tokens, O(h) stack"},
+]} />
+
+<ProbeNote>Lead with *why null markers are mandatory* — that one decision is the crux. BFS (level-order with markers, the LeetCode display format) is an equally valid alternative; preorder is just simpler to recurse. Edge cases: the empty tree (serializes to just `#`), single-node trees, and negative values (commas, not signs, are the delimiter, so negatives parse fine). For production, you would still prefer a robust format like protobuf over hand-rolled string splitting.</ProbeNote>

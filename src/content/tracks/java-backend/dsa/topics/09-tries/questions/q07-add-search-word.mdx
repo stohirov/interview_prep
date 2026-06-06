@@ -1,0 +1,52 @@
+**Problem.** Design a data structure with two operations: `addWord(word)` stores a word, and `search(word)` returns true if any stored word matches. The twist: a search word may contain the **wildcard `.`**, which matches **any single character**. Example: after adding `bad`, `dad`, `mad`, `search("b..")` → true, `search(".ad")` → true, `search("b.d")` → true, `search("..")` → false.
+
+## Approach — trie with DFS for the wildcard
+
+Storage is an ordinary trie — `addWord` is the standard O(L) insert. Search is where the wildcard changes things. A normal character is a deterministic step to one child. A `.` is **non-deterministic**: it could match any existing child, so search must branch and try them all. That turns lookup into a **DFS over the trie**.
+
+```java
+class WordDictionary {
+    private static class Node {
+        Node[] next = new Node[26];     // lowercase a–z
+        boolean isWord = false;
+    }
+
+    private final Node root = new Node();
+
+    void addWord(String word) {
+        Node cur = root;
+        for (char c : word.toCharArray()) {
+            int i = c - 'a';
+            if (cur.next[i] == null) cur.next[i] = new Node();
+            cur = cur.next[i];
+        }
+        cur.isWord = true;
+    }
+
+    boolean search(String word) {
+        return dfs(word, 0, root);
+    }
+
+    private boolean dfs(String word, int idx, Node node) {
+        if (node == null) return false;
+        if (idx == word.length()) return node.isWord;   // consumed all chars: must end a word
+
+        char c = word.charAt(idx);
+        if (c == '.') {                                  // wildcard: try every child
+            for (Node child : node.next)
+                if (dfs(word, idx + 1, child)) return true;
+            return false;
+        }
+        return dfs(word, idx + 1, node.next[c - 'a']);   // normal char: single deterministic step
+    }
+}
+```
+
+The recursion mirrors the two cases exactly: a concrete character descends into one child (and short-circuits to false if that child is absent); a `.` loops over all 26 children, returning true as soon as any branch succeeds. The base case `idx == word.length()` must check `isWord` — reaching a node isn't enough, a complete word must end there (so `search("ba")` is false when only `bad` was added).
+
+## Complexity
+
+- **addWord** — O(L), one node per character.
+- **search** — O(L) when the word has **no** wildcards (a single path). With wildcards it is worst-case **O(R^k · L)**, where `k` is the number of `.` characters and R the alphabet size, because each `.` can fan out to R branches. A leading `.` (like `search("...")`) is the expensive shape; concrete prefixes prune the branching fast.
+
+<ProbeNote>Frame it as: storage is a plain trie, the wildcard makes *search* a DFS because `.` is non-deterministic and must branch over all children. The two details that catch people: the base case has to check `isWord` (path existence isn't a match), and a missing child must return false rather than NPE. Quote the cost honestly — O(L) without wildcards, but exponential in the number of dots, with leading dots being the worst because nothing prunes the fan-out. The array-vs-map children choice is the same trade-off as the basic trie.</ProbeNote>

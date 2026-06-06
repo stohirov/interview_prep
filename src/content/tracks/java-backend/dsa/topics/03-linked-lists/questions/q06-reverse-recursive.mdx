@@ -1,0 +1,35 @@
+**Problem.** Reverse a singly linked list recursively and return the new head.
+
+## The idea
+
+Recursion peels off the head, reverses the *rest* of the list (trusting the recursive call), then attaches the old head to the back. The base case is an empty list or a single node — already reversed, so return it.
+
+The key move is the rewiring after the recursive call. Suppose the list is `1 → 2 → 3 → 4`. The call on `head.next` returns the head of the reversed tail (`4 → 3 → 2`), but `2`'s `next` still points at... nothing useful — we need `2 → 1`. We have `head` pointing at node `1` and `head.next` pointing at node `2`, so:
+
+- `head.next.next = head` makes `2 → 1`.
+- `head.next = null` so node `1` becomes the new tail (otherwise `1 → 2` lingers and you create a 2-node cycle).
+
+```java
+ListNode reverseList(ListNode head) {
+    if (head == null || head.next == null) return head;   // base case
+    ListNode newHead = reverseList(head.next);            // reverse the rest
+    head.next.next = head;   // the next node now points back to us
+    head.next = null;        // we become the tail
+    return newHead;          // unchanged all the way up the stack
+}
+```
+
+`newHead` is the tail of the original list and is threaded back up the call stack unchanged — every frame returns the same final head.
+
+## Complexity
+
+<ComplexityTable rows={[
+  {op: "Recursive reverse", best: "O(n)", average: "O(n)", worst: "O(n)", note: "O(n) call-stack space"},
+  {op: "Iterative reverse", best: "O(n)", average: "O(n)", worst: "O(n)", note: "O(1) space — preferred"},
+]} />
+
+O(n) time either way, but recursion costs **O(n) stack space** and risks a `StackOverflowError` on a long list. Java does not perform tail-call optimization (and this isn't tail-recursive anyway, since work happens after the call returns), so the iterative version from q05 is what you ship.
+
+<ProbeNote>
+The `head.next.next = head` line is the whole question — be able to explain it pointing at a concrete 2-node example. Mention the O(n) stack cost and Java's lack of TCO unprompted; it shows you know the recursive form is elegant but the iterative form is production-grade.
+</ProbeNote>

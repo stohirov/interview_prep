@@ -1,0 +1,39 @@
+**Problem.** Given a string `s` and a dictionary of words, return `true` if `s` can be segmented into a space-separated sequence of one or more dictionary words. `"leetcode"`, `["leet","code"] → true`. Words are reusable.
+
+## The recurrence
+
+State `dp[i]` = can the prefix `s[0..i)` be fully segmented? `dp[0] = true` (empty string). The prefix of length `i` is breakable if there is some split point `j < i` where `s[0..j)` is breakable **and** `s[j..i)` is a dictionary word:
+
+```
+dp[i] = OR over j in [0, i) of (dp[j] && dict.contains(s[j..i)))
+```
+
+A naive recursion re-segments the same prefixes exponentially — O(2ⁿ) in the worst case (`"aaaa...ab"` with dictionary `["a","aa",...]`). Memoizing on the start index, or tabulating `dp[]`, makes it polynomial.
+
+## O(n²) DP (with substring cost)
+
+```java
+boolean wordBreak(String s, List<String> wordDict) {
+    Set<String> dict = new HashSet<>(wordDict);   // O(1) membership
+    int n = s.length();
+    boolean[] dp = new boolean[n + 1];
+    dp[0] = true;
+    for (int i = 1; i <= n; i++)
+        for (int j = 0; j < i; j++)
+            if (dp[j] && dict.contains(s.substring(j, i))) {
+                dp[i] = true;
+                break;                            // one valid split is enough
+            }
+    return dp[n];
+}
+```
+
+Two nested loops give O(n²) iterations, and each `substring`/hash is O(n), so the bound is O(n³) in the strictest accounting (often quoted O(n²) treating substring as cheap). Space is O(n) plus the dictionary set.
+
+<Callout kind="tip" title="Pruning the inner loop">
+You only need to test split points `j` where `i - j` is at most the **longest dictionary word** — anything longer can't be a single word. Tracking `maxLen` shrinks the inner loop to O(maxLen) and is the standard optimization. A trie over the dictionary lets you walk characters and avoid building `substring` objects entirely.
+</Callout>
+
+<ProbeNote>
+Convert the dictionary to a `HashSet` up front — interviewers notice if you call `List.contains` (O(n)) in the inner loop. The `dp[0] = true` base case is essential and easy to forget. The natural escalation is **Word Break II** (return all segmentations), which switches from a boolean DP to memoized backtracking that builds the sentence list.
+</ProbeNote>

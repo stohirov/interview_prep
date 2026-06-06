@@ -1,0 +1,46 @@
+## State CAP correctly — and what Partition tolerance really means
+
+CAP is the most misquoted theorem in system design. Stating it correctly is a fast, reliable senior signal; repeating the popular misreading ("pick two of three") is an equally fast junior tell.
+
+### The correct statement
+
+CAP (Brewer's theorem, formalized by Gilbert and Lynch) defines three properties of a distributed data store:
+
+- **Consistency (C)** — here it means **linearizability**: every read sees the most recent write; the system behaves as if there were a single copy of the data. (This is *not* the C in ACID.)
+- **Availability (A)** — every request to a non-failing node receives a non-error response (though possibly stale).
+- **Partition tolerance (P)** — the system keeps operating despite the network dropping or delaying arbitrary messages between nodes.
+
+The theorem: **when a network partition occurs, you cannot have both C and A — you must sacrifice one.**
+
+### Why "pick two of three" is wrong
+
+The popular framing implies you choose any two of C, A, P as if they were symmetric. They are not. **Partitions are not a choice** — in any real distributed system, the network *will* eventually drop or delay messages. You cannot opt out of P. So the only genuine choice is the one you make **during a partition**: **C or A.**
+
+<Callout kind="danger" title="The trap question">
+"Can I have a CA system?" A true CA system is one that gives up partition tolerance — meaning a single node, or a system that simply stops being correct when the network splits. For any system that spans machines, **P is non-negotiable**, so "CA" is not a real operating point. Saying "I'd pick CA" is the answer interviewers are listening for to fail you.
+</Callout>
+
+### So the real choice is CP vs AP
+
+During a partition, a node that can't reach its peers must decide:
+
+<Mermaid caption="The genuine CAP decision happens only during a partition">{`graph TB
+    P{Network partition?}
+    P -->|No| Normal[Serve normally]
+    P -->|Yes| Choose{C or A?}
+    Choose -->|CP: choose Consistency| Reject[Reject / block requests<br/>on the minority side]
+    Choose -->|AP: choose Availability| Serve[Serve possibly-stale data,<br/>reconcile later]`}</Mermaid>
+
+- **CP (consistency under partition)** — the minority side refuses to serve (returns errors or blocks) rather than risk returning stale or divergent data. Examples: ZooKeeper, etcd, HBase, a single-leader RDBMS that won't accept writes without a quorum.
+- **AP (availability under partition)** — every node keeps serving, accepting that copies diverge and must be reconciled when the partition heals. Examples: Cassandra, DynamoDB (in its eventually-consistent mode), Riak.
+
+### Two clarifications that earn points
+
+- **CAP's C is linearizability, not ACID's C.** Conflating them is a common error. ACID's C is "transactions preserve invariants"; CAP's C is "single-copy freshness."
+- **It's a spectrum, not a binary.** Most real systems are tunable — DynamoDB can do strong or eventual reads; quorum stores let you trade C and A per request via W and R. CAP describes the limit, not a permanent product label.
+
+This is exactly the precision Kleppmann insists on in **DDIA Chapter 9**, which argues CAP is too narrow to be a design tool and that linearizability plus PACELC is the more useful framing.
+
+<ProbeNote>
+The interviewer wants to hear "P is mandatory, so the choice is C vs A during a partition," and ideally that CAP's C means linearizability. Bonus signal: noting that real systems are tunable and that the more interesting trade-off (latency vs consistency in normal operation) is what PACELC captures.
+</ProbeNote>

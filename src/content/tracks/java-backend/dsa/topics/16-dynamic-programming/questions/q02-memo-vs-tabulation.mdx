@@ -1,0 +1,43 @@
+Both compute the same answers and share the same asymptotic complexity. They differ in *how* the cache is filled — and that has real engineering consequences.
+
+## Top-down memoization
+
+Write the natural recursion, then add a cache keyed by state. Computation is **lazy**: only the states you actually reach get evaluated.
+
+```java
+int[] memo;
+int rob(int[] nums, int i) {
+    if (i < 0) return 0;
+    if (memo[i] != -1) return memo[i];
+    return memo[i] = Math.max(rob(nums, i - 1), nums[i] + rob(nums, i - 2));
+}
+```
+
+**Pros:** mirrors the recurrence almost verbatim, so it is easy to derive and easy to get right; skips unreachable states. **Cons:** recursion-stack overhead (a function call per state) and risk of `StackOverflowError` when depth is large (n in the tens of thousands).
+
+## Bottom-up tabulation
+
+Define a table, seed the base cases, and iterate in dependency order — every state you read is already computed.
+
+```java
+int rob(int[] nums) {
+    int n = nums.length, prev2 = 0, prev1 = 0;
+    for (int x : nums) {
+        int cur = Math.max(prev1, prev2 + x);
+        prev2 = prev1; prev1 = cur;
+    }
+    return prev1;
+}
+```
+
+**Pros:** no recursion, so no stack limit and lower constant factors; the explicit fill order is exactly what enables rolling-array space optimization. **Cons:** you must work out a valid iteration order, and you compute *every* table cell even ones a lazy approach would skip.
+
+<Callout kind="tip" title="How to choose">
+- Reach for **memoization** first when deriving the recurrence — it is the lowest-friction way to confirm your transition is correct.
+- Switch to **tabulation** when n is large enough to overflow the stack, when constant factors matter, or when you want to drop to O(1)/O(n) space with a rolling array.
+- Prefer **memoization** when the reachable state space is sparse relative to the full table (you skip the unreached states for free).
+</Callout>
+
+<ProbeNote>
+A strong answer states they are equivalent in Big-O, then names the trade-offs: stack overflow risk and call overhead for top-down; iteration-order burden but space-optimization headroom for bottom-up. Mentioning that you often *prototype* top-down then *convert* to bottom-up shows real workflow maturity.
+</ProbeNote>

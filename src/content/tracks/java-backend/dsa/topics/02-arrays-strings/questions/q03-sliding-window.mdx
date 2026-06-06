@@ -1,0 +1,48 @@
+A **sliding window** maintains a contiguous range `[left, right]` over an array or string and slides it forward, updating an answer incrementally instead of recomputing from scratch. It's the canonical tool for **"best contiguous subarray/substring"** questions, turning O(n²) (or O(n·k)) into **O(n)**.
+
+## Fixed-size window
+
+The window width is a constant `k`. Slide it one step at a time: add the entering element, remove the leaving element, update the answer. Each transition is O(1), so the whole pass is O(n).
+
+```java
+// Max sum of any k consecutive elements.
+int maxSum(int[] a, int k) {
+    int sum = 0;
+    for (int i = 0; i < k; i++) sum += a[i];   // first window
+    int best = sum;
+    for (int r = k; r < a.length; r++) {
+        sum += a[r] - a[r - k];                // slide: +enter, -leave
+        best = Math.max(best, sum);
+    }
+    return best;
+}
+```
+
+Use this whenever the problem fixes the window length: "max average of k elements," "number of substrings of length k with property P."
+
+## Variable-size window
+
+The width **grows and shrinks** to maintain an invariant (sum ≤ target, at most k distinct chars, no repeats). The template: expand `right` to include more; while the invariant breaks, contract `left`; record the answer when valid.
+
+```java
+// Longest subarray with sum <= target (non-negative values).
+int longest(int[] a, int target) {
+    int left = 0, sum = 0, best = 0;
+    for (int right = 0; right < a.length; right++) {
+        sum += a[right];                       // expand
+        while (sum > target) sum -= a[left++]; // contract to restore invariant
+        best = Math.max(best, right - left + 1);
+    }
+    return best;
+}
+```
+
+Although there's a nested `while`, each index is added once and removed once, so it's amortized **O(n)** — not O(n²). That amortization argument is the part interviewers probe.
+
+## When do you reach for it?
+
+<Callout kind="tip" title="Recognition signals">
+Sliding window applies when you want an optimum over **contiguous** elements and the window's validity is **monotonic** — shrinking from the left can only help restore the invariant. If elements can be **negative** (so growing the window doesn't monotonically change a sum), a plain window breaks; you typically need prefix sums + a hash map instead (e.g. "subarray sum equals k").
+</Callout>
+
+<ProbeNote>Be ready to state which variant fits and to defend the O(n) bound on the variable window ("each element enters and leaves once"). The classic trap: applying a sliding window to a problem with negative numbers where the monotonic-shrink property fails — name prefix sums as the fallback. Also clarify *contiguous* (window) vs *any subset* (different problem entirely).</ProbeNote>

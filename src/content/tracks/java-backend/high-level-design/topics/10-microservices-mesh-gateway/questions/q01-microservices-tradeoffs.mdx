@@ -1,0 +1,32 @@
+## What problems do microservices solve — and cause?
+
+The honest answer to "should we use microservices?" is "what problem are you solving?" Microservices trade a set of *organizational and scaling* problems for a set of *distributed-systems* problems. A senior answer names both columns and notes that most teams adopt them for the second-order benefit (team autonomy) while underestimating the operational cost.
+
+### What they solve
+
+- **Independent deployability.** Each service ships on its own cadence. A bug fix in payments doesn't require redeploying the entire application — the single biggest source of release-coordination pain in a large monolith.
+- **Team autonomy / Conway's Law.** Service boundaries can mirror team boundaries. A team owns a service end-to-end, picks its own internal tech, and is on call for it. This is the *real* reason most large orgs go microservices — it scales the *organization*, not just the software.
+- **Independent scalability.** Scale only the hot service. If image processing is CPU-bound and the rest is idle, you run 50 instances of *that* service and 2 of everything else, instead of cloning the whole monolith.
+- **Fault isolation (potential).** A crash or memory leak in one service needn't take down the others — *if* callers are built to tolerate it (timeouts, circuit breakers). Without that discipline, isolation is theoretical.
+- **Technology heterogeneity.** A service can use the language or datastore that fits its job. Useful, but easily overdone into an unsupportable zoo.
+
+### What they cause
+
+- **Distributed-systems complexity.** In-process calls that never failed become network calls that fail partially, time out, and arrive out of order. You now must design for retries, idempotency, and partial failure everywhere. This is the dominant cost.
+- **No more ACID across services.** A single business operation spanning services can't be one transaction. You move to **eventual consistency** and **Sagas** with compensating actions — far harder to reason about and to debug than a rollback.
+- **Operational overhead.** Service discovery, an API gateway, a service mesh, centralized logging, distributed tracing, CI/CD per service, container orchestration. The monolith needed none of this; now it is mandatory just to keep the lights on.
+- **Debugging across boundaries.** A single user request fans out across many services. Without distributed tracing, "why was this request slow?" becomes nearly unanswerable.
+- **Data duplication and consistency.** With a database per service, data gets duplicated and must be synced via events — introducing lag, conflict, and reconciliation work.
+- **Network and serialization cost.** Every hop adds latency and (de)serialization; a chatty design that was free in-process becomes a latency problem over the wire.
+
+<Callout kind="warn" title="The distributed monolith — worst of both worlds">
+The common failure mode: services split too early or along the wrong boundaries, so they must be deployed together and call each other synchronously in tight chains. You pay the full distributed-systems tax *and* keep the deployment coupling of a monolith. If services can't deploy independently, the split bought you nothing.
+</Callout>
+
+### The judgment
+
+Microservices pay off when the organization is large enough that deployment coordination and team autonomy are real, recurring pain — typically many teams on one codebase. For a small team or an unproven product, the distributed-systems tax dwarfs the benefit, and a **monolith or modular monolith** ships faster and breaks less. "Start with a monolith, extract services when boundaries prove stable and a clear scaling or autonomy need appears" is the defensible default.
+
+<ProbeNote>
+The interviewer (EPAM-style especially) wants both columns — benefits *and* costs — and the judgment to say microservices are not a default. Strong signals: invoking Conway's Law (team autonomy is the real driver), naming the loss of cross-service ACID, and calling out the "distributed monolith" anti-pattern.
+</ProbeNote>

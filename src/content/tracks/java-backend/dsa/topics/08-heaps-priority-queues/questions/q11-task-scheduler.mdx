@@ -1,0 +1,63 @@
+**Problem.** Given an array of CPU `tasks` (letters) and an integer `n`, two runs of the *same* task must be separated by at least `n` intervals of cooldown. Each interval runs one task or idles. Return the **minimum total intervals** to finish all tasks.
+
+## Greedy idea — always run the most-frequent ready task
+
+The bottleneck is the task with the highest count: it forces the most cooldown gaps. To minimize idling, at each "round" of `n + 1` slots you should run the currently most-frequent tasks first, then let them cool while you fill slots with the next-most-frequent.
+
+## Heap simulation — O(T log 26) ≈ O(T) time
+
+A **max-heap keyed by remaining count** always hands you the best task to run next. Process in rounds of `n + 1` slots: pop up to `n + 1` distinct tasks, decrement each, stash the still-positive ones, and push them back after the round. Idle slots are the rounds where the heap runs dry early.
+
+```java
+int leastInterval(char[] tasks, int n) {
+    int[] counts = new int[26];
+    for (char t : tasks) counts[t - 'A']++;
+
+    PriorityQueue<Integer> heap = new PriorityQueue<>(Comparator.reverseOrder());
+    for (int c : counts) if (c > 0) heap.offer(c);   // max-heap of remaining counts
+
+    int time = 0;
+    while (!heap.isEmpty()) {
+        int slots = n + 1;                 // one full cooldown cycle
+        List<Integer> carry = new ArrayList<>();
+        while (slots > 0 && !heap.isEmpty()) {
+            int c = heap.poll();
+            if (c - 1 > 0) carry.add(c - 1);   // still has copies left -> run next round
+            slots--;
+            time++;                            // ran one task this slot
+        }
+        for (int c : carry) heap.offer(c);
+        if (!heap.isEmpty()) time += slots;    // remaining slots in this round are idle
+    }
+    return time;
+}
+```
+
+The trailing `time += slots` only adds idle time when tasks remain — the final round never pads with idles.
+
+## O(1)-math alternative
+
+The schedule is governed by `maxCount` (the top frequency) and how many tasks tie for it (`maxTies`):
+
+```java
+int leastIntervalMath(char[] tasks, int n) {
+    int[] counts = new int[26];
+    for (char t : tasks) counts[t - 'A']++;
+    int maxCount = 0, ties = 0;
+    for (int c : counts) {
+        if (c > maxCount) { maxCount = c; ties = 1; }
+        else if (c == maxCount) ties++;
+    }
+    int frame = (maxCount - 1) * (n + 1) + ties;   // skeleton built around the busiest task
+    return Math.max(tasks.length, frame);          // if dense enough, no idling needed
+}
+```
+
+The `(maxCount - 1)` full frames of width `n + 1`, plus the `ties` tasks in the last partial frame, give the skeleton; `max(..., tasks.length)` covers the case where there are enough distinct tasks to fill every gap with no idle.
+
+<ComplexityTable rows={[
+  {op: "Heap simulation", best: "O(T)", average: "O(T)", worst: "O(T)", note: "heap is ≤ 26 entries → log factor is constant"},
+  {op: "Greedy math", best: "O(T)", average: "O(T)", worst: "O(T)", note: "O(1) after the O(T) count"},
+]} />
+
+<ProbeNote>The heap version is the intuitive simulation and easy to defend; the math version is the slick close. Be ready to explain `(maxCount - 1) * (n + 1) + ties` and why `max(..., tasks.length)` is needed — when there are many distinct tasks the gaps fill naturally and the answer is just the task count. Watch the final-round idle padding.</ProbeNote>

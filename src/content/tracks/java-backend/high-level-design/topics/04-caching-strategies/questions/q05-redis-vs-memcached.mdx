@@ -1,0 +1,33 @@
+## Redis vs Memcached, and local (Caffeine) vs distributed
+
+Two orthogonal decisions live here. First, *which distributed cache* — Redis or Memcached. Second, *whether the cache should be distributed at all*, or in-process (Caffeine). The senior answer treats them as different axes and often picks **both** layers (L1 local + L2 distributed).
+
+### Redis vs Memcached
+
+| | **Redis** | **Memcached** |
+| --- | --- | --- |
+| Data model | Rich: strings, hashes, lists, sets, sorted sets, streams, bitmaps, HLL | Strings only (opaque blobs) |
+| Threading | Single-threaded per shard (event loop) | Multi-threaded — scales on a big box |
+| Persistence | Optional RDB snapshots / AOF log | None (pure cache) |
+| Replication / HA | Built-in replication, Sentinel, Cluster | None native; client-side sharding |
+| Pub/sub, Lua, transactions | Yes | No |
+| Eviction | `maxmemory` + policies (LRU/LFU/TTL/random) | LRU |
+| Best fit | Default choice; needs structures, persistence, or HA | Simple, huge, multi-threaded LRU cache |
+
+**Takeaway:** Memcached is a lean, multi-threaded, LRU-only cache that excels at pure "big bag of bytes" caching on a single large machine. **Redis** is the de facto default because its data structures (sorted sets for leaderboards/rate limits, hashes for objects), persistence, replication, Cluster mode, and pub/sub make it far more than a cache — and its single-threaded model rarely bottlenecks because you scale horizontally with Cluster sharding. Pick Memcached only when you specifically want its simplicity and multi-threaded throughput and need none of Redis's features.
+
+### Local (Caffeine) vs distributed
+
+This is the more important architectural axis.
+
+- **Local / in-process (Caffeine).** Lives in the JVM heap of each app instance. Access is **nanoseconds** with **no network hop and no serialization**. The downsides: it is **per-node** (not shared — each instance has its own copy and its own hit rate), bounded by heap, and **incoherent** — when one node updates the source, the other nodes' local copies go stale. Best for tiny, ultra-hot, read-mostly data that tolerates brief staleness (feature flags, config, the hottest keys).
+
+- **Distributed (Redis).** A shared cache reachable by all instances over the network (~sub-millisecond). It is **coherent** (one copy, one place to invalidate), survives instance restarts, and scales independently of the app tier. The cost is the network round-trip and serialization.
+
+### The two-tier (L1/L2) combination
+
+The strongest production answer uses **both**: Caffeine as **L1** in front of Redis as **L2**. L1 absorbs the hottest keys at zero network cost; on an L1 miss it falls through to the shared L2, and only an L2 miss hits the database. The price is **L1 coherence** — an L1 entry can go stale when another node writes to L2 — handled with **short L1 TTLs** and/or a **Redis pub/sub channel** that tells every node to evict a key on change.
+
+<ProbeNote>
+The interviewer wants you to default to Redis and justify it (data structures, HA, persistence) while knowing Memcached's niche (simple, multi-threaded LRU). The senior differentiator is the local-vs-distributed axis: naming the L1 (Caffeine) / L2 (Redis) two-tier pattern and immediately flagging L1 coherence as its cost, solved with short TTLs or pub/sub invalidation.
+</ProbeNote>

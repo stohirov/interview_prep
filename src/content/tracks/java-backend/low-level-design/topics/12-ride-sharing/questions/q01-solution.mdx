@@ -1,0 +1,200 @@
+## 1. Functional requirements
+
+- A `Rider` **requests a ride** from a pickup to a drop `Location`.
+- The system **matches** the request to a nearby available `Driver` using a pluggable strategy.
+- A `Driver` can **accept or reject**; on acceptance a `Trip` begins its lifecycle.
+- **Stream the driver's location** to the rider while en-route and in-trip.
+- On completion, **compute the fare** (base + distance + time + surge) and take **payment**.
+- Both parties **rate** each other after the trip.
+- A ride can be **cancelled** by either party from the appropriate states.
+
+## 2. Non-functional requirements
+
+- **Correct ride lifecycle** — illegal transitions (start trip before a driver accepts) must be impossible.
+- **One active ride per driver** — matching must not assign a driver who is mid-trip.
+- **Extensibility** — new matching and pricing strategies should not touch the dispatcher or ride logic.
+- **Scale is deferred** — geospatial indexing and real-time location at scale are HLD concerns (noted, not built).
+
+## 3. Core entities
+
+| Entity | Responsibility |
+| --- | --- |
+| `User` → `Rider` / `Driver` | Account; a `Driver` additionally has a `Vehicle` and availability. |
+| `Vehicle` | Type (economy/premium), capacity, plate. |
+| `Location` | Lat/long; supports distance/ETA computation. |
+| `Ride` | The request + lifecycle; holds the current `RideState`. |
+| `Trip` | The realized journey: actual route, distance, duration, fare. |
+| `MatchingService` | Selects a driver via a `MatchingStrategy`. |
+| `MatchingStrategy` | Nearest / highest-rated / lowest-ETA driver selection. |
+| `PricingStrategy` | Computes fare, including surge multiplier. |
+| `PaymentService` | Charges the rider, pays out the driver. |
+| `Dispatcher` | Singleton coordinator: registry of available drivers and active rides. |
+
+## 4. Class diagram
+
+<Mermaid caption="Ride-sharing class model">{`classDiagram
+    class Ride {
+      -String id
+      -Rider rider
+      -Driver driver
+      -Location pickup
+      -Location drop
+      -RideState state
+      +accept(Driver)
+      +startTrip()
+      +endTrip()
+      +cancel()
+    }
+    class RideState {
+      <<interface>>
+      +accept(Ride, Driver)
+      +startTrip(Ride)
+      +endTrip(Ride)
+      +cancel(Ride)
+    }
+    class Dispatcher {
+      -Map~String,Driver~ available
+      -Map~String,Ride~ activeRides
+      -MatchingStrategy matcher
+      +requestRide(Rider, Location, Location) Ride
+      +updateLocation(Driver, Location)
+    }
+    class MatchingStrategy {
+      <<interface>>
+      +match(List~Driver~, Ride) Optional~Driver~
+    }
+    class PricingStrategy {
+      <<interface>>
+      +fare(Trip) Money
+    }
+    class LocationObserver {
+      <<interface>>
+      +onLocation(Driver, Location)
+    }
+    Ride o-- RideState
+    Dispatcher ..> MatchingStrategy
+    Dispatcher "1" o-- "*" Ride
+    Ride --> Trip
+    Trip ..> PricingStrategy
+    Driver ..> LocationObserver
+    RideState <|.. RequestedState
+    RideState <|.. AcceptedState
+    RideState <|.. InTripState
+    RideState <|.. CompletedState`}</Mermaid>
+
+## 5. Key interfaces and classes
+
+```java
+interface MatchingStrategy {                 // Strategy — how to pick a driver
+    Optional<Driver> match(List<Driver> available, Ride ride);
+}
+
+final class NearestDriverMatching implements MatchingStrategy {
+    public Optional<Driver> match(List<Driver> available, Ride ride) {
+        return available.stream()
+            .filter(Driver::isAvailable)
+            .min(Comparator.comparingDouble(d ->
+                d.location().distanceTo(ride.pickup())));
+    }
+}
+
+interface PricingStrategy {                  // Strategy — fare incl. surge
+    Money fare(Trip trip);
+}
+
+final class SurgePricing implements PricingStrategy {
+    private final double base, perKm, perMin;
+    private final DoubleSupplier surge;      // demand/supply multiplier, evaluated now
+    public Money fare(Trip t) {
+        double raw = base + perKm * t.distanceKm() + perMin * t.durationMin();
+        return Money.of(raw * surge.getAsDouble());
+    }
+}
+```
+
+```java
+interface RideState {                        // State — ride lifecycle
+    default void accept(Ride r, Driver d) { illegal(); }
+    default void startTrip(Ride r)        { illegal(); }
+    default void endTrip(Ride r)          { illegal(); }
+    default void cancel(Ride r)           { r.setState(new CancelledState()); }
+    private void illegal() { throw new IllegalStateException("transition not allowed"); }
+}
+
+final class RequestedState implements RideState {
+    public void accept(Ride r, Driver d) {
+        d.setAvailable(false);               // driver now committed to one ride
+        r.assignDriver(d);
+        r.setState(new AcceptedState());
+    }
+}
+final class AcceptedState implements RideState {            // driver en-route to pickup
+    public void startTrip(Ride r) { r.setState(new InTripState()); }
+}
+final class InTripState implements RideState {
+    public void endTrip(Ride r) {
+        Trip trip = r.finalizeTrip();
+        Money fare = r.pricing().fare(trip);
+        r.paymentService().charge(r.rider(), r.driver(), fare);
+        r.driver().setAvailable(true);
+        r.setState(new CompletedState());
+    }
+}
+```
+
+```java
+public final class Dispatcher {              // Singleton coordinator
+    private static final Dispatcher INSTANCE = new Dispatcher();
+    public static Dispatcher get() { return INSTANCE; }
+
+    private final ConcurrentHashMap<String, Driver> available = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Ride> activeRides = new ConcurrentHashMap<>();
+    private MatchingStrategy matcher = new NearestDriverMatching();
+
+    public Ride requestRide(Rider rider, Location pickup, Location drop) {
+        Ride ride = new Ride(rider, pickup, drop);          // starts in RequestedState
+        matcher.match(new ArrayList<>(available.values()), ride)
+            .ifPresent(driver -> {
+                ride.accept(driver);                        // delegates to RideState
+                available.remove(driver.id());
+                activeRides.put(ride.id(), ride);
+            });
+        return ride;                                        // may still be unmatched -> retry/expand radius
+    }
+
+    // Observer fan-out: driver pings location, riders subscribed to the ride are notified.
+    public void updateLocation(Driver driver, Location loc) {
+        driver.setLocation(loc);
+        Ride ride = activeRides.get(driver.currentRideId());
+        if (ride != null) ride.rider().onLocation(driver, loc);
+    }
+}
+```
+
+## 6. Design patterns used
+
+- **Strategy** — `MatchingStrategy` (nearest / highest-rated / lowest-ETA) and `PricingStrategy` (flat, surge) vary independently; swapping one never touches the dispatcher or ride.
+- **State** — `Ride` moves through `Requested → Accepted → InTrip → Completed`, with `Cancelled` reachable from the early states; each state permits only its legal transitions.
+- **Observer** — the rider subscribes to the matched driver's location stream; `updateLocation` fans out pushes instead of the rider polling.
+- **Singleton** — one `Dispatcher` owns the available-driver registry and active-ride map per deployment (a service in the HLD version).
+
+## 7. Trade-offs and alternatives
+
+- **Matching is a Strategy, not a hardcoded scan.** Nearest-driver is the default, but lowest-ETA (accounts for traffic) and highest-rated are common variants. At LLD scope a linear scan over available drivers is fine; flag that production uses a **geospatial index (geohash/quadtree/S2)** — an HLD concern.
+- **Driver assignment must be atomic.** Two riders' requests could match the same driver; the dispatcher must claim the driver (remove from `available` / CAS the availability flag) as part of acceptance, or two rides race onto one driver. This mirrors the parking-spot "find-then-occupy" race.
+- **Surge as a multiplier supplier.** Injecting surge as a `DoubleSupplier` keeps pricing decoupled from how demand/supply is computed; the computation itself is deferred to HLD.
+- **Cancellation policy.** Free before acceptance, fee after a driver is en-route — model as a cancellation-policy Strategy rather than branching inside the state.
+
+## 8. Common follow-up questions
+
+- **Matching algorithm** — swap the linear scan for a geospatial index; discuss ETA-based vs distance-based matching and batching requests to optimize globally.
+- **Pooling (shared rides)** — a `Ride` carries multiple riders with compatible routes; matching becomes a route-overlap problem and pricing splits the fare.
+- **Cancellation policy** — tiered fees by state and time elapsed, modeled as a Strategy.
+- **Ratings** — both parties rate post-trip; aggregate feeds the highest-rated matching strategy and driver deactivation thresholds.
+- **Disputes** — the `Trip` retains the route/fare breakdown for arbitration; pair with a payment hold/capture flow.
+
+## 9. What interviewers are really probing
+
+<ProbeNote>
+That you (1) **scoped this as LLD and explicitly deferred the geospatial/scaling concerns to HLD** — the framing itself is a senior signal, (2) used **State** for the ride lifecycle so illegal transitions can't happen, (3) put **matching and pricing behind Strategy** so they're swappable, and (4) spotted that **driver assignment must be atomic** to avoid two riders racing onto the same driver. Reaching for Observer for location push (not polling) and naming the geo-index as the real-world matching backbone rounds out the answer.
+</ProbeNote>

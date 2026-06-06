@@ -1,0 +1,20 @@
+**Instagram** is the canonical "design a social feed with media" problem. It layers two hard sub-systems on top of each other: a **photo storage and delivery pipeline** (upload, store the bytes once, generate thumbnails, serve through a CDN) and a **feed generation** system (fan-out of new posts to hundreds of millions of followers). Stories, likes, comments, and hashtag search hang off the same core. At 500M DAU it is overwhelmingly read-heavy and latency-sensitive, so almost every decision comes back to caching and precomputation.
+
+## The shape of the problem
+
+The defining characteristic is **read amplification through fan-out**. One celebrity post can be read by tens of millions of followers, while the median user has a few hundred. That skew makes pure push (fan-out-on-write) blow up for celebrities and pure pull (fan-out-on-read) too slow for everyone, so the real answer is **hybrid fan-out**. The second axis is **blob vs metadata separation**: the image bytes go to object storage (S3) and a CDN, never through your application database, which only stores small metadata rows.
+
+## What the interviewer is probing, by style
+
+- **FAANG** — go deep on hybrid fan-out (push for normal users, pull for celebrities), feed cache design (Redis sorted sets), the async encoding/thumbnail pipeline, and how view/like counts are kept eventually consistent at scale. Expect "what happens when a celebrity with 100M followers posts?"
+- **EU / remote contracting** — pragmatism and cost: "S3 + CloudFront + Postgres + Redis gets you a very long way." Justify when fan-out-on-write is worth the storage, and where managed services replace bespoke infra.
+- **Regional (EPAM / Uzum)** — a clean upload API, a sensible schema separating media metadata from blobs, a defensible diagram, and an honest story for thumbnails and the feed cache.
+
+## The key decisions
+
+1. **Feed generation** — fan-out-on-write vs fan-out-on-read vs **hybrid** (the heart of the problem). Choose per follower count.
+2. **Media storage** — store bytes once in object storage, serve via CDN; DB holds only metadata and the object key.
+3. **Thumbnail / encoding pipeline** — generate renditions asynchronously off an upload event, never on the request path.
+4. **Counts at scale** — likes/views as approximate, eventually-consistent counters rather than synchronous row updates.
+
+The worked solution applies the full 11-section structure and shows all three style angles where they diverge.

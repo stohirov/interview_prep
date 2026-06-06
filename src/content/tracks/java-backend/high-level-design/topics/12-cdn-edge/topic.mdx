@@ -1,0 +1,23 @@
+A **CDN (content delivery network)** is a globally distributed fleet of cache servers — **points of presence (PoPs)** — placed close to users so that content is served from a nearby city instead of your origin on another continent. It is the cache layer that lives *outside* your data center, and for any system serving a geographically spread audience (media, static assets, even cacheable API responses), it is one of the highest-impact and easiest wins in a design.
+
+## Why this matters
+
+Latency is dominated by the **speed of light and round-trips**. A user in São Paulo fetching from a Virginia origin pays ~120 ms each way; the same object from a São Paulo PoP is ~5 ms. A CDN also **offloads the origin** — if 95% of requests are served at the edge, your origin sees a fraction of the traffic, which cuts cost and shields you from spikes (a built-in absorber for traffic surges and a first line against DDoS). In an interview, "put a CDN in front of static and cacheable content" is expected; the depth comes from *invalidation*, *edge compute*, and *routing*.
+
+## The mental model
+
+- **Edge caching.** PoPs cache responses keyed by URL + headers, honoring `Cache-Control`, `ETag`, and TTLs. The hard part, as always, is **invalidation** — TTLs, explicit **purge** APIs, and **surrogate keys** that purge groups of related objects at once.
+- **Anycast vs DNS geo-routing.** Two ways to send a user to the nearest PoP: **anycast** (the same IP is announced from every PoP; BGP routes the packet to the topologically nearest one) and **DNS-based geo-routing** (the DNS resolver hands back the IP of a nearby PoP). They differ in failover speed and granularity.
+- **Edge compute.** Beyond static caching, modern CDNs run code at the PoP — **Cloudflare Workers, Lambda@Edge, Fastly Compute** — for request routing, auth, A/B tests, personalization, and assembling responses without a trip to origin.
+- **TLS termination at the edge.** The PoP terminates the user's TLS connection, so the expensive handshake happens close to the user; the edge then reuses warm, pooled connections back to origin.
+- **HTTP/2 and HTTP/3.** Edges speak modern protocols — HTTP/2 multiplexing over one TCP connection, and **HTTP/3 over QUIC (UDP)**, which removes head-of-line blocking and resumes faster on flaky mobile networks — even if your origin still speaks HTTP/1.1.
+
+## What a CDN serves
+
+- **Static assets** (JS, CSS, images, video segments) — the classic case, with long TTLs and content-hashed URLs.
+- **Cacheable dynamic content** — API GETs, HTML fragments — with short TTLs or surrogate-key invalidation.
+- **Streaming media** — HLS/DASH segments delivered from the nearest edge are what make global video viable.
+
+## What the questions cover
+
+The questions explain what a CDN actually does and when it is essential, how cache invalidation works at the edge (TTL vs purge vs surrogate keys), and the routing-and-termination layer — edge compute, anycast vs DNS geo-routing, and why TLS terminates at the edge. Together they take "I'd add a CDN" from a checkbox to a defensible design decision.

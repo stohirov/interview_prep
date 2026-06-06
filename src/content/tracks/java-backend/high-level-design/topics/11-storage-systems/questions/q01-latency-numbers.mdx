@@ -1,0 +1,46 @@
+## Latency numbers every engineer should know
+
+Jeff Dean's "latency numbers" are the back-of-the-envelope intuition behind every capacity estimate and every "where should this data live?" decision. You don't need the digits to the nanosecond — you need the **orders of magnitude** and the *ratios* between them, so you can reason about what dominates a request's latency.
+
+### The canonical table
+
+Rounded to memorable orders of magnitude (modern hardware):
+
+<Diagram caption="Latency numbers every engineer should know — by order of magnitude">{`
+ OPERATION                                  LATENCY        RELATIVE
+ ----------------------------------------   -----------    -----------------------
+ L1 cache reference                         ~1 ns          1x
+ Branch mispredict                          ~3 ns
+ L2 cache reference                         ~4 ns          ~4x L1
+ Mutex lock/unlock                          ~17 ns
+ Main memory (RAM) reference                ~100 ns        ~100x L1
+ Compress 1 KB (fast algorithm)             ~2 us
+ Read 1 MB sequentially from RAM            ~3 us
+ SSD random read                            ~16-100 us     ~1,000x RAM
+ Round trip within same datacenter          ~500 us        (0.5 ms)
+ Read 1 MB sequentially from SSD            ~1 ms
+ Disk seek (spinning HDD)                   ~2-10 ms
+ Read 1 MB sequentially from disk           ~20 ms
+ Round trip CA <-> Netherlands (cross-region) ~150 ms      ~1,000,000x RAM
+`}</Diagram>
+
+(ns = nanosecond, us = microsecond, ms = millisecond; 1 ms = 1,000 us = 1,000,000 ns.)
+
+### The takeaways that actually matter
+
+- **RAM is ~100× faster than SSD, which is ~100× faster than a disk seek.** Keeping the working set in memory is the single biggest performance lever — this is the whole case for caching.
+- **A datacenter round trip (~0.5 ms) dwarfs local compute.** Within a request, network hops dominate; cutting one cross-service call beats micro-optimizing code.
+- **Cross-region is ~150 ms.** A single synchronous transatlantic round trip blows most latency budgets — hence read replicas near users, CDNs, and async cross-region replication.
+- **Sequential beats random by orders of magnitude**, especially on disk. This is *why* LSM-trees (sequential writes) and log-structured designs win on write throughput.
+
+### Using them in an interview
+
+Latency numbers turn vague claims into arithmetic. "We need p99 < 50 ms, and a cross-region call alone is ~150 ms, so this read must be served from a same-region replica or cache" is the kind of sentence that lands. Likewise: "100K reads/s against a disk-bound store at ~10 ms each is impossible on one node → it must be served from memory."
+
+<Callout kind="tip" title="Memorize ratios, not digits">
+The exact figures drift with hardware. What never changes is the *shape*: cache ≪ RAM ≪ SSD ≪ disk ≪ same-DC network ≪ cross-region. Reason in factors of ~100 and you'll be right enough for any design.
+</Callout>
+
+<ProbeNote>
+The interviewer isn't quizzing trivia — they want to see you *use* the numbers: identifying that a latency budget forces data into RAM/same-region, that a cross-region round trip breaks a tight SLO, and that sequential I/O is why log-structured stores scale writes. Knowing RAM ≈ 100 ns, SSD ≈ 100 µs, same-DC RTT ≈ 0.5 ms, cross-region ≈ 150 ms covers almost every estimate.
+</ProbeNote>

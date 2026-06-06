@@ -1,0 +1,35 @@
+There are two standard ways to store a graph, and the choice comes down to **density** and **which operation you run most**.
+
+## Adjacency list
+
+Each vertex maps to a list of its neighbors — in Java, `Map<Node, List<Node>>` or `List<List<Integer>>` for `0..V-1` vertices.
+
+```java
+Map<Integer, List<Integer>> g = new HashMap<>();
+g.computeIfAbsent(u, k -> new ArrayList<>()).add(v);   // edge u -> v
+```
+
+- **Space O(V + E)** — you store exactly what exists. For a sparse graph (`E ≈ V`) this is dramatically smaller than a matrix.
+- **Iterating a vertex's neighbors is O(deg(v))** — optimal, since BFS/DFS do exactly that.
+- **"Is there an edge u→v?" is O(deg(u))** — you scan the list. Slower than a matrix.
+
+## Adjacency matrix
+
+A `boolean[V][V]` (or `int[V][V]` for weights) where `m[u][v]` flags the edge.
+
+- **Space O(V²)** — fixed, regardless of how few edges exist. Wasteful for sparse graphs.
+- **Edge query O(1)** — a single array read; its one real advantage.
+- **Iterating neighbors is O(V)** — you scan a whole row even if the vertex has two neighbors.
+
+## The trade-off
+
+<ComplexityTable rows={[
+  {op: "Space", best: "List: O(V+E)", average: "Matrix: O(V²)", worst: "—", note: "list wins on sparse graphs"},
+  {op: "Edge exists?", best: "List: O(deg)", average: "Matrix: O(1)", worst: "—", note: "matrix wins"},
+  {op: "Iterate neighbors", best: "List: O(deg)", average: "Matrix: O(V)", worst: "—", note: "list wins"},
+  {op: "Add edge", best: "List: O(1)", average: "Matrix: O(1)", worst: "—", note: "tie"},
+]} />
+
+**Use a list** for sparse graphs (the common case — road networks, dependency graphs, social graphs) and whenever you traverse. **Use a matrix** when the graph is dense (`E ≈ V²`), the vertex count is small and fixed, or you do many O(1) edge-existence checks (e.g., Floyd-Warshall, which is inherently V³).
+
+<ProbeNote>Lead with "list by default, O(V+E) space, because real graphs are sparse." Expect the follow-up "when is a matrix better?" — answer: dense graphs, tiny V, or O(1) edge lookups. Mention that the matrix also makes algorithms like Floyd-Warshall natural to express.</ProbeNote>

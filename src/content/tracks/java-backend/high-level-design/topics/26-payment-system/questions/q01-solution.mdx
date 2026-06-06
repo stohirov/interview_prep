@@ -1,0 +1,149 @@
+## 1. Functional requirements
+
+- **Charge** a customer: authorize then capture a payment via an external processor (Stripe model; Click.uz / Payme regionally).
+- **Idempotency:** a retried charge request must never double-charge; it returns the original result.
+- **Refunds** (full/partial) and **payouts** to merchants/sellers.
+- **Double-entry ledger:** every money movement recorded as balanced debit/credit entries; the ledger is the system of record.
+- **Reconciliation:** continuously match internal records against the processor's settlement reports.
+- **Fraud hooks:** a risk check in the authorization path that can decline/flag.
+- **Webhooks/notifications** on payment state changes; full audit history.
+
+## 2. Non-functional requirements
+
+- **Scale:** 100K TPS peak; tens of millions of merchants/customers.
+- **Correctness over latency:** **no double-charge, no lost charge, ledger always balances** — these are inviolable.
+- **Durability:** every payment intent and ledger entry is durably persisted before acknowledging; nothing is best-effort.
+- **Latency:** authorize p99 < 1 s (bounded by the processor); ledger posting can be async.
+- **Availability:** 99.99%; degrade gracefully (queue captures) rather than charge incorrectly.
+- **Auditability & compliance:** immutable audit trail; PCI scope minimized by tokenizing cards at the processor.
+
+## 3. Capacity estimation
+
+- Throughput: 100K TPS peak. Each payment fans into multiple ledger writes (≥2 entries) → **~200K+ ledger writes/s** → the ledger must be partitioned.
+- Steady state: assume ~10K TPS average; 100K is the burst (sale events) → size for burst, autoscale workers.
+- Storage: 100K TPS × 86,400 s ≈ **~8.6B payments/day** at peak-equivalent; realistically ~1B/day average. At ~1 KB/payment + ledger entries ≈ **~2–3 TB/day** → partition + tier to cold storage; keep recent hot.
+- Processor calls: each authorize is one outbound call with a strict timeout (~3–5 s) and bounded retries; size the outbound connection pool and rate-limit per processor account.
+- Dedup store: idempotency keys at 100K/s with, say, 24 h retention ≈ **~8.6B keys/day** → Redis/partitioned KV with TTL.
+
+## 4. High-level architecture
+
+<Mermaid caption="Payment system — idempotent API fronts a saga orchestrator that drives the processor and posts to an immutable double-entry ledger, with async reconciliation">{`graph LR
+    M[Merchant / Client] --> API[Payment API - Spring Boot]
+    API -->|dedup| IDM[(Idempotency store - Redis)]
+    API --> ORCH[Saga orchestrator]
+    ORCH --> RISK[Fraud / risk check]
+    ORCH -->|authorize / capture| PROC[Processor adapter]
+    PROC --> EXT[Stripe / Click / Payme]
+    ORCH -->|outbox| OB[(Outbox - Postgres)]
+    OB --> LEDGER[(Double-entry ledger - partitioned)]
+    EXT -.webhooks.-> WH[Webhook handler]
+    WH --> ORCH
+    LEDGER --> RECON[Reconciliation job]
+    EXT -.settlement files.-> RECON
+    RECON --> ALERT[Alerting on mismatch]`}</Mermaid>
+
+## 5. API design
+
+```
+POST /api/v1/payments
+  Header: Idempotency-Key: 8e1f...c3      (client-generated, required)
+  Body:   { "amount": 50000, "currency":"UZS", "source":"tok_visa",
+            "merchantId":"m_123", "capture": true }
+  201:    { "paymentId":"pay_abc", "status":"succeeded", "ledgerTxnId":"txn_999" }
+  200:    (same Idempotency-Key replay) -> the ORIGINAL response, unchanged
+  402:    { "status":"declined", "reason":"insufficient_funds" }
+
+POST /api/v1/payments/{id}/capture        # if authorized but not captured
+POST /api/v1/payments/{id}/refunds        Idempotency-Key required
+  Body: { "amount": 50000 }               # full or partial
+GET  /api/v1/payments/{id}                # status + state-machine history
+POST /webhooks/stripe                     # signed processor callbacks (verify signature)
+```
+
+Idempotency contract: first request with a key executes and stores `(key -> result, requestHash)`; replays return the stored result. A replay with a *different* body for the same key is rejected (409) — this catches client bugs.
+
+## 6. Data model
+
+```sql
+-- Payment intent / state machine
+CREATE TABLE payment (
+  payment_id      UUID PRIMARY KEY,
+  idempotency_key TEXT NOT NULL,
+  merchant_id     UUID NOT NULL,
+  amount          BIGINT NOT NULL,        -- minor units (tiyin/cents); NEVER float
+  currency        CHAR(3) NOT NULL,
+  status          TEXT NOT NULL,          -- created|authorized|captured|failed|refunded
+  processor       TEXT NOT NULL,          -- stripe|click|payme
+  processor_ref   TEXT,                   -- charge id at the processor
+  created_at      TIMESTAMPTZ NOT NULL,
+  UNIQUE (merchant_id, idempotency_key)   -- enforces idempotency at the DB
+);
+
+-- Immutable, append-only double-entry ledger (system of record)
+CREATE TABLE ledger_entry (
+  entry_id    UUID PRIMARY KEY,
+  txn_id      UUID NOT NULL,              -- groups the balanced legs of one event
+  account_id  UUID NOT NULL,             -- customer / merchant / fees / cash accounts
+  direction   CHAR(1) NOT NULL,          -- 'D' debit | 'C' credit
+  amount      BIGINT NOT NULL,           -- minor units, always positive
+  currency    CHAR(3) NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL
+  -- INVARIANT: for each txn_id, SUM(debits) == SUM(credits). Enforced on write.
+);
+CREATE INDEX idx_ledger_txn ON ledger_entry (txn_id);
+-- ledger_entry is append-only (no UPDATE/DELETE); partitioned by account/time.
+
+-- Transactional outbox: ledger posts and webhook sends written in the same TX
+CREATE TABLE outbox (
+  id UUID PRIMARY KEY, aggregate_id UUID, type TEXT,
+  payload JSONB, published BOOLEAN DEFAULT false, created_at TIMESTAMPTZ
+);
+```
+
+A capture posts a balanced transaction, e.g. **debit** customer-receivable, **credit** merchant-payable + **credit** fee-revenue — debits equal credits, so the books always balance.
+
+## 7. Detailed component design
+
+**Idempotency.** The `Idempotency-Key` plus a `UNIQUE(merchant_id, idempotency_key)` constraint (backed by a fast Redis check) guarantees that retries — network timeouts, user double-clicks, processor-call timeouts where you don't know if the charge landed — execute at most once. On timeout the orchestrator **does not blindly retry**; it queries the processor by the idempotency key (processors like Stripe also accept idempotency keys) to learn the real outcome.
+
+**Saga orchestration.** A single ACID transaction can't span your DB + the processor + the ledger, so the flow is an **orchestrated saga** / state machine: `created → fraud-check → authorize → capture → ledger-post → notify`. Each forward step has a **compensating action** (e.g. capture failed after authorize → void the authorization; ledger-post failed → reverse with a balancing entry, never an in-place edit). State transitions are persisted so a crashed orchestrator resumes from the durable state.
+
+**Reliable processor calls (outbox).** To avoid the dual-write problem (DB committed but the side-effect lost, or vice versa), the orchestrator writes its state change **and** an outbox row in the same transaction; a relay publishes the outbox event (call processor / post to ledger / send webhook) at-least-once, with idempotency making replays safe.
+
+**Double-entry ledger.** The ledger is the immutable source of truth: every event is a `txn_id` whose debit legs sum to its credit legs. Money is stored in **integer minor units** — never floating point. Corrections are new reversing transactions, never updates, preserving a complete audit trail.
+
+**Reconciliation.** A scheduled job ingests the processor's settlement/transaction files (Stripe reports; bank statements for Click/Payme) and matches each external line against internal ledger txns. Mismatches (missing, extra, amount-diff) are flagged for an ops queue and alerting — this is how you *prove* correctness rather than assume it.
+
+**Fraud hooks.** A synchronous risk check sits in the authorize path: it can decline, step-up (3DS), or flag-for-review; it consumes signals (velocity, geo, device) and is designed to fail-open or fail-closed per risk appetite. Heavy ML scoring runs async; the hot path calls a low-latency risk service.
+
+## 8. Scaling considerations
+
+- **Partition the ledger** by account (and time) so 200K+ entry-writes/s spread across shards; keep each `txn_id`'s legs co-located to enforce the balance invariant atomically.
+- **Decouple authorize from ledger-post** — authorize synchronously (user waits), post to the ledger asynchronously via the outbox/queue, smoothing the 100K TPS burst.
+- **Per-processor rate limits & circuit breakers** on the adapter; shed/queue captures when a processor degrades rather than failing charges.
+- **Idempotency store** as a partitioned Redis/KV with TTL absorbs the dedup QPS off the primary DB.
+- **Hot/cold tiering** of payment history; recent in OLTP, archives in object storage / OLAP for analytics and disputes.
+
+## 9. Trade-offs and alternatives
+
+- **Saga vs 2PC.** Two-phase commit can't span external processors and harms availability; sagas with compensations are the standard, at the cost of writing (and testing) every compensating action.
+- **At-least-once + idempotency vs exactly-once.** True exactly-once delivery is unattainable across the network; deliver at-least-once and make every operation idempotent — the only correct answer for money.
+- **Synchronous vs async ledger posting.** Async (outbox) gives throughput and resilience but means the ledger is eventually consistent with the payment state for a short window; reconcile to close the gap.
+- **Build vs buy / processor choice.** Integrate **Stripe/Adyen** (or **Click/Payme** regionally) rather than touching card networks — minimizes PCI scope (card data tokenized at the processor) and offloads compliance. Direct network integration is rarely justified.
+- **SQL ledger vs event-sourced.** A relational double-entry table is auditable and simple; full event sourcing gives perfect history/replay at higher complexity — mention it as the heavier alternative.
+
+## 10. Common follow-up questions
+
+- "The processor call timed out — did we charge them?" → don't retry blindly; query by idempotency key to learn the truth, then converge state.
+- "Two requests with the same idempotency key arrive concurrently." → unique constraint / atomic Redis SETNX serializes them; the loser returns the stored result.
+- "How do you guarantee the books balance?" → double-entry invariant enforced per `txn_id`; corrections are reversing entries; reconciliation proves it daily.
+- "A refund partially failed mid-saga." → compensate: reverse posted legs with balancing entries, leave the payment in a defined state, alert ops.
+- "How do you detect we're out of sync with Stripe?" → reconciliation against settlement files surfaces missing/extra/amount mismatches.
+- "Multi-currency / FX?" → store amount + currency in minor units per leg; FX is its own balanced txn against an FX account; never mix currencies in one account.
+- "Marketplace payouts (Stripe Connect-style)?" → split funds across merchant-payable and platform-fee accounts in the same balanced txn; payouts are separate ledger movements.
+
+## 11. What interviewers are really probing
+
+<ProbeNote>
+**All styles:** that you put **correctness first** — idempotency so nothing double-charges, a double-entry ledger that always balances, and reconciliation to *prove* it — and that you know a single ACID transaction can't span external processors. **FAANG:** depth on the saga state machine and compensations, idempotency-key + outbox design, exactly-once-effect over at-least-once delivery, and partitioning the ledger at 100K TPS. **EU/contracting:** pragmatic, auditable design integrating Stripe/Adyen, PCI-scope awareness, and the outbox pattern. **Regional:** a clean Spring service with a real ledger schema and idempotency handling, integrating Stripe and regional processors (Click.uz, Payme) — a strong place to ground the answer in genuine Stripe Connect / Click / Payme experience, describing the patterns you actually used without fabricating any company's internal architecture. The classic failure mode is representing money as a float, or retrying a timed-out charge without checking the idempotency key — and double-charging the customer.
+</ProbeNote>

@@ -1,0 +1,44 @@
+**Problem.** Given a set of `n` distinct integers, return **all** possible subsets (the power set). Solve it with bitmask enumeration rather than recursion.
+
+## The bitmask insight
+
+There are exactly `2^n` subsets, and each maps one-to-one to an `n`-bit integer: bit `i` of the mask means "include `nums[i]`." So iterating `mask` from `0` to `2^n - 1` enumerates every subset, with `mask = 0` the empty set and `mask = 2^n - 1` the full set.
+
+## Iterative bitmask solution — O(2^n · n)
+
+```java
+List<List<Integer>> subsets(int[] nums) {
+    int n = nums.length;
+    List<List<Integer>> result = new ArrayList<>();
+
+    for (int mask = 0; mask < (1 << n); mask++) {   // 0 .. 2^n - 1
+        List<Integer> subset = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            if ((mask & (1 << i)) != 0)             // bit i set -> include nums[i]
+                subset.add(nums[i]);
+        }
+        result.add(subset);
+    }
+    return result;
+}
+```
+
+The outer loop runs `2^n` times; the inner loop checks `n` bits each, giving `O(2^n · n)` — and that's optimal, since the output itself contains `O(2^n · n)` integers.
+
+## Why bitmask over recursion here
+
+- **No call stack / backtracking state** — purely iterative, trivial to reason about.
+- **Deterministic ordering** — subsets come out in mask order, which is easy to test against.
+- **Direct indexing** — `mask` *is* the subset id, handy when subsets feed into bitmask DP.
+
+The recursive (backtracking) version is equally valid and often preferred when you need pruning; the bitmask version shines when you want all `2^n` subsets unconditionally.
+
+## Bit-trick variant — iterate submasks
+
+To enumerate only the subsets *of a given set* `mask` (not the whole universe), the idiom is `for (int s = mask; s > 0; s = (s - 1) & mask)`. That's the building block for set-cover and partition DP.
+
+<ComplexityTable rows={[
+  {op: "Bitmask enumeration", best: "O(2^n · n)", average: "O(2^n · n)", worst: "O(2^n · n)", note: "output size is itself 2^n · n"},
+]} />
+
+<ProbeNote>The mapping "each subset ↔ an n-bit integer" is the whole idea — state it clearly. Note that `n` must be small (≤ ~20) for `2^n` to be tractable. The submask-enumeration idiom `s = (s - 1) & mask` is the advanced follow-up that connects this directly to bitmask DP.</ProbeNote>

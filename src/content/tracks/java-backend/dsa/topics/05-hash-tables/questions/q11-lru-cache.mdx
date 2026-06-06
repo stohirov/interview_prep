@@ -1,0 +1,93 @@
+**Problem.** Design an LRU (Least Recently Used) cache supporting `get(key)` and `put(key, value)` in **O(1)** time. When `put` exceeds capacity, evict the least-recently-used entry. Both `get` and `put` count as "use."
+
+The `LinkedHashMap` access-order trick is the idiomatic Java answer, but interviewers asking *"from scratch"* want to see the underlying data structure: a **hash map + doubly-linked list**.
+
+## Why these two structures together
+
+- The **hash map** gives O(1) lookup from key → node.
+- The **doubly-linked list** maintains recency order: most-recently-used at the head, least-recently-used at the tail. A doubly-linked list lets you **unlink any node in O(1)** (you have both neighbors), which a singly-linked list cannot.
+
+On every access you unlink the node and re-insert it at the head. Eviction is "remove the tail." Both are constant-time pointer surgery.
+
+## Full implementation
+
+```java
+public class LRUCache {
+
+    private static final class Node {
+        int key, value;
+        Node prev, next;
+        Node(int key, int value) { this.key = key; this.value = value; }
+    }
+
+    private final int capacity;
+    private final Map<Integer, Node> map = new HashMap<>();
+    private final Node head, tail;   // sentinels: head.next = MRU, tail.prev = LRU
+
+    public LRUCache(int capacity) {
+        this.capacity = capacity;
+        head = new Node(0, 0);
+        tail = new Node(0, 0);
+        head.next = tail;
+        tail.prev = head;
+    }
+
+    public int get(int key) {
+        Node node = map.get(key);
+        if (node == null) return -1;
+        moveToFront(node);            // mark as most-recently-used
+        return node.value;
+    }
+
+    public void put(int key, int value) {
+        Node node = map.get(key);
+        if (node != null) {           // update existing
+            node.value = value;
+            moveToFront(node);
+            return;
+        }
+        if (map.size() == capacity) { // evict LRU (the node before the tail sentinel)
+            Node lru = tail.prev;
+            remove(lru);
+            map.remove(lru.key);
+        }
+        Node fresh = new Node(key, value);
+        map.put(key, fresh);
+        addToFront(fresh);
+    }
+
+    // --- doubly-linked list helpers, all O(1) ---
+
+    private void remove(Node n) {
+        n.prev.next = n.next;
+        n.next.prev = n.prev;
+    }
+
+    private void addToFront(Node n) {
+        n.next = head.next;
+        n.prev = head;
+        head.next.prev = n;
+        head.next = n;
+    }
+
+    private void moveToFront(Node n) {
+        remove(n);
+        addToFront(n);
+    }
+}
+```
+
+<Callout kind="tip" title="Sentinel nodes earn their keep">
+The `head` and `tail` sentinels (dummy nodes) mean every real node always has non-null neighbors. That eliminates null checks in `remove`/`addToFront` and the empty-list and single-element edge cases — the classic dummy-node simplification.
+</Callout>
+
+## Complexity
+
+<ComplexityTable rows={[
+  {op: "get", best: "O(1)", average: "O(1)", worst: "O(1)", note: "hash lookup + constant pointer updates"},
+  {op: "put", best: "O(1)", average: "O(1)", worst: "O(1)", note: "lookup + at most one eviction"},
+]} />
+
+Space is O(capacity) — the map and list hold the same nodes.
+
+<ProbeNote>They want: *why doubly* (O(1) unlink of an arbitrary node), *why the hash map* (O(1) key→node), and the sentinel trick to kill edge cases. Watch for the bug where `put` on an **existing** key forgets to update recency, and the eviction order (evict `tail.prev`, then remove its key from the map — using the node's stored `key`, which is why nodes carry the key, not just the value). If asked for the concise version, mention `LinkedHashMap` with `accessOrder=true` and `removeEldestEntry`.</ProbeNote>

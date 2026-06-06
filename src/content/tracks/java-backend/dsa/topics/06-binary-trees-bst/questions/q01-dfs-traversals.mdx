@@ -1,0 +1,98 @@
+**Problem.** Implement the three depth-first traversals of a binary tree — preorder, inorder, postorder — both recursively and iteratively.
+
+## The idea
+
+All three DFS orders visit the same nodes; they differ only in *when* the current node is emitted relative to descending into its children:
+
+- **Preorder** — emit, go left, go right (node, L, R).
+- **Inorder** — go left, emit, go right (L, node, R). On a BST this is sorted order.
+- **Postorder** — go left, go right, emit (L, R, node).
+
+## Recursive — O(n) time, O(h) space
+
+The recursion mirrors the definition exactly; the call stack carries O(h) frames. The only thing that moves between variants is the position of the `visit` line.
+
+```java
+void preorder(TreeNode n, List<Integer> out) {
+    if (n == null) return;
+    out.add(n.val);          // visit
+    preorder(n.left, out);
+    preorder(n.right, out);
+}
+
+void inorder(TreeNode n, List<Integer> out) {
+    if (n == null) return;
+    inorder(n.left, out);
+    out.add(n.val);          // visit
+    inorder(n.right, out);
+}
+
+void postorder(TreeNode n, List<Integer> out) {
+    if (n == null) return;
+    postorder(n.left, out);
+    postorder(n.right, out);
+    out.add(n.val);          // visit
+}
+```
+
+## Iterative — O(n) time, O(h) space
+
+Recursion just hides an explicit stack, so we can make it explicit. **Preorder** is the cleanest: push the node, pop and emit, then push *right before left* so left comes off first.
+
+```java
+List<Integer> preorderIter(TreeNode root) {
+    List<Integer> out = new ArrayList<>();
+    if (root == null) return out;
+    Deque<TreeNode> stack = new ArrayDeque<>();
+    stack.push(root);
+    while (!stack.isEmpty()) {
+        TreeNode n = stack.pop();
+        out.add(n.val);
+        if (n.right != null) stack.push(n.right);  // pushed first -> popped last
+        if (n.left  != null) stack.push(n.left);
+    }
+    return out;
+}
+```
+
+**Inorder** walks left as far as possible, pushing each node, then pops/emits and pivots right:
+
+```java
+List<Integer> inorderIter(TreeNode root) {
+    List<Integer> out = new ArrayList<>();
+    Deque<TreeNode> stack = new ArrayDeque<>();
+    TreeNode cur = root;
+    while (cur != null || !stack.isEmpty()) {
+        while (cur != null) { stack.push(cur); cur = cur.left; }  // dive left
+        cur = stack.pop();
+        out.add(cur.val);          // visit on the way up
+        cur = cur.right;           // then go right
+    }
+    return out;
+}
+```
+
+**Postorder** is trickiest. The neat trick: run a *modified preorder* (node, right, left) and reverse the result — that yields (left, right, node).
+
+```java
+List<Integer> postorderIter(TreeNode root) {
+    LinkedList<Integer> out = new LinkedList<>();
+    if (root == null) return out;
+    Deque<TreeNode> stack = new ArrayDeque<>();
+    stack.push(root);
+    while (!stack.isEmpty()) {
+        TreeNode n = stack.pop();
+        out.addFirst(n.val);       // reverse-preorder: prepend
+        if (n.left  != null) stack.push(n.left);
+        if (n.right != null) stack.push(n.right);
+    }
+    return out;
+}
+```
+
+<ComplexityTable rows={[
+  {op: "Recursive (any order)", best: "O(n)", average: "O(n)", worst: "O(n)", note: "O(h) call-stack space"},
+  {op: "Iterative (any order)", best: "O(n)", average: "O(n)", worst: "O(n)", note: "O(h) explicit-stack space"},
+]} />
+
+<ProbeNote>Interviewers ask the iterative versions to see whether you understand that recursion *is* a stack. Be ready to state that "iterative" does not mean O(1) space — the stack is still O(h), which is O(n) for a degenerate tree. The truly O(1)-space option is Morris traversal (threading), worth naming as a bonus.</ProbeNote>

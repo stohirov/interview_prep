@@ -1,0 +1,21 @@
+A system you can't observe is a system you can only guess about. Once you move past a single server into microservices and distributed infrastructure, "is it up?" stops being a yes/no question — failures are partial, latency is a distribution, and a single user request fans out across a dozen services. **Observability** is the practice of instrumenting systems so you can ask *new* questions about their behavior in production without shipping new code — and it's built on three pillars: **logs**, **metrics**, and **traces**.
+
+## Why this matters
+
+In an HLD interview, observability is where "I'd build it" meets "I'd operate it." After you've drawn the architecture, a senior interviewer asks: *How would you know this is broken? How would you find the slow service? What do you alert on?* Hand-waving "we'd add logging" is a junior answer. Naming the three pillars, the right metric type for each measurement, how a trace stitches a request across services, and how SLOs drive alerting via an error budget — that's the signal that you've actually carried a pager.
+
+## The mental model
+
+- **Three pillars.** **Logs** are discrete, timestamped events (what happened, with detail). **Metrics** are numeric aggregates over time (how much / how many / how fast — cheap to store, great for dashboards and alerts). **Traces** follow one request across service boundaries (where the time went). Each answers a different question; you need all three.
+- **Structured logging.** Logs should be machine-parseable (JSON key-value), carry a **correlation/trace ID**, and use levels deliberately. Free-text logs don't aggregate.
+- **Metric types.** **Counter** (monotonic — requests, errors), **gauge** (a value that goes up and down — memory, queue depth), **histogram** (distribution of observations, bucketed — latency, sized for percentiles), and **summary** (client-computed quantiles). Choosing the wrong type produces meaningless data.
+- **Distributed tracing.** A **trace** is a tree of **spans**; **context propagation** carries the trace ID across network hops (W3C `traceparent`). **Sampling** controls cost. **OpenTelemetry (OTel)** is the vendor-neutral standard for all of it.
+- **SLI / SLO / SLA.** An **SLI** is a measured indicator (e.g., success rate); an **SLO** is the internal target (99.9%); an **SLA** is the external contract with penalties. The gap below 100% is the **error budget** — how much unreliability you're allowed to spend.
+
+## The canonical references
+
+Google's **SRE Book** (and *The Site Reliability Workbook*) define the SLI/SLO/SLA and error-budget vocabulary interviewers expect. The **OpenTelemetry** spec is the standard for instrumentation; **Prometheus** documentation is the reference for the metric types.
+
+## What the questions cover
+
+The questions break down the three pillars and what each uniquely gives you, the four metric types and when each is correct, distributed tracing (spans, context propagation, sampling, OpenTelemetry), and the SLI/SLO/SLA distinction with how an error budget turns reliability into an engineering decision.

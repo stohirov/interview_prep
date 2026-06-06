@@ -1,0 +1,112 @@
+## 1. Functional requirements
+
+- Post a tweet (text up to 280 chars, optional media).
+- Follow / unfollow another user.
+- Read the **home timeline** — a merged, reverse-chronological feed of tweets from followees.
+- Read a **user timeline** — a single author's tweets.
+- Optional: likes, retweets, replies (out of scope for the core read path).
+
+## 2. Non-functional requirements
+
+- **Scale:** 500M users, **200M DAU**; ~400M tweets/day; **read-heavy** (~100:1 timeline reads to posts).
+- **Latency:** home timeline read p99 < 200 ms; it's the most-hit endpoint on the app.
+- **Availability:** 99.9%+; a stale timeline is acceptable, an unavailable one is not.
+- **Freshness:** a followee's tweet should appear within a few seconds (eventual consistency is fine).
+
+## 3. Capacity estimation
+
+- Posts: 400M/day ≈ **~4,600 writes/s** (×~3 peak ≈ 14K/s).
+- Timeline reads: 200M DAU × ~20 refreshes/day ≈ 4B/day ≈ **~46K reads/s** (×3 peak ≈ 140K/s).
+- **Fan-out writes (push):** avg ~200 followers × 4,600 posts/s ≈ **~920K timeline writes/s** — the real load. A celebrity post (100M followers) is 100M writes from a single tweet → must be handled separately.
+- Storage: 400M tweets/day × 365 × 5 yr ≈ **~730B tweets**. At ~300 B of metadata each ≈ **~220 TB** → sharded. Media is far larger and lives in object storage.
+- Timeline cache: 200M DAU × 800 tweet IDs × ~16 B ≈ **~2.5 TB** of Redis (sharded).
+
+## 4. High-level architecture
+
+<Mermaid caption="Twitter feed — hybrid fan-out: push for normal users via workers, pull-merge for celebrities at read time">{`graph LR
+    U[Client] --> LB[Load Balancer]
+    LB --> WS[Write Service]
+    LB --> RS[Timeline Read Service]
+    WS --> TDB[(Tweet Store - sharded)]
+    WS --> MQ[(Kafka fan-out topic)]
+    MQ --> FW[Fan-out Workers]
+    FW --> TL[(Timeline Cache - Redis)]
+    RS --> TL
+    RS --> GR[(Follow Graph)]
+    RS -->|celebrity pull| TDB
+    WS --> OBJ[(Object Storage)]
+    OBJ --> CDN[CDN]`}</Mermaid>
+
+## 5. API design
+
+```
+POST /api/v1/tweets
+  Body: { "text": "hello", "mediaIds": ["m_91x"] }
+  201:  { "tweetId": "t_8h2k", "createdAt": "..." }
+
+GET /api/v1/timeline/home?cursor=<tweetId>&limit=50
+  200:  { "tweets": [ ... ], "nextCursor": "t_8h2k" }
+
+POST /api/v1/follow   { "targetUserId": "u_44" }
+GET  /api/v1/users/{id}/tweets?cursor=...&limit=50
+```
+
+Timelines are **cursor-paginated** (by tweet ID / snowflake), never offset-paginated — offsets break when the feed shifts.
+
+## 6. Data model
+
+```sql
+CREATE TABLE tweet (
+  tweet_id    BIGINT PRIMARY KEY,        -- snowflake: time-sortable
+  author_id   BIGINT NOT NULL,
+  text        VARCHAR(280),
+  media_ids   TEXT[],
+  created_at  TIMESTAMPTZ NOT NULL
+);                                        -- sharded by author_id
+
+CREATE TABLE follow (
+  follower_id BIGINT NOT NULL,
+  followee_id BIGINT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (follower_id, followee_id)
+);                                        -- index also on followee_id (for fan-out)
+
+-- Home timeline lives in Redis, NOT in SQL:
+--   timeline:{userId} -> sorted set of tweet_ids (score = snowflake), capped to ~800.
+```
+
+## 7. Detailed component design — fan-out
+
+The crux. Follower counts are power-law distributed, so use a **hybrid**:
+
+- **Push (fan-out-on-write).** On a normal user's post, the write service emits an event to Kafka; **fan-out workers** look up the author's followers and prepend the tweet ID to each follower's Redis timeline. Reads then become one `ZREVRANGE`. This covers the ~99.9% of accounts with manageable follower counts.
+- **Pull (fan-out-on-read) for celebrities.** Accounts above a threshold (e.g. >1M followers) are **not** pushed. At read time, the read service merges the user's pushed timeline with a fresh pull of the celebrity followees they follow. This caps fan-out cost and avoids the "single tweet → 100M writes" stampede.
+- **Backfill on follow.** When you follow someone, lazily merge their recent tweets into your timeline (or just let pull fill the gap).
+
+Fan-out workers are horizontally scaled and consume from Kafka, so a viral post becomes queued work rather than a synchronous spike.
+
+## 8. Scaling considerations
+
+- **Timeline cache (main lever).** Redis sorted sets, sharded by user ID; cap each timeline to ~800 IDs (older pages fall back to pull). Tweet *bodies* are hydrated from a separate tweet cache keyed by tweet ID.
+- **Tweet store sharding** by `author_id`; reads of a single author hit one shard.
+- **Hot-key handling.** A celebrity's tweet object is read by millions — replicate it across cache nodes or use a local in-process cache to avoid a hot Redis key.
+- **Media** never touches the timeline path: upload to object storage, serve via CDN, store only IDs in the tweet.
+
+## 9. Trade-offs and alternatives
+
+- **Push vs pull vs hybrid.** Push optimizes reads (the common case) at the cost of write amplification; pull optimizes writes but makes the hottest endpoint slow. Hybrid is more code but the only thing that survives the celebrity case — say this explicitly.
+- **Chronological vs ranked timeline.** Chronological is trivial and a fine interview default; ML ranking (engagement score) improves quality but adds a scoring service and breaks simple cursoring. Mention it as the evolution, don't build it.
+- **Redis timeline vs assemble-on-read.** Precomputed timelines cost memory and write work but give predictable read latency; pure on-read is cheaper to store but unpredictable under fan-in.
+
+## 10. Common follow-up questions
+
+- "A user with 100M followers posts" → that's the celebrity pull path; explain why you don't push.
+- "How fresh is the timeline?" → seconds; fan-out is async via Kafka, freshness vs cost trade-off.
+- "Unfollow / deleted tweet" → tombstone and filter at read time; don't rewrite millions of timelines synchronously.
+- "Ranking and dedup of retweets" → score at read-time hydration; dedup by original tweet ID.
+
+## 11. What interviewers are really probing
+
+<ProbeNote>
+**All styles:** that you identified the read skew and made fan-out the central decision rather than hand-waving "we cache it." **FAANG:** depth on the hybrid fan-out, the celebrity hot-key/hot-write problem, worker pools draining Kafka, and timeline cache sizing. **EU/contracting:** a pragmatic push-first design with a pull path bolted on only for the top accounts, justified on cost. **Regional:** a clean write path, follow graph, timeline endpoint, and a diagram you can defend. The classic failure is choosing pure fan-out-on-write and never addressing the celebrity who turns one tweet into 100M writes — or choosing pure pull and making the most-hit endpoint in the product slow.
+</ProbeNote>

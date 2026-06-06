@@ -1,0 +1,56 @@
+**Problem (min coins).** Given coin denominations and an `amount`, return the **fewest** coins that sum to it, or `-1` if impossible. Coins are unlimited.
+
+**Problem (count ways).** Coin Change 2 — return the **number of distinct combinations** that sum to `amount`.
+
+Both are **unbounded knapsack**: each coin reusable, capacity = `amount`. The subtle difference is in the loop order.
+
+## Coin Change — minimum coins
+
+State `dp[a]` = fewest coins to make amount `a`. Try every coin as the last one used:
+
+```
+dp[a] = min over coins c (c <= a) of (dp[a - c] + 1)
+```
+
+```java
+int coinChange(int[] coins, int amount) {
+    int[] dp = new int[amount + 1];
+    Arrays.fill(dp, amount + 1);          // sentinel "infinity" — amount+1 is unreachable
+    dp[0] = 0;
+    for (int a = 1; a <= amount; a++)
+        for (int c : coins)
+            if (c <= a)
+                dp[a] = Math.min(dp[a], dp[a - c] + 1);
+    return dp[amount] > amount ? -1 : dp[amount];
+}
+```
+
+O(amount · coins) time, O(amount) space. `amount + 1` is a safe sentinel since no valid answer exceeds `amount`.
+
+## Coin Change 2 — count combinations
+
+Here order must **not** matter (1+2 and 2+1 are the same combination). The trick is to put the **coin loop outside** the amount loop, so each coin is fully processed before the next — this counts each combination exactly once.
+
+```java
+int change(int amount, int[] coins) {
+    int[] dp = new int[amount + 1];
+    dp[0] = 1;                            // one way to make 0: take nothing
+    for (int c : coins)                   // coin loop OUTSIDE
+        for (int a = c; a <= amount; a++)
+            dp[a] += dp[a - c];
+    return dp[amount];
+}
+```
+
+If you swapped the loops (amount outside, coin inside), you would count **permutations** instead — that answers a different question (number of ordered sequences).
+
+<Callout kind="warn" title="Loop order is the whole problem">
+- **Min coins:** the `min` makes the result order-independent, so either loop nesting works.
+- **Count combinations:** coin loop **outside**, amount inside — counts each unordered combination once.
+- **Count permutations** (e.g. "Combination Sum IV"): amount loop **outside**, coin inside.
+Getting this nesting wrong is the single most common Coin Change bug.
+</Callout>
+
+<ProbeNote>
+Frame both as unbounded knapsack, then make the loop-order distinction explicit — that is exactly what separates a memorized answer from real understanding. For min coins, note the unreachable sentinel and the final `-1` check. The follow-up "count ways" with swapped semantics (combinations vs permutations) is the classic trap.
+</ProbeNote>

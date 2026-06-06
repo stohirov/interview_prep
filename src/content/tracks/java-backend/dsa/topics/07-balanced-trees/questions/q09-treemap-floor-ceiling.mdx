@@ -1,0 +1,53 @@
+**Problem.** Given a sorted collection of keys, support two queries: the **floor** of `k` (the largest key ≤ `k`) and the **ceiling** of `k` (the smallest key ≥ `k`). For example, over `{10, 20, 30, 40}`: `floor(25) = 20`, `ceiling(25) = 30`, `floor(40) = 40`, `ceiling(45) = null`.
+
+## Brute force — O(n) per query
+
+Scan all keys, tracking the best candidate below and above `k`:
+
+```java
+Integer floorBrute(int[] keys, int k) {
+    Integer best = null;
+    for (int x : keys)
+        if (x <= k && (best == null || x > best)) best = x;
+    return best;
+}
+```
+
+Correct, but O(n) per query and it ignores the fact that the data is ordered. With `q` queries it is O(n·q).
+
+## Optimal — TreeMap, O(log n) per query
+
+A `TreeMap` is a red-black tree, so it keeps keys sorted and exposes the navigation methods directly. Each is a single root-to-leaf descent: **O(log n)**.
+
+```java
+import java.util.TreeMap;
+
+class FloorCeiling {
+    private final TreeMap<Integer, Integer> map = new TreeMap<>();
+
+    void add(int key, int value) { map.put(key, value); }
+
+    // largest key <= k, or null
+    Integer floor(int k)        { return map.floorKey(k); }
+    // smallest key >= k, or null
+    Integer ceiling(int k)      { return map.ceilingKey(k); }
+
+    // strict variants: largest key < k  /  smallest key > k
+    Integer strictlyBelow(int k){ return map.lowerKey(k); }
+    Integer strictlyAbove(int k){ return map.higherKey(k); }
+
+    // when you need the value, not just the key
+    Map.Entry<Integer, Integer> floorEntry(int k) { return map.floorEntry(k); }
+}
+```
+
+The four navigation methods are the whole toolkit:
+
+- **`floorKey(k)`** — largest key `≤ k` (inclusive below).
+- **`ceilingKey(k)`** — smallest key `≥ k` (inclusive above).
+- **`lowerKey(k)`** — largest key `< k` (strict below).
+- **`higherKey(k)`** — smallest key `> k` (strict above).
+
+All four return `null` when no such key exists — for example `ceilingKey` past the maximum. The `*Entry` variants return the key-value pair instead of just the key, and `*Key` vs `*Entry` is the only choice you usually have to make.
+
+<ProbeNote>The interviewer is checking whether you reach for `TreeMap` instead of hand-rolling a binary search. Know the inclusive/strict distinction cold: `floor`/`ceiling` are inclusive (`≤`/`≥`), `lower`/`higher` are strict (`<`/`>`). Remember they return `null` at the boundaries, so guard against NPEs. If asked for the underlying mechanism, it is a red-black tree descent — O(log n) — and the data must be `Comparable` or you must supply a `Comparator`.</ProbeNote>

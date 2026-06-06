@@ -1,0 +1,48 @@
+**DFS** explores as deep as possible down one branch before backtracking. It comes in two forms that are algorithmically identical — the only difference is *where the stack lives*.
+
+## Recursive — the call stack is your stack
+
+The cleanest form. The JVM's call stack does the bookkeeping for you.
+
+```java
+void dfs(int u, Map<Integer,List<Integer>> g, Set<Integer> seen) {
+    if (!seen.add(u)) return;                 // mark visited
+    // process u (pre-order)
+    for (int v : g.getOrDefault(u, List.of()))
+        dfs(v, g, seen);
+}
+```
+
+Short and natural, but it consumes JVM stack frames — **O(V) depth** in the worst case (a long path or skewed graph). On a graph with ~10⁴–10⁵ vertices in a single chain, you risk **StackOverflowError**. Java does **not** optimize tail recursion, so you cannot lean on that.
+
+## Iterative — an explicit stack
+
+Move the stack onto the heap with an `ArrayDeque`. No recursion-depth limit; the cost is slightly more verbose code.
+
+```java
+void dfsIterative(int start, Map<Integer,List<Integer>> g) {
+    Deque<Integer> stack = new ArrayDeque<>();
+    Set<Integer> seen = new HashSet<>();
+    stack.push(start);
+    while (!stack.isEmpty()) {
+        int u = stack.pop();
+        if (!seen.add(u)) continue;           // skip if already visited
+        // process u
+        for (int v : g.getOrDefault(u, List.of()))
+            if (!seen.contains(v)) stack.push(v);
+    }
+}
+```
+
+<Callout kind="warn" title="Iterative DFS visit order differs">
+With the explicit stack you typically mark visited **on pop**, not on push, because a vertex can be pushed multiple times before it's popped. Also note neighbors come off the stack in reverse push order, so the traversal order won't match the recursive version unless you push neighbors in reverse.
+</Callout>
+
+## When to use which
+
+- **Recursive** — default for readability when depth is safely bounded (trees, small/shallow graphs, grid problems where the recursion depth is the grid size).
+- **Iterative** — when depth can reach 10⁴+ and you must avoid stack overflow, or when you need explicit control over the frontier.
+
+Both are **O(V + E)** time and **O(V)** space.
+
+<ProbeNote>The senior signal is naming the failure mode: deep recursion → StackOverflowError, and Java won't do tail-call elimination to save you. Mention the subtle correctness point — recursive DFS marks on entry, iterative DFS marks on pop, and the visit orders differ. BFS swaps the stack for a queue; that one substitution is the whole difference between DFS and BFS.</ProbeNote>

@@ -1,0 +1,103 @@
+**Problem.** Implement a `HashMap` from scratch — `put(key, value)`, `get(key)`, `remove(key)` — without using the library map. This tests whether you actually understand the structure underneath the class you call every day.
+
+## The plan
+
+An **array of buckets**, where each bucket is a chain (linked list) of entries — **separate chaining**, the same scheme as the JDK. Map a key to a bucket with `(hash & (capacity - 1))` when capacity is a power of two, then walk the chain for `equals`-matches.
+
+## Implementation
+
+```java
+public class MyHashMap<K, V> {
+
+    private static final class Entry<K, V> {
+        final K key;
+        V value;
+        Entry<K, V> next;
+        Entry(K key, V value) { this.key = key; this.value = value; }
+    }
+
+    private Entry<K, V>[] buckets;
+    private int size;
+    private static final int DEFAULT_CAPACITY = 16;
+    private static final double LOAD_FACTOR = 0.75;
+
+    @SuppressWarnings("unchecked")
+    public MyHashMap() {
+        buckets = new Entry[DEFAULT_CAPACITY];
+    }
+
+    // spread high bits down, then mask to a power-of-two capacity
+    private int indexFor(K key, int capacity) {
+        int h = (key == null) ? 0 : key.hashCode();
+        h ^= (h >>> 16);
+        return h & (capacity - 1);
+    }
+
+    public void put(K key, V value) {
+        int i = indexFor(key, buckets.length);
+        for (Entry<K, V> e = buckets[i]; e != null; e = e.next) {
+            if (eq(e.key, key)) { e.value = value; return; }   // overwrite
+        }
+        Entry<K, V> head = new Entry<>(key, value);            // prepend new entry
+        head.next = buckets[i];
+        buckets[i] = head;
+        if (++size > buckets.length * LOAD_FACTOR) resize();
+    }
+
+    public V get(K key) {
+        int i = indexFor(key, buckets.length);
+        for (Entry<K, V> e = buckets[i]; e != null; e = e.next) {
+            if (eq(e.key, key)) return e.value;
+        }
+        return null;
+    }
+
+    public boolean remove(K key) {
+        int i = indexFor(key, buckets.length);
+        Entry<K, V> prev = null;
+        for (Entry<K, V> e = buckets[i]; e != null; prev = e, e = e.next) {
+            if (eq(e.key, key)) {
+                if (prev == null) buckets[i] = e.next;   // head removal
+                else prev.next = e.next;                 // mid/tail removal
+                size--;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public int size() { return size; }
+
+    private boolean eq(K a, K b) {
+        return (a == null) ? b == null : a.equals(b);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void resize() {
+        Entry<K, V>[] old = buckets;
+        Entry<K, V>[] bigger = new Entry[old.length * 2];
+        for (Entry<K, V> headEntry : old) {
+            for (Entry<K, V> e = headEntry; e != null; ) {
+                Entry<K, V> next = e.next;        // save before relinking
+                int i = indexFor(e.key, bigger.length);
+                e.next = bigger[i];               // rehash into the new table
+                bigger[i] = e;
+                e = next;
+            }
+        }
+        buckets = bigger;
+    }
+}
+```
+
+## What the design demonstrates
+
+- **Collision handling** via chaining — multiple keys per bucket, walked with `equals`.
+- **The equals/hashCode contract** — `get` finds an entry only if its key both hashes to the same bucket *and* is `equals`. Reusing `hashCode` for placement and `equals` for matching is exactly the JDK contract.
+- **Resizing** at the 0.75 load factor to keep chains short and lookups near O(1) amortized.
+
+<Callout kind="info" title="What we left out vs the real HashMap">
+The JDK also **treeifies** a bucket into a red-black tree once it exceeds 8 entries (capacity ≥ 64), bounding the worst case at O(log n) instead of O(n). Mention it — but you don't need to implement a red-black tree in an interview unless explicitly asked.
+</Callout>
+
+<ProbeNote>They watch for: handling `null` keys, correct **head-vs-middle removal** in the chain (the `prev` bookkeeping), overwrite-on-duplicate-key in `put`, and rehashing into the resized table (note `e.next` must be saved *before* relinking, or you lose the rest of the chain). Bonus points for naming the 0.75 load factor and the treeification you omitted.</ProbeNote>

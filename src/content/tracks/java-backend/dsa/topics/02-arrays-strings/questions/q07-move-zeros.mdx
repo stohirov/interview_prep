@@ -1,0 +1,42 @@
+**Problem.** Move all `0`s to the end of an array **in place** while keeping the relative order of the non-zero elements, in O(n) time and O(1) space. `[0,1,0,3,12]` → `[1,3,12,0,0]`.
+
+## Brute force — O(n) time, but O(n) space
+
+Collect non-zeros, then pad with zeros:
+
+```java
+void moveZerosExtra(int[] a) {
+    int[] out = new int[a.length];
+    int idx = 0;
+    for (int x : a) if (x != 0) out[idx++] = x;
+    System.arraycopy(out, 0, a, 0, a.length);
+}
+```
+
+Correct and stable, but allocates a second array. The interviewer explicitly wants O(1) space.
+
+## Optimal — O(n) time, O(1) space (fast/slow two pointers)
+
+A **slow write pointer** marks where the next non-zero belongs; a **fast read pointer** scans. When the reader finds a non-zero, swap it into the write slot and advance both. Swapping (rather than overwriting then padding) means the zeros bubble to the tail automatically, in one pass:
+
+```java
+public void moveZeroes(int[] a) {
+    int write = 0;                       // next slot for a non-zero
+    for (int read = 0; read < a.length; read++) {
+        if (a[read] != 0) {
+            int tmp = a[write];
+            a[write] = a[read];
+            a[read] = tmp;
+            write++;
+        }
+    }
+}
+```
+
+**Stability** is preserved because non-zeros are placed in the exact order they're encountered. The swap is safe even when `read == write` (it's a no-op self-swap during the prefix with no zeros yet). Each index is visited once → O(n) time, O(1) space, and at most one swap per element.
+
+<Callout kind="info" title="Swap vs overwrite-then-pad">
+An alternative writes non-zeros forward (`a[write++] = a[read]`) then fills `a[write..]` with zeros — also O(n)/O(1) but does two passes and more total writes. The swap version is a single pass and minimizes writes (it only swaps when a zero actually precedes a non-zero), which matters if writes are expensive (e.g. flash memory) — a nice point to raise.
+</Callout>
+
+<ProbeNote>They're testing the fast/slow two-pointer compaction pattern and the **stability** requirement (relative order of non-zeros must hold). State O(n)/O(1) explicitly. Bonus: note the self-swap is harmless, contrast swap vs overwrite-and-pad on write count, and confirm you never reorder the non-zeros. A common bug is overwriting with the write pointer but forgetting to zero-fill the tail.</ProbeNote>

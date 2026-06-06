@@ -1,0 +1,58 @@
+**Problem.** A **topological sort** is a linear ordering of a directed graph's vertices such that for every edge `u → v`, `u` comes before `v`. It exists **iff the graph is a DAG** (no cycles). It answers "in what order can I do these tasks given their dependencies?" — build systems, course prerequisites, package installs.
+
+There are two standard algorithms; know both and when each is natural.
+
+## Kahn's algorithm (BFS / indegree)
+
+Repeatedly emit any vertex with **indegree 0** (no remaining prerequisites), then remove it and decrement its neighbors' indegrees. A queue holds the currently-ready vertices.
+
+```java
+int[] kahn(int n, List<List<Integer>> g) {
+    int[] indeg = new int[n];
+    for (List<Integer> nbrs : g) for (int v : nbrs) indeg[v]++;
+
+    Queue<Integer> q = new ArrayDeque<>();
+    for (int i = 0; i < n; i++) if (indeg[i] == 0) q.add(i);
+
+    int[] order = new int[n]; int idx = 0;
+    while (!q.isEmpty()) {
+        int u = q.poll();
+        order[idx++] = u;
+        for (int v : g.get(u))
+            if (--indeg[v] == 0) q.add(v);
+    }
+    return idx == n ? order : new int[0];   // idx < n  =>  a cycle exists
+}
+```
+
+The cycle check is free: if you emit fewer than `n` vertices, some indegrees never hit 0, which means a cycle. This is why Kahn is the go-to when you must *also* detect cycles (Course Schedule).
+
+## DFS-based (postorder + reverse)
+
+Run DFS; when a vertex **finishes** (all descendants processed), push it onto a stack. The reversed finish order is a valid topological order. Reuse the white/gray/black coloring to detect cycles simultaneously.
+
+```java
+boolean dfs(int u, List<List<Integer>> g, int[] color, Deque<Integer> out) {
+    color[u] = 1;
+    for (int v : g.get(u)) {
+        if (color[v] == 1) return false;            // back edge -> cycle, no topo order
+        if (color[v] == 0 && !dfs(v, g, color, out)) return false;
+    }
+    color[u] = 2;
+    out.push(u);                                    // finished -> prepend
+    return true;
+}
+```
+
+The stack ends up holding the reverse-postorder, which *is* the topological order.
+
+## Choosing between them
+
+<ComplexityTable rows={[
+  {op: "Kahn (BFS)", best: "O(V+E)", average: "O(V+E)", worst: "O(V+E)", note: "iterative; natural cycle check; gives lexicographically-controllable order with a PQ"},
+  {op: "DFS postorder", best: "O(V+E)", average: "O(V+E)", worst: "O(V+E)", note: "recursive; concise; watch stack depth"},
+]} />
+
+Both are **O(V + E)**. Pick **Kahn** when you want an iterative solution, an explicit cycle check, or control over tie-breaking (swap the queue for a `PriorityQueue` to get the lexicographically smallest order). Pick **DFS** when recursion is clean and depth is safe.
+
+<ProbeNote>Define it precisely: a linear order respecting all edges, existing only for a DAG. Name both algorithms and the cycle-detection hook in each — Kahn emits &lt; n vertices, DFS hits a gray node. The "smallest lexicographic topo order" twist is a common follow-up; the answer is Kahn with a min-heap instead of a plain queue.</ProbeNote>

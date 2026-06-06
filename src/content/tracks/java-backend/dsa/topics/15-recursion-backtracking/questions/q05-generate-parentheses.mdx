@@ -1,0 +1,43 @@
+**Problem.** Given `n` pairs of parentheses, generate all well-formed combinations. For `n = 3`: `((()))`, `(()())`, `(())()`, `()(())`, `()()()`.
+
+## Brute force — O(2^(2n) · n) time
+
+Generate every string of length `2n` over `{'(', ')'}`, then check each for balance. There are `2^(2n)` candidates and validation is O(n), so the cost is `O(2^(2n) · n)` — most of which is wasted on malformed strings.
+
+## Optimal — backtracking with pruning
+
+Build the string character by character, but only place a parenthesis that *can still* lead to a valid result. Two invariants prune the tree:
+
+- Place `(` only while `open < n` (we still have opening brackets to spend).
+- Place `)` only while `close < open` (never close more than we have opened).
+
+When the string reaches length `2n`, it is guaranteed balanced — record it. This visits only valid prefixes, so the count is the **Catalan number** `C(n)`, and the work is `O(4ⁿ / √n)` — exponentially fewer nodes than brute force.
+
+```java
+List<String> generateParenthesis(int n) {
+    List<String> result = new ArrayList<>();
+    backtrack(result, new StringBuilder(), 0, 0, n);
+    return result;
+}
+
+void backtrack(List<String> result, StringBuilder path, int open, int close, int n) {
+    if (path.length() == 2 * n) {       // complete and provably balanced
+        result.add(path.toString());
+        return;
+    }
+    if (open < n) {                     // can still open
+        path.append('(');
+        backtrack(result, path, open + 1, close, n);
+        path.deleteCharAt(path.length() - 1);   // unchoose
+    }
+    if (close < open) {                 // can still close
+        path.append(')');
+        backtrack(result, path, open, close + 1, n);
+        path.deleteCharAt(path.length() - 1);   // unchoose
+    }
+}
+```
+
+The `StringBuilder` is the shared `path`; each branch appends, recurses, then deletes its character. The two `if` guards *are* the pruning — there is no separate validity check because we never construct an invalid prefix.
+
+<ProbeNote>Interviewers want the two invariants stated precisely: open up to `n`, close strictly less than open. A common mistake is allowing `)` when `close < n` instead of `close < open`, which lets `)(` through. Expect a follow-up on the Catalan-number count and why the search space is `O(4ⁿ/√n)`, not `2^(2n)`.</ProbeNote>

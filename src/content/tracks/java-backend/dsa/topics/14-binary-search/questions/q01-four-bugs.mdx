@@ -1,0 +1,38 @@
+**Problem.** Binary search is four lines, yet it's famously bug-prone — Bentley reported most programmers can't write it correctly. What are the four classic bugs?
+
+## The reference implementation
+
+```java
+int binarySearch(int[] a, int target) {
+    int lo = 0, hi = a.length - 1;     // inclusive [lo, hi]
+    while (lo <= hi) {
+        int mid = lo + (hi - lo) / 2;
+        if (a[mid] == target) return mid;
+        else if (a[mid] < target) lo = mid + 1;
+        else hi = mid - 1;
+    }
+    return -1;
+}
+```
+
+## Bug 1 — Midpoint overflow
+
+`mid = (lo + hi) / 2` overflows `int` when `lo + hi` exceeds `2³¹ − 1`, producing a negative index and an `ArrayIndexOutOfBoundsException`. Fix: `lo + (hi - lo) / 2`. This shipped in `java.util.Arrays.binarySearch` for nine years and was documented by Joshua Bloch in 2006.
+
+## Bug 2 — Wrong loop condition
+
+With **inclusive** `hi = length - 1`, the guard must be `lo <= hi`. Writing `lo < hi` exits when `lo == hi` and never inspects that last single element — a silent miss. The two consistent conventions are `[lo, hi]` with `lo <= hi`, or `[lo, hi)` with `lo < hi` and `hi = length`. Mixing them is the bug.
+
+## Bug 3 — Range that doesn't shrink
+
+Updating `lo = mid` (instead of `mid + 1`) or `hi = mid` (instead of `mid - 1`) can leave the range identical when it's down to one or two elements, causing an **infinite loop**. Always step strictly past `mid` in the standard search.
+
+## Bug 4 — Wrong boundary on duplicates
+
+Plain search returns *any* matching index. For **first/last occurrence**, returning on the first `==` hit is wrong — you must record the candidate and keep searching the left (for first) or right (for last) half. Getting this off by one is the most common "almost right" answer.
+
+<Callout kind="tip" title="A discipline that kills all four">
+Pick one interval convention and never deviate; always use the overflow-safe mid; always move strictly past `mid` in the exact-match search; and for boundary variants, don't return early — narrow toward the boundary and remember the best candidate.
+</Callout>
+
+<ProbeNote>Name all four crisply: overflow midpoint, off-by-one loop condition, non-shrinking range (infinite loop), and early-return on duplicates. Citing the real `Arrays.binarySearch` overflow bug signals you've internalized why this is hard, not just memorized the template.</ProbeNote>

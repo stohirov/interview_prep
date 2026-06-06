@@ -1,0 +1,20 @@
+The **web crawler** (the bot behind a search index, a price scraper, or an archive like the Wayback Machine) looks deceptively simple — "fetch a page, extract links, repeat" — but at scale it becomes a study in *coordination under politeness constraints*. It is the classic interview test of whether you can manage a giant work queue, dedupe billions of URLs cheaply, and be a good citizen of the open web.
+
+## The shape of the problem
+
+A crawler is a distributed **BFS/DFS over the web graph**. The core loop is: pull a URL from a frontier, resolve DNS, fetch, store the content, parse out new links, and feed the *unseen* ones back into the frontier. The hard parts are not the fetch — they are the **URL frontier** (which URL next, and how to keep it from exploding), **deduplication** (have I seen this URL? this *content*?), and **politeness** (don't hammer one domain, obey `robots.txt`). It is write-heavy and embarrassingly parallel, but bounded by courtesy, not CPU.
+
+## What the interviewer is probing, by style
+
+- **FAANG** — go deep on the frontier design (priority + politeness queues), Bloom-filter dedup at 1B-page scale, and distributed coordination: how do N crawler nodes split the URL space without double-fetching? Expect "how do you detect duplicate *content*, not just duplicate URLs?"
+- **EU / remote contracting** — pragmatism and good citizenship: respect `robots.txt`, rate-limit per domain, cache DNS, handle traps and infinite calendars. "How would you crawl politely without getting blocked?"
+- **Regional (EPAM / Uzum)** — a clean producer/consumer design with a real queue (Kafka/RabbitMQ), a sensible storage schema, and a defensible component diagram. Show you can build a focused crawler for a known set of sites.
+
+## The key decisions
+
+1. **URL frontier** — how to prioritize (freshness, importance) *and* enforce politeness (per-host rate limits) in the same structure. This is the heart of the problem.
+2. **Deduplication** — URL-seen tests at scale (Bloom filter to avoid storing every URL in RAM) and content-level dedup (checksum / SimHash for near-duplicates).
+3. **Politeness & DNS** — `robots.txt` parsing/caching, per-domain crawl delay, and a DNS cache to avoid resolution becoming the bottleneck.
+4. **Distributed coordination** — partition the URL space across crawler nodes (hash by host) so each domain has a single owner and politeness is enforceable.
+
+The worked solution applies the full 11-section structure and shows all three style angles where they diverge.

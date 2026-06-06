@@ -1,0 +1,52 @@
+**Problem.** In a sorted array with duplicates, find the **first** and **last** index of a target. Plain binary search returns *some* match — how do you control which boundary you land on?
+
+## Why plain search isn't enough
+
+In `[5, 7, 7, 7, 8, 8, 10]`, searching for `7` might return index 1, 2, or 3 depending on where `mid` lands. To pin down the *first* or *last* occurrence, you must **not return on the first hit** — instead, treat a match as "a valid candidate, but keep narrowing toward the boundary."
+
+## The lower-bound / upper-bound trick
+
+The clean formulation is two helpers. `lowerBound` returns the first index whose value is `>= target`; `upperBound` returns the first index whose value is `> target`. From those, the first occurrence is `lowerBound(target)` (if it actually equals target) and the last is `upperBound(target) - 1`.
+
+```java
+// first index with a[i] >= target  (insertion point on the left)
+int lowerBound(int[] a, int target) {
+    int lo = 0, hi = a.length;          // exclusive hi -> [lo, hi)
+    while (lo < hi) {
+        int mid = lo + (hi - lo) / 2;
+        if (a[mid] < target) lo = mid + 1;   // mid too small -> go right
+        else hi = mid;                       // a[mid] >= target -> mid is a candidate
+    }
+    return lo;
+}
+
+// first index with a[i] > target
+int upperBound(int[] a, int target) {
+    int lo = 0, hi = a.length;
+    while (lo < hi) {
+        int mid = lo + (hi - lo) / 2;
+        if (a[mid] <= target) lo = mid + 1;  // mid <= target -> boundary is further right
+        else hi = mid;
+    }
+    return lo;
+}
+
+int[] searchRange(int[] a, int target) {
+    int first = lowerBound(a, target);
+    if (first == a.length || a[first] != target) return new int[]{-1, -1};
+    int last = upperBound(a, target) - 1;
+    return new int[]{first, last};
+}
+```
+
+**O(log n)** per bound, O(1) space.
+
+## The boundary handling that matters
+
+The whole technique is the `else hi = mid` branch: on a candidate you **shrink the window without discarding `mid`**, because a still-earlier occurrence may exist. The only difference between the two bounds is `<` vs `<=` in the comparison — that single character decides whether equal elements push the boundary left or right.
+
+<Callout kind="warn" title="Two off-by-ones to guard">
+Use the exclusive `[lo, hi)` convention with `lo < hi` here (note `hi = a.length`, not `length - 1`), so `lowerBound` can correctly return `a.length` for "target larger than everything." And validate `a[first] == target` before trusting the range — `lowerBound` returns an insertion point even when the target is absent.
+</Callout>
+
+<ProbeNote>Frame it as lower/upper bound rather than two ad-hoc searches — the `< vs <=` symmetry is elegant and hard to get wrong once you see it. The key behavior to articulate: a match is a candidate, not a stop condition; keep shrinking toward the boundary. This generalizes to `Collections.binarySearch`'s "(-insertionPoint - 1)" return for misses.</ProbeNote>

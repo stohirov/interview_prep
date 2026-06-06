@@ -1,0 +1,22 @@
+Asynchronous messaging is how you decouple services in time, absorb load spikes, and turn a brittle chain of synchronous calls into a resilient pipeline. Two families dominate the conversation: traditional **message queues** (RabbitMQ, SQS, ActiveMQ) and **distributed logs** (Kafka, Pulsar, Kinesis). They look similar from a distance — producers put messages in, consumers take them out — but their internal model, ordering guarantees, and operational shape are different enough that picking the wrong one shows up months later as pain.
+
+## Why this matters
+
+The moment a design has more than two services, an interviewer will probe how they communicate. "Do you call the inventory service synchronously, or publish an event?" The right answer almost always involves a broker, and the follow-ups are relentless: *What happens if the consumer is down? What if it processes the same message twice? What if messages arrive out of order? Where do poison messages go?* Naming the broker is the easy part; reasoning about its guarantees is the senior signal.
+
+## The mental model
+
+- **Queue vs log.** A **queue** (RabbitMQ) treats a message as a transient work item — once acknowledged, it's gone, and the broker tracks per-message state. A **log** (Kafka) is an append-only, durably retained sequence; consumers track their own **offset** and the same record can be re-read by many independent consumers. Queues excel at task distribution; logs excel at replayable event streams and multiple consumers.
+- **Delivery guarantees.** **At-most-once** (fire and forget), **at-least-once** (retry until acked — the practical default, implies duplicates), and **exactly-once** (the hard one). The pragmatic answer is *at-least-once delivery + idempotent consumers* = effectively-once processing.
+- **Ordering.** Global ordering is expensive; the realistic guarantee is **per-key / per-partition** ordering. Kafka achieves it by hashing a key to a partition and giving each partition to exactly one consumer in a group.
+- **Backpressure.** When producers outrun consumers, you must shed, buffer, or slow down — never silently drop or OOM. Logs buffer on disk; queues bound their depth.
+- **DLQ.** Messages that repeatedly fail go to a **dead-letter queue** for inspection rather than blocking the main flow forever.
+- **Outbox + CDC.** Writing to the database *and* publishing to the broker is a **dual-write** problem — they can't be atomic across two systems. The **transactional outbox** writes the event to a DB table in the same transaction; **CDC** (Debezium reading the WAL) then ships it to Kafka reliably.
+
+## The canonical reference
+
+Kleppmann's *DDIA* **Chapter 11 ("Stream Processing")** is the standard treatment of logs vs queues, delivery semantics, and exactly-once. Confluent's Kafka docs and the Debezium project cover the streaming and CDC specifics.
+
+## What the questions cover
+
+The questions contrast the queue and log models (RabbitMQ vs Kafka), dissect the three delivery guarantees and why exactly-once is hard, explain Kafka's partition-and-consumer-group ordering, cover backpressure and dead-letter queues, and finish with the outbox/CDC pattern for the dual-write problem.

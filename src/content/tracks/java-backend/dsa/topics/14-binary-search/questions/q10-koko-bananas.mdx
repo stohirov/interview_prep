@@ -1,0 +1,42 @@
+**Problem.** Koko has `piles` of bananas and `h` hours before the guards return. Each hour she picks one pile and eats up to `k` bananas from it (if the pile has fewer, she finishes it and waits out the hour). Find the **minimum eating speed `k`** that lets her finish all piles within `h` hours.
+
+## Why this is binary search on the answer
+
+There's no array to search — we search the **speed `k`** itself. Feasibility is monotonic: if speed `k` finishes in time, any faster speed also does (`F F F T T T` over increasing `k`). So binary-search the smallest feasible `k`.
+
+## Optimal — search the speed, O(n log(maxPile))
+
+The answer lies in `[1, max(piles)]` — speed 1 is the slowest sensible value, and eating at `max(piles)` per hour clears every pile in one hour each. For a candidate `k`, hours needed is `Σ ceil(pile / k)`; feasible iff that's `<= h`.
+
+```java
+int minEatingSpeed(int[] piles, int h) {
+    int lo = 1, hi = 0;
+    for (int p : piles) hi = Math.max(hi, p);   // fastest useful speed = biggest pile
+
+    while (lo < hi) {
+        int k = lo + (hi - lo) / 2;
+        if (hoursNeeded(piles, k) <= h) hi = k;  // k works -> try slower (smaller)
+        else lo = k + 1;                          // too slow -> must go faster
+    }
+    return lo;                                    // smallest feasible speed
+}
+
+private long hoursNeeded(int[] piles, int k) {
+    long hours = 0;
+    for (int p : piles)
+        hours += (p + k - 1) / k;                 // ceil(p / k) without floating point
+    return hours;
+}
+```
+
+**O(n log(max(piles)))** time — `log(max)` binary-search steps, each an O(n) feasibility scan — and **O(1)** space.
+
+## The two details
+
+The ceiling `(p + k - 1) / k` avoids floating-point rounding bugs. And accumulate `hours` as a `long`: with up to 10⁴ piles of up to 10⁹ bananas at speed 1, the sum overflows `int`.
+
+<Callout kind="tip" title="The template you're applying">
+Bound `[lo, hi]` from the problem's physics, write a monotonic `feasible(mid)`, and use `feasible(mid) → hi = mid` to converge on the *smallest* feasible value. Koko, Capacity to Ship Packages, and Split Array Largest Sum are the same template with a different feasibility test.
+</Callout>
+
+<ProbeNote>State the monotonicity ("faster never hurts") to justify binary search, bound `hi = max(piles)`, and compute hours with integer ceiling. The `long` accumulator for the hour count is the overflow trap interviewers plant. The `hi = mid` on feasible / `lo = mid + 1` on infeasible pattern returning the minimum feasible answer is the reusable core.</ProbeNote>

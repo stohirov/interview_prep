@@ -1,0 +1,125 @@
+## 1. Functional requirements
+
+- Upload a photo with a caption (`POST /media`), store it durably, generate thumbnails.
+- View a **home feed** of posts from accounts you follow (`GET /feed`).
+- **Like** and **comment** on posts; see counts.
+- **Stories** — ephemeral media that expires after 24h.
+- **Hashtag search** — find recent posts by tag.
+
+## 2. Non-functional requirements
+
+- **Scale:** 500M DAU; ~100M new photos/day; **read-heavy** (~100:1 read/write on feed).
+- **Latency:** feed and image load p99 < 200 ms (CDN-served).
+- **Availability:** 99.9%+; reads must survive write-path degradation.
+- **Durability:** an uploaded photo must never be lost (11 9s object storage).
+- **Consistency:** feed and counts may be **eventually** consistent (seconds).
+
+## 3. Capacity estimation
+
+- Writes: 100M photos/day ≈ **~1,160 uploads/s** (×~3 peak ≈ 3.5K/s).
+- Feed reads: 500M DAU × ~20 feed opens/day ≈ 10B/day ≈ **~115K reads/s** (×3 peak ≈ 350K/s) → cache aggressively.
+- Storage (originals): 100M/day × ~1.5 MB ≈ **~150 TB/day** raw; with 3–4 thumbnail renditions add ~30%. Over 5 yr ≈ **~250 PB** → object storage, not a DB.
+- Metadata: 100M rows/day × ~300 B ≈ **~30 GB/day** ≈ ~55 TB / 5 yr → sharded.
+- Feed cache: 500M users × ~500 post IDs × ~16 B ≈ **~4 TB** in Redis (sharded).
+
+## 4. High-level architecture
+
+<Mermaid caption="Instagram — upload pipeline writes blobs to object storage and CDN; feed served from a precomputed Redis cache">{`graph LR
+    U[Client] --> LB[Load Balancer]
+    LB --> API[API / Edge Service]
+    API -->|upload| UP[Upload Service]
+    UP --> S3[(Object Storage S3)]
+    UP -->|event| MQ[(Kafka)]
+    MQ --> ENC[Thumbnail / Encode Workers]
+    ENC --> S3
+    S3 --> CDN[CDN]
+    CDN --> U
+    API -->|write post| FAN[Fan-out Service]
+    FAN --> FEED[(Redis Feed Cache)]
+    API -->|read feed| FEED
+    API --> META[(Sharded Metadata DB)]
+    API -->|likes/comments| CNT[Counter Service]
+    API -->|search| IDX[(Hashtag Index ES)]`}</Mermaid>
+
+## 5. API design
+
+```http
+POST /api/v1/media        # multipart or pre-signed S3 upload
+  Body: { "caption": "...", "objectKey": "u123/abc.jpg", "tags": ["sunset"] }
+  201:  { "postId": "p_88f3", "renditions": ["thumb","med","orig"] }
+
+GET  /api/v1/feed?cursor=<ts_postId>&limit=30
+  200:  { "items": [ { "postId":"p_88f3", "author":"u9", "url":"https://cdn/...", "likes":1240 } ], "next": "..." }
+
+POST /api/v1/media/{postId}/likes          # idempotent per (user,post)
+POST /api/v1/media/{postId}/comments       { "text": "..." }
+POST /api/v1/stories                        { "objectKey": "...", "ttl": 86400 }
+GET  /api/v1/search/tags/{tag}?cursor=...
+```
+
+Large uploads use a **pre-signed S3 URL** so bytes go client→S3 directly, never through your app servers.
+
+## 6. Data model
+
+```sql
+CREATE TABLE post (
+  post_id     BIGINT PRIMARY KEY,        -- snowflake (time-sortable)
+  author_id   BIGINT NOT NULL,
+  object_key  TEXT NOT NULL,             -- S3 key for the original
+  caption     TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- Shard by author_id.
+
+CREATE TABLE follow (
+  follower_id BIGINT NOT NULL,
+  followee_id BIGINT NOT NULL,
+  PRIMARY KEY (follower_id, followee_id)
+);
+
+CREATE TABLE story (
+  story_id    BIGINT PRIMARY KEY,
+  author_id   BIGINT NOT NULL,
+  object_key  TEXT NOT NULL,
+  expires_at  TIMESTAMPTZ NOT NULL        -- TTL index, 24h
+);
+-- Likes/comments counts live in a counter store (Redis/Cassandra), not as
+-- synchronous UPDATEs on post. Hashtag postings live in a search index.
+```
+
+## 7. Detailed component design
+
+- **Upload + encoding pipeline.** Client uploads the original to S3 via a pre-signed URL; S3 emits an event to Kafka; encode workers generate thumbnail/medium renditions and write them back to S3. The CDN pulls from S3 on first miss. Nothing blocks the user request on encoding.
+- **Feed generation (hybrid fan-out).** On a normal user's post, the fan-out service pushes the `postId` into each follower's Redis sorted set (key `feed:{userId}`, score = timestamp) — **fan-out-on-write**. For **celebrities** (followers above a threshold) we skip push and instead **pull** their recent posts at read time and merge them with the user's precomputed feed. This caps write amplification while keeping reads fast.
+- **Counts.** Likes/views are sharded counters updated asynchronously (Kafka → aggregator), surfaced as eventually-consistent, sometimes approximate numbers — far cheaper than row locks at 350K/s.
+- **Hashtag search.** Posts are indexed into Elasticsearch (or an inverted index) on tag; recency-ranked, served outside the hot feed path.
+- **Stories.** Same blob pipeline; rows carry a `expires_at` TTL so they auto-vanish after 24h.
+
+## 8. Scaling considerations
+
+- **CDN is the main read lever** — images and even feed thumbnails are served from edge, offloading ~95%+ of byte traffic.
+- **Feed cache** — Redis sorted sets, sharded by user; jittered TTLs and a capped feed length (~500–1000 IDs) bound memory.
+- **Metadata DB** — sharded by `author_id`; reads of a post by ID are point lookups.
+- **Async everything** — encoding, fan-out, counts, and indexing are all off the request path via Kafka.
+- **Hot keys** — celebrity posts bypass push to avoid fan-out storms; their content is heavily CDN-cached.
+
+## 9. Trade-offs and alternatives
+
+- **Fan-out-on-write vs on-read.** Push gives O(1) reads but huge write amplification for celebrities; pull is cheap to write but slow to read. **Hybrid** is the accepted answer — state the follower threshold as the tuning knob.
+- **Approximate vs exact counts.** Exact like counts need synchronous coordination and don't scale; approximate eventually-consistent counters are the standard trade-off.
+- **Pre-signed upload vs proxy upload.** Pre-signed keeps bytes off your servers (cheaper, faster) but ties you to the object store's auth model.
+- **Postgres+Redis+S3 (EU/regional) vs Cassandra/DynamoDB + bespoke feed infra (FAANG)** — ops simplicity vs raw scale.
+
+## 10. Common follow-up questions
+
+- A celebrity with 100M followers posts — how do you avoid a fan-out storm? (Pull-on-read for celebrities.)
+- How do you rank the feed (chronological vs ML ranking)? Ranking layer reads candidate IDs from cache, scores them.
+- How do stories expire cheaply? TTL index + lazy filtering on read.
+- Image optimization — serve WebP/AVIF and device-appropriate renditions from the CDN.
+- Preventing abuse / rate limiting uploads (see the rate-limiting topic).
+
+## 11. What interviewers are really probing
+
+<ProbeNote>
+**All styles:** that you separated blob storage (S3 + CDN) from metadata, made encoding/fan-out asynchronous, and recognized feed generation as the core problem. **FAANG:** depth on hybrid fan-out, the celebrity edge case, feed-cache design, and eventually-consistent counts. **EU/contracting:** a pragmatic S3 + CloudFront + Postgres + Redis stack with cost justification. **Regional:** a clean upload API with pre-signed URLs, a schema separating media from blobs, and a defensible diagram. The classic failure is putting image bytes in the database, or doing pure fan-out-on-write and getting destroyed by the celebrity case.
+</ProbeNote>

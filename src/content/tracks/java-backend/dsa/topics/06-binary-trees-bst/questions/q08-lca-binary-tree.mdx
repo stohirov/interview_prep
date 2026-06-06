@@ -1,0 +1,41 @@
+**Problem.** Given a **general binary tree** (no ordering) and two nodes `p` and `q` guaranteed to exist, find their **lowest common ancestor**.
+
+## Why the BST trick fails here
+
+Without the ordering invariant, you cannot tell from a node's value which subtree contains a target — you have to actually **search both subtrees**. The insight: a node is the LCA if `p` and `q` are found in *different* subtrees beneath it, *or* the node itself is one of them and the other lies below.
+
+## Brute force — parent pointers, O(n) time, O(n) space
+
+Walk the tree recording each node's parent, climb from `p` collecting its ancestors into a set, then climb from `q` until you hit one of them. Correct, but it needs an auxiliary parent map and ancestor set — O(n) extra space.
+
+## Optimal — single post-order recursion, O(n) time, O(h) space
+
+Do one DFS that returns, for each subtree, "did you find `p` or `q` (or am I one of them) down here?" The first node where the answer comes back *true from both sides* is the LCA.
+
+```java
+TreeNode lowestCommonAncestor(TreeNode root, TreeNode p, TreeNode q) {
+    if (root == null || root == p || root == q) return root;  // base / found a target
+
+    TreeNode left  = lowestCommonAncestor(root.left,  p, q);
+    TreeNode right = lowestCommonAncestor(root.right, p, q);
+
+    if (left != null && right != null) return root;  // p and q split here -> LCA
+    return left != null ? left : right;              // both (or one) on one side
+}
+```
+
+How to read the return values:
+
+- A `null` from a side means neither target was found there.
+- A non-null from a side means that side found a target (or the LCA already, deeper down).
+- If **both** sides return non-null, `p` and `q` were discovered in opposite subtrees, so the **current node is their LCA**.
+- If only one side is non-null, that value bubbles up — it is either a target (whose ancestor may still be the LCA, the "node is its own descendant" case) or the LCA already found deeper.
+
+Each node is visited once — **O(n) time**, **O(h)** recursion stack.
+
+<ComplexityTable rows={[
+  {op: "Parent-pointer + set", best: "O(n)", average: "O(n)", worst: "O(n)", note: "O(n) extra space"},
+  {op: "Post-order recursion", best: "O(n)", average: "O(n)", worst: "O(n)", note: "O(h) stack, no extra structures"},
+]} />
+
+<ProbeNote>This is a frequent Meta/Google question precisely because the recursion is subtle — practice explaining *what a non-null return means* (a target or the LCA found below). Two clarifications interviewers love: "What if a node can be its own ancestor?" (the `root == p` base case handles it) and "What if `p` or `q` might *not* exist in the tree?" (then you need a found-count variant, since the bare version assumes both are present).</ProbeNote>

@@ -1,0 +1,30 @@
+A hash set is the right default, but it throws ordering away to get O(1). The moment a problem needs **order**, that's the wrong trade — reach for `TreeMap`/`TreeSet` (red-black trees, O(log n)).
+
+## When a sorted structure wins
+
+- **Ordered iteration.** Iterating a `TreeMap` yields keys in sorted order for free. A `HashMap` iterates in undefined (effectively random) order, so sorting its keys costs an extra O(n log n) pass.
+- **Range queries.** `subMap(from, to)`, `headMap`, `tailMap` return a view of all keys in a range in O(log n + k). A hash map can only do this by scanning everything — O(n).
+- **Nearest-key / floor & ceiling.** `floorKey(x)` (largest key ≤ x), `ceilingKey(x)` (smallest key ≥ x), `lower`, `higher` — all O(log n). A hash map has no concept of "nearest"; the only way is a full scan.
+- **Min / max.** `firstKey()` / `lastKey()` are O(log n) (or O(1) on a cached pointer). A hash map must scan all entries.
+
+```java
+TreeMap<Integer, String> events = new TreeMap<>();
+events.put(100, "a"); events.put(250, "b"); events.put(400, "c");
+
+events.floorKey(300);          // 250  — last event at or before t=300
+events.ceilingKey(300);        // 400  — next event at or after t=300
+events.subMap(150, 350);       // {250=b} — everything in [150, 350)
+events.firstKey();             // 100
+```
+
+## The classic trap
+
+> "Given timestamps, find the most recent reading at or before time T."
+
+A `HashMap<Long, Reading>` cannot answer this without scanning every key. A `TreeMap` does it with one `floorEntry(T)` in O(log n). This "nearest-key" shape — rate limiters keyed by time, version lookups, calendar/scheduling, IP-range routing — is where candidates who reach for a hash map by reflex get stuck.
+
+<Callout kind="tip" title="Rule of thumb">
+Need membership/counting only → `HashSet`/`HashMap` (O(1)). Need order, ranges, or nearest-key → `TreeSet`/`TreeMap` (O(log n)). The log n is cheap insurance when the access pattern is ordered.
+</Callout>
+
+<ProbeNote>This is a trick question — the interviewer is checking whether you reflexively reach for a `HashMap`. Listen for the keywords *sorted*, *range*, *between*, *nearest*, *floor/ceiling*, *most recent before* — any of them flips the answer to `TreeMap`. Also worth naming `LinkedHashMap` for *insertion/access* order without the O(log n) cost, since that's a different kind of "order."</ProbeNote>

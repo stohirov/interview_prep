@@ -1,0 +1,30 @@
+Once a dataset outgrows a single machine — for **fault tolerance**, **read throughput**, or **sheer size** — you reach for two orthogonal techniques: **replication** (keep copies of the same data on multiple nodes) and **partitioning / sharding** (split the data across nodes so each holds a subset). Real systems use both at once: data is partitioned, and each partition is replicated. These are among the most heavily probed senior topics because they are where consistency, availability, and scale collide in practice.
+
+## Replication vs partitioning — the distinction
+
+- **Replication** answers "how do I survive a node dying and scale reads?" by storing the *same* data on several nodes. The hard problems are keeping copies in sync and deciding what happens when they diverge.
+- **Partitioning** answers "how do I store more data and writes than one machine can hold?" by giving each node a *different* slice. The hard problems are choosing the slice boundaries and rebalancing without downtime.
+
+<Diagram caption="Partition first, then replicate each partition">{`
+  Dataset
+    |  partition (shard) by key
+    +--> Partition 1 --> replicas: [P1a][P1b][P1c]
+    +--> Partition 2 --> replicas: [P2a][P2b][P2c]
+    +--> Partition 3 --> replicas: [P3a][P3b][P3c]
+`}</Diagram>
+
+## Replication topologies
+
+There are three families, in increasing complexity:
+
+1. **Single-leader** — one node accepts writes, replicates to followers. Simple, the default for relational databases. The cost is a write bottleneck and failover complexity.
+2. **Multi-leader** — several nodes accept writes (e.g., per data center). Better write availability and locality, but introduces write conflicts that must be resolved.
+3. **Leaderless (Dynamo-style)** — any replica accepts writes; consistency comes from quorums (W+R>N), with read repair and anti-entropy reconciling divergence.
+
+## Partitioning strategies
+
+The two base strategies are **range partitioning** (contiguous key ranges per shard — great for range scans, prone to hot spots) and **hash partitioning** (hash the key to spread load evenly — kills hot spots but loses range queries). **Consistent hashing** with **virtual nodes** is the technique that makes hash partitioning cheap to rebalance, which is why it underpins Dynamo, Cassandra, and most distributed caches.
+
+## The recurring problems
+
+Replication brings **replication lag** (followers trail the leader → stale reads, fixed with read-your-writes and monotonic-reads techniques). Partitioning brings **hot partitions** (skewed load on one shard) and **resharding** (moving data when you add capacity, ideally without downtime). The questions in this topic cover each topology, both partitioning strategies, consistent hashing with virtual nodes, and the operational realities of lag, resharding, and hot keys.

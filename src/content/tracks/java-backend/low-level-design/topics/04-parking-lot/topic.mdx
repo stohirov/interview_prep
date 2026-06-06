@@ -1,0 +1,14 @@
+The **parking lot** is the single most common LLD problem worldwide — Amazon, EPAM, Uber, and most product companies use it as a warm-up. It is popular because it has a clean domain (everyone understands parking), it naturally exercises 3–4 design patterns, and it scales from a 5-minute sketch to a 45-minute deep dive depending on how many follow-ups the interviewer pulls in.
+
+## What the interviewer is testing
+
+- Can you turn an ambiguous prompt into crisp requirements (sizes? floors? payment? multiple gates?) before touching code?
+- Do you model entities with clear responsibilities, or do you build one God class that does everything?
+- Do you choose patterns because they earn their place — Strategy for pricing/allocation, Factory for vehicle/spot creation, Observer for availability — rather than to show off?
+- Can you discuss trade-offs: how spot allocation is chosen, how you'd make it thread-safe when two cars arrive at the same gate at once?
+
+## How to frame it
+
+Start by **clarifying scope**: multiple floors, several vehicle types (motorcycle, car, bus/truck) and matching spot sizes, ticket on entry, pay on exit, pricing by duration. State your non-functional assumptions out loud — concurrency on the spot pool, extensibility for new vehicle/spot types and pricing schemes.
+
+Then drive the canonical flow: **vehicle arrives → gate finds a free compatible spot → issues a ticket → on exit, fee is computed by a pricing strategy → payment → spot freed → waiting observers notified.** The worked solution below follows the full 9-section structure; treat it as the template for every other design problem in this module.

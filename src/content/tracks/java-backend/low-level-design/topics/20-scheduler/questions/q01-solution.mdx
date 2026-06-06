@@ -1,0 +1,174 @@
+## 1. Functional requirements
+
+- Schedule a **one-shot** task after a delay, a **recurring** task at a fixed rate/delay, or by a **cron** expression.
+- `cancel(taskId)` removes a scheduled task; recurring tasks reschedule themselves after each run.
+- Tasks are arbitrary units of work (a `Task`/`Runnable`).
+- Optional **tick listeners** observe the clock (stopwatch / progress UI).
+
+## 2. Non-functional requirements
+
+- **Correct ordering** — the earliest-due task always runs first (priority by next-run time).
+- **Testability** — time is injected via a `Clock`, never read from `System.now()` directly.
+- **Concurrency** — the ready queue is accessed by submitters and the worker(s); must be thread-safe.
+- **Overrun & missed-run policy** — define fixed-rate vs fixed-delay behavior and catch-up for runs missed during a pause.
+- **Distributed** scheduling (leader election, sharding, persistence) is **out of scope** — an HLD concern.
+
+## 3. Core entities
+
+| Entity | Responsibility |
+| --- | --- |
+| `Clock` | Source of "now"; injectable for testing. |
+| `Task` | Command — the unit of work (`run()`). |
+| `ScheduledTask` | A `Task` + next-run time + recurrence; ordered by next-run time. |
+| `SchedulingStrategy` | Computes the next run (FIFO / priority / cron / fixed-rate). |
+| `Scheduler` | Holds the ready queue + worker loop; schedule/cancel. |
+| `TickListener` | Observer notified on each clock tick (stopwatch). |
+
+## 4. Class diagram
+
+<Mermaid caption="Task scheduler class model">{`classDiagram
+    class Scheduler {
+      -PriorityQueue~ScheduledTask~ queue
+      -Clock clock
+      -List~TickListener~ listeners
+      +schedule(Task, SchedulingStrategy) String
+      +cancel(String)
+      +start()
+    }
+    class ScheduledTask {
+      -String id
+      -Task task
+      -Instant nextRun
+      -SchedulingStrategy strategy
+      +compareTo(ScheduledTask) int
+    }
+    class Task {
+      <<interface>>
+      +run()
+    }
+    class SchedulingStrategy {
+      <<interface>>
+      +next(Instant) Optional~Instant~
+    }
+    class Clock {
+      <<interface>>
+      +now() Instant
+    }
+    class TickListener {
+      <<interface>>
+      +onTick(Instant)
+    }
+    Scheduler o-- ScheduledTask
+    Scheduler o-- Clock
+    Scheduler o-- TickListener
+    ScheduledTask o-- Task
+    ScheduledTask o-- SchedulingStrategy
+    FixedRateStrategy ..|> SchedulingStrategy
+    CronStrategy ..|> SchedulingStrategy`}</Mermaid>
+
+## 5. Key interfaces and classes
+
+```java
+interface Task { void run(); }                  // Command
+
+interface Clock { Instant now(); }              // injectable for tests
+
+interface SchedulingStrategy {
+    Optional<Instant> next(Instant from);       // empty -> do not reschedule (one-shot done)
+}
+
+final class FixedRateStrategy implements SchedulingStrategy {
+    private final Duration period;
+    FixedRateStrategy(Duration period) { this.period = period; }
+    public Optional<Instant> next(Instant from) { return Optional.of(from.plus(period)); }
+}
+
+final class OneShotStrategy implements SchedulingStrategy {
+    public Optional<Instant> next(Instant from) { return Optional.empty(); }
+}
+
+final class ScheduledTask implements Comparable<ScheduledTask> {
+    final String id = UUID.randomUUID().toString();
+    final Task task;
+    Instant nextRun;
+    final SchedulingStrategy strategy;
+    ScheduledTask(Task task, Instant nextRun, SchedulingStrategy strategy) {
+        this.task = task; this.nextRun = nextRun; this.strategy = strategy;
+    }
+    public int compareTo(ScheduledTask o) { return nextRun.compareTo(o.nextRun); }
+}
+
+interface TickListener { void onTick(Instant now); }   // Observer
+```
+
+```java
+public final class Scheduler {
+    private final Clock clock;
+    private final PriorityQueue<ScheduledTask> queue = new PriorityQueue<>();
+    private final Set<String> cancelled = ConcurrentHashMap.newKeySet();
+    private final List<TickListener> listeners = new CopyOnWriteArrayList<>();
+    private final Object lock = new Object();
+
+    public Scheduler(Clock clock) { this.clock = clock; }
+
+    public String schedule(Task task, Instant firstRun, SchedulingStrategy strategy) {
+        ScheduledTask st = new ScheduledTask(task, firstRun, strategy);
+        synchronized (lock) { queue.add(st); lock.notifyAll(); }   // wake worker
+        return st.id;
+    }
+    public void cancel(String id) { cancelled.add(id); }
+    public void addTickListener(TickListener l) { listeners.add(l); }
+
+    public void start() {                                          // worker loop
+        new Thread(() -> {
+            while (true) {
+                ScheduledTask st;
+                synchronized (lock) {
+                    while (queue.isEmpty()) waitQuietly();          // sleep until work arrives
+                    st = queue.peek();
+                    long waitMs = Duration.between(clock.now(), st.nextRun).toMillis();
+                    if (waitMs > 0) { waitFor(waitMs); continue; }  // sleep until due, recheck
+                    queue.poll();
+                }
+                listeners.forEach(l -> l.onTick(clock.now()));
+                if (cancelled.remove(st.id)) continue;              // dropped if cancelled
+                run(st.task);
+                st.strategy.next(clock.now()).ifPresent(t -> {      // reschedule recurring
+                    st.nextRun = t;
+                    synchronized (lock) { queue.add(st); }
+                });
+            }
+        }, "scheduler-worker").start();
+    }
+    private void run(Task t) { try { t.run(); } catch (Exception ignored) {} }
+    // waitQuietly / waitFor wrap lock.wait(...) and swallow InterruptedException
+}
+```
+
+## 6. Design patterns used
+
+- **Command** — `Task` encapsulates a unit of work; the scheduler runs it without knowing what it does, enabling logging, retry, and undo.
+- **Strategy** — `SchedulingStrategy` makes one-shot, fixed-rate, fixed-delay, priority, and cron interchangeable.
+- **Observer** — `TickListener` lets stopwatches/UI react to each tick without coupling to the scheduler internals.
+- **Singleton** (optional) — a single process-wide `Scheduler` instance.
+
+## 7. Trade-offs and alternatives
+
+- **Fixed-rate vs fixed-delay.** Fixed-rate schedules `start + n·period` (next run measured from the previous *scheduled* time); fixed-delay measures from *completion*. Under overruns, fixed-rate can pile up runs while fixed-delay drifts — pick deliberately and decide whether to skip or coalesce missed fixed-rate runs.
+- **Priority queue vs timing wheel.** A min-heap keyed by next-run is O(log n) per op and ideal for a moderate number of tasks. A **hashed timing wheel** gives O(1) insert/expire for huge numbers of timers (Netty/Kafka use this) at the cost of complexity.
+- **Single worker vs pool.** One worker preserves ordering but a long task blocks the queue; a thread pool runs tasks concurrently but loses strict ordering and needs care so reschedule isn't lost.
+- **`Clock` injection.** Wrapping time behind `Clock` makes the whole thing deterministically testable (advance a fake clock) — a real senior habit.
+
+## 8. Common follow-up questions
+
+- **Distributed scheduler** — persistent store, leader election, and sharding of the timer space so tasks survive restarts and don't double-fire (the HLD bridge).
+- **Missed runs** after a pause/crash — catch-up policy: run all missed occurrences, run once, or skip to the next slot.
+- **Overlap handling** — disallow concurrent runs of the same task (run-once-at-a-time), or allow with a concurrency cap.
+- **Time-zone correctness** — cron expressions evaluated in a specific zone, DST transitions (a 2am job during a spring-forward), and storing UTC internally.
+- **Cron parsing** — a `CronStrategy` that computes the next matching `Instant` from a cron spec.
+
+## 9. What interviewers are really probing
+
+<ProbeNote>
+That you (1) modeled the work as a **Command** so the scheduler is agnostic to it, (2) reached for a **priority queue keyed by next-run time** and a worker that sleeps until the head is due rather than busy-polling, (3) put scheduling policy behind a **Strategy** and could explain **fixed-rate vs fixed-delay** under overruns, and (4) injected a **`Clock`** for testability while naming the **missed-run / catch-up** and **time-zone/DST** hazards. Knowing the timing-wheel alternative and the DST edge case is what reads as senior.
+</ProbeNote>

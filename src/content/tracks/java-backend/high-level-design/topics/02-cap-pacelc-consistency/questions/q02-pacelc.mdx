@@ -1,0 +1,41 @@
+## PACELC — what it adds to CAP
+
+CAP only tells you what happens **during a partition** — a rare event. PACELC, introduced by Daniel Abadi in 2012, extends it to cover the **common case: normal operation, when there is no partition.** That makes it the more practically useful framing for choosing a data store.
+
+### The formulation
+
+> **If** there is a **P**artition, choose between **A**vailability and **C**onsistency; **E**lse (no partition), choose between **L**atency and **C**onsistency.
+
+<Diagram caption="PACELC: two trade-offs, one in each operating regime">{`
+                 +-- Partition (P) -----> choose  A  or  C
+  PACELC --------|
+                 +-- Else      (E) -----> choose  L  or  C
+`}</Diagram>
+
+### Why the "else" branch matters more
+
+Partitions are infrequent; the latency-vs-consistency trade-off, by contrast, is paid on **every single request**. Strong consistency (linearizability) requires coordination — a write must reach a quorum or the leader before it's acknowledged, which costs round trips. If you instead allow asynchronous replication and serve from the nearest replica, you get **lower latency** but **weaker consistency** (a read might miss a recent write). PACELC names this everyday tension that CAP ignores entirely.
+
+### Classifying real systems
+
+Each system gets a two-part label: its partition behavior, then its normal-operation behavior.
+
+| System | Partition (P) | Else (E) | Label | Reading |
+|---|---|---|---|---|
+| DynamoDB / Cassandra (default) | A | L | **PA/EL** | Availability under partition; low latency otherwise |
+| Cassandra tuned to QUORUM | A | C | **PA/EC** | Available under partition, but pays latency for consistency normally |
+| Single-leader RDBMS (sync replication) | C | C | **PC/EC** | Consistent always, at a latency cost |
+| MongoDB (default) | C | C | **PC/EC** | Rejects writes without primary; reads from primary |
+| MongoDB (read from secondaries) | C | L | **PC/EL** | Consistent under partition, low latency reads otherwise |
+
+<Callout kind="info" title="The labels are about defaults, and defaults are tunable">
+Most modern stores let you move the dial per request — Cassandra's consistency level, DynamoDB's strong vs eventual reads. The PACELC label describes the typical configuration, not an immutable property. Saying "it's PA/EL by default but I can request QUORUM reads to get EC for this critical path" is a strong senior answer.
+</Callout>
+
+### How to use it in a design
+
+When you choose a store, narrate both branches: "Under a partition I'm fine serving stale data here (PA), and in normal operation I'll take the low-latency, eventually-consistent read (EL), because this is a feed and staleness of a few hundred milliseconds is invisible." Conversely, for a payment ledger: "PC/EC — I'll pay the coordination latency because I can never serve a wrong balance." This is the framing **DDIA Chapter 9** points toward when it argues CAP alone is too coarse for real design decisions.
+
+<ProbeNote>
+The interviewer wants to see that you understand the *everyday* cost of consistency, not just the partition case. Naming the PA/EL vs PC/EC label for the store you chose — and tying the "E" branch to your latency budget — shows you grasp why CAP alone is insufficient.
+</ProbeNote>

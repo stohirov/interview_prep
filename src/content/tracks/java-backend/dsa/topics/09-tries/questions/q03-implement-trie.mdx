@@ -1,0 +1,72 @@
+**Problem.** Implement a `Trie` (prefix tree) supporting three operations: `insert(word)`, `search(word)` — returns true only if the *exact word* was inserted — and `startsWith(prefix)` — returns true if any inserted word has that prefix.
+
+## The structure
+
+Each node holds links to children (one per next character) and a flag marking whether a complete word ends at that node. The flag is what distinguishes `search` from `startsWith`: searching for `"car"` must fail if you only ever inserted `"card"`, even though the `car` path exists.
+
+## Two children layouts
+
+- **`TrieNode[26]`** — O(1) child access, ideal for a fixed lowercase `a–z` alphabet, but R pointers per node (mostly null).
+- **`Map<Character, TrieNode>`** — pays only for children that exist, handles any alphabet (Unicode, mixed case), at the cost of hashing per step.
+
+Both give the same Big-O. Below is the map version (general, the one to default to in an interview unless the alphabet is fixed and small); the array variant is noted after.
+
+```java
+class Trie {
+    private static class Node {
+        Map<Character, Node> children = new HashMap<>();
+        boolean isWord = false;
+    }
+
+    private final Node root = new Node();
+
+    void insert(String word) {
+        Node cur = root;
+        for (char c : word.toCharArray())
+            cur = cur.children.computeIfAbsent(c, k -> new Node());
+        cur.isWord = true;
+    }
+
+    boolean search(String word) {
+        Node node = find(word);
+        return node != null && node.isWord;   // exact word: path AND end-flag
+    }
+
+    boolean startsWith(String prefix) {
+        return find(prefix) != null;           // prefix: path is enough
+    }
+
+    // walk the path; return the node where it ends, or null if it breaks
+    private Node find(String s) {
+        Node cur = root;
+        for (char c : s.toCharArray()) {
+            cur = cur.children.get(c);
+            if (cur == null) return null;
+        }
+        return cur;
+    }
+}
+```
+
+`search` and `startsWith` share the `find` walk; the only difference is whether you additionally require `isWord`. `computeIfAbsent` keeps `insert` clean — create the child only if missing.
+
+## Array variant
+
+For lowercase `a–z`, swap the map for `Node[] children = new Node[26]` and index with `c - 'a'`:
+
+```java
+int idx = c - 'a';
+if (cur.children[idx] == null) cur.children[idx] = new Node();
+cur = cur.children[idx];
+```
+
+## Complexity
+
+<ComplexityTable rows={[
+  {op: "insert", best: "O(L)", average: "O(L)", worst: "O(L)", note: "L = word length; creates ≤ L nodes"},
+  {op: "search", best: "O(L)", average: "O(L)", worst: "O(L)", note: "one path walk + isWord check"},
+  {op: "startsWith", best: "O(L)", average: "O(L)", worst: "O(L)", note: "path walk only"},
+  {op: "space", best: "—", average: "—", worst: "O(N·R)", note: "N nodes; array layout reserves R pointers each"},
+]} />
+
+<ProbeNote>The make-or-break detail is the `isWord` flag: without it `search` and `startsWith` are indistinguishable, and `search("car")` wrongly returns true when only `"card"` was inserted. State that all three ops are O(L), **independent of how many words are stored** — that's the trie's selling point. Be ready to justify the children layout: array for a small fixed alphabet, HashMap for large/Unicode alphabets. `computeIfAbsent` is the idiomatic insert.</ProbeNote>

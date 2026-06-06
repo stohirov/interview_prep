@@ -1,0 +1,73 @@
+**Problem.** Given an integer array `nums` and an integer `k`, return the `k` most frequent elements, in any order.
+
+## Shared first step — count frequencies
+
+Every approach starts with one O(n) pass:
+
+```java
+Map<Integer, Integer> freq = new HashMap<>();
+for (int n : nums) freq.merge(n, 1, Integer::sum);
+```
+
+The question is how to pull the top `k` out of the `m` distinct frequencies.
+
+## Brute force — O(m log m) time
+
+Sort the distinct keys by frequency descending and take the first `k`. Simple, but sorts all `m` entries when you want only `k`.
+
+## Optimal (heap) — O(m log k) time, O(k) space
+
+Keep a **min-heap of size k keyed by frequency**. Its root is the least-frequent current winner; evict it whenever the heap overflows. The top-K pattern again.
+
+```java
+int[] topKFrequent(int[] nums, int k) {
+    Map<Integer, Integer> freq = new HashMap<>();
+    for (int n : nums) freq.merge(n, 1, Integer::sum);
+
+    // min-heap by frequency; least-frequent winner sits at the top, ready to evict
+    PriorityQueue<Integer> heap =
+        new PriorityQueue<>(Comparator.comparingInt(freq::get));
+    for (int key : freq.keySet()) {
+        heap.offer(key);
+        if (heap.size() > k) heap.poll();   // drop the least frequent
+    }
+
+    int[] out = new int[k];
+    for (int i = 0; i < k; i++) out[i] = heap.poll();
+    return out;
+}
+```
+
+`Comparator.comparingInt(freq::get)` is overflow-safe and reads cleanly — prefer it to `(a, b) -> freq.get(a) - freq.get(b)`.
+
+## When k is large — bucket sort, O(n)
+
+A value appears at most `n` times, so frequencies are bounded by `n`. Index an array of buckets **by frequency**, then walk from the highest frequency down, collecting until you have `k`. No heap, no sort.
+
+```java
+int[] topKFrequentBucket(int[] nums, int k) {
+    Map<Integer, Integer> freq = new HashMap<>();
+    for (int n : nums) freq.merge(n, 1, Integer::sum);
+
+    List<Integer>[] buckets = new List[nums.length + 1];   // buckets[f] = vals with freq f
+    for (var e : freq.entrySet())
+        buckets[e.getValue()] = buckets[e.getValue()] == null
+            ? new ArrayList<>() : buckets[e.getValue()];
+    for (var e : freq.entrySet()) buckets[e.getValue()].add(e.getKey());
+
+    int[] out = new int[k];
+    int idx = 0;
+    for (int f = buckets.length - 1; f >= 0 && idx < k; f--) {   // high -> low
+        if (buckets[f] == null) continue;
+        for (int v : buckets[f]) { out[idx++] = v; if (idx == k) break; }
+    }
+    return out;
+}
+```
+
+<ComplexityTable rows={[
+  {op: "Heap (size k)", best: "O(n)", average: "O(n + m log k)", worst: "O(n + m log k)", note: "best when k << m or streaming"},
+  {op: "Bucket sort", best: "O(n)", average: "O(n)", worst: "O(n)", note: "frequencies bounded by n; O(n) buckets"},
+]} />
+
+<ProbeNote>Volunteer both and state the cutoff: heap is O(n + m log k) and stream-friendly; bucket sort is O(n) but assumes bounded integer frequencies and spends O(n) on buckets. Use `Comparator.comparingInt(freq::get)` — never `freq.get(a) - freq.get(b)` (overflow). Edge cases: `k` equals the distinct count, and ties at the cutoff (any valid set is accepted).</ProbeNote>

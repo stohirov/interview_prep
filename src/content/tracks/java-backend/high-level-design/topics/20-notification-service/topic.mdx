@@ -1,0 +1,22 @@
+A **notification service** is the system that every other service depends on to reach a user — push, SMS, email, in-app. It looks simple ("just send a message") but is actually a distributed-systems problem dressed as a CRUD app: you fan messages across heterogeneous third-party providers with wildly different reliability, enforce per-user preferences and rate limits, retry with backoff, and never lose or duplicate a critical message. At 10B notifications/day it is a high-throughput pipeline where the hard parts are **delivery guarantees** and **provider failure isolation**, not the API.
+
+## The shape of the problem
+
+The defining characteristic is **unreliable downstream dependencies you don't control**. APNs, FCM, Twilio, SendGrid, an SMTP relay — each can be slow, rate-limit you, or go down, and each has its own throughput ceiling. So the core design is a **queue-backed, channel-abstracted pipeline** with retries, exponential backoff, a **dead-letter queue (DLQ)**, per-channel rate limiting, and **provider failover**. The second axis is **idempotency**: the same logical notification must not be sent twice when a worker crashes mid-send.
+
+This HLD complements the **LLD notification-system topic** (topic 18 in the low-level-design track), which drills into the class design — the channel/provider abstraction, the Strategy and Factory patterns, and the template engine — at the object level. Here we stay at the system level: queues, scaling, and delivery guarantees.
+
+## What the interviewer is probing, by style
+
+- **FAANG** — go deep on delivery semantics (at-least-once + idempotency keys), retry/backoff + DLQ, per-channel rate limiting and provider failover, and how you scale to 10B/day without head-of-line blocking across channels. Expect "what happens when Twilio is down for 10 minutes?"
+- **EU / remote contracting** — pragmatism: a managed queue (SQS/Kafka) + a channel abstraction over providers, with clear cost and preference-management handling. Justify retry policy and GDPR-aware preference storage.
+- **Regional (EPAM / Uzum)** — a clean send API, a channel/provider abstraction, a templates + preferences schema, and an honest retry/DLQ story you can implement in Spring.
+
+## The key decisions
+
+1. **Channel abstraction** — one internal model, pluggable per-channel providers (push/SMS/email/in-app) behind a common interface.
+2. **Queue + workers** — accept fast, enqueue, deliver asynchronously; isolate channels into separate queues to avoid head-of-line blocking.
+3. **Reliability** — at-least-once delivery, idempotency keys, retry with exponential backoff, and a DLQ for poison messages.
+4. **Preferences, templates, rate limits, failover** — user opt-outs and quiet hours, server-side templates, per-channel/per-provider rate limiting, and failover to a backup provider.
+
+The worked solution applies the full 11-section structure and shows all three style angles where they diverge.

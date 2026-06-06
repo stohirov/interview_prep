@@ -1,0 +1,35 @@
+Three more structural cues round out the recognition toolkit: **connectivity/grouping** → union-find, **prefix/string matching** → trie, and **finding a boundary in a monotone space** → binary search.
+
+## The decision table
+
+<ComplexityTable rows={[
+  {op: "When you see…", best: "…use", average: "Complexity", worst: "Tell"},
+  {op: "Are X and Y connected? / count groups", best: "union-find (DSU)", average: "≈O(1) amortized per op", worst: "dynamic merging"},
+  {op: "Cycle in undirected graph / redundant edge", best: "union-find", average: "O(E·α)", worst: "—"},
+  {op: "Prefix / autocomplete / many words share prefixes", best: "trie", average: "O(L) per op", worst: "high space"},
+  {op: "Find boundary in a monotone predicate", best: "binary search", average: "O(log n)", worst: "must be monotone"},
+  {op: "Minimize/maximize a feasible value", best: "binary search on the answer", average: "O(n log range)", worst: "feasibility must be monotone"},
+]} />
+
+## Connectivity → union-find
+
+The cue is **dynamic grouping**: "are these two elements in the same set?", "how many connected components?", "does adding this edge create a cycle?" Union-find (disjoint set union) with **path compression + union by rank** gives near-constant amortized time (inverse Ackermann, α). Reach for it over DFS when the graph is built incrementally (edges arrive one at a time) or when you only need connectivity, not paths. Classics: Number of Provinces, Redundant Connection, Accounts Merge.
+
+## Prefix matching → trie
+
+The cue is **shared string prefixes**: autocomplete, "does any word start with…", dictionary lookups, word-search-on-a-grid with many target words. A trie stores characters along edges so common prefixes are stored once; insert/search/`startsWith` are O(L) in the word length, independent of dictionary size. Choose it over a hash set when you specifically need **prefix queries** (a hash set only answers exact-match). The trade-off is space — one node per character path.
+
+## Boundary in monotone space → binary search
+
+The cue is a **monotone predicate**: a condition that is false, false, …, true, true across the search space (or a sorted array). Binary search finds the flip point in O(log n). Two flavors:
+
+- **Classic:** search a *sorted array* for a value or its insertion point.
+- **Binary search on the answer:** when the *answer* lies in a numeric range and "is value `v` feasible?" is monotone (feasible for all `v ≥ threshold`), binary-search the range and test feasibility. Examples: Koko Eating Bananas, Capacity to Ship Packages, "minimize the largest…". The unlock is recognizing that feasibility is monotone even though the input isn't sorted.
+
+## The recognition rule
+
+1. "Connected? / how many groups? / does this edge close a cycle?" → **union-find**.
+2. "Prefix / autocomplete / many words" → **trie**.
+3. "Sorted input" or "minimize a feasible threshold" with a monotone check → **binary search** (classic or on-the-answer).
+
+<ProbeNote>The highest-value tell here is **binary search on the answer** — candidates miss it because the input isn't sorted; the trick is spotting that *feasibility* is monotone over the answer range ("if capacity C works, so does any C′ > C"). For union-find, mention path compression + union by rank for the α bound, and prefer it over DFS when edges arrive dynamically. For trie, justify it over a hash set specifically when prefix queries are needed.</ProbeNote>

@@ -1,0 +1,44 @@
+**Problem.** Given an `m × n` grid of characters and a `word`, return whether the word can be formed by a path of horizontally/vertically adjacent cells, using each cell at most once.
+
+## Brute force
+
+There is no shortcut that avoids searching paths — the brute force *is* trying every starting cell and walking every adjacent path. The optimization is how aggressively we prune and how cheaply we mark visited cells.
+
+## Optimal — DFS backtracking from each cell
+
+From each cell whose character matches `word[0]`, run a DFS that matches successive characters into the four neighbors. The backtracking element: mark a cell visited before recursing, then **unmark it** on the way out so other paths can reuse it.
+
+```java
+boolean exist(char[][] board, String word) {
+    for (int r = 0; r < board.length; r++)
+        for (int c = 0; c < board[0].length; c++)
+            if (dfs(board, word, 0, r, c)) return true;
+    return false;
+}
+
+boolean dfs(char[][] board, String word, int k, int r, int c) {
+    if (k == word.length()) return true;             // matched the whole word
+    if (r < 0 || r >= board.length || c < 0 || c >= board[0].length
+            || board[r][c] != word.charAt(k)) return false;   // out of bounds / mismatch → prune
+
+    char saved = board[r][c];
+    board[r][c] = '#';                               // choose: mark visited in-place
+    boolean found =
+           dfs(board, word, k + 1, r + 1, c)
+        || dfs(board, word, k + 1, r - 1, c)
+        || dfs(board, word, k + 1, r, c + 1)
+        || dfs(board, word, k + 1, r, c - 1);
+    board[r][c] = saved;                             // unchoose: restore
+    return found;
+}
+```
+
+Marking the cell `'#'` in place is the visited-set — no extra `boolean[][]` needed, and restoring `saved` is the unchoose. The bounds-and-mismatch check at the top of `dfs` is the prune that kills dead paths immediately.
+
+Worst case there are `m·n` starts and each DFS branches in (up to) 3 new directions to depth `L = word.length()`, giving **O(m · n · 3^L)** time and **O(L)** recursion-stack space.
+
+<Callout kind="warn" title="The ordering of the guard matters">
+Check the base case `k == word.length()` *before* the bounds check — otherwise a fully matched word ending at the grid edge could be rejected. And restore `board[r][c]` on *every* return path; an early `return true` that skips the restore corrupts the grid for the caller.
+</Callout>
+
+<ProbeNote>Lead with "in-place marking instead of a visited matrix" — it shows you minimize space. Interviewers probe the unchoose: why restore the cell? Because a different valid path may legitimately reuse it. The `O(m·n·3^L)` bound (3, not 4, since you never step back) is the expected complexity answer.</ProbeNote>

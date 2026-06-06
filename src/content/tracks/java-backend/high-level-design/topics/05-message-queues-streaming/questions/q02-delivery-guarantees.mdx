@@ -1,0 +1,50 @@
+## At-most-once, at-least-once, exactly-once — what each guarantees
+
+These three labels describe what a messaging system promises about **how many times a message is delivered (and processed)** in the presence of failures — crashes, retries, lost acks. Every broker forces a choice among them, and the honest senior answer is that "exactly-once delivery" is mostly a myth; what you actually engineer is **at-least-once delivery plus idempotent processing**.
+
+### The three guarantees
+
+- **At-most-once** — deliver and forget. The producer sends and doesn't retry; the consumer processes without strong ack tracking. A message is delivered **zero or one** times: on failure it's simply lost. Lowest latency, no duplicates, but data loss is possible. Fine for high-volume telemetry where a dropped sample doesn't matter.
+- **At-least-once** — retry until acknowledged. If an ack is lost or a consumer crashes mid-process, the message is **redelivered**. A message is delivered **one or more** times — never lost, but **duplicates are guaranteed** to happen eventually. This is the practical default for almost everything.
+- **Exactly-once** — every message takes effect **once and only once**, no loss and no duplicate side effects. The ideal, and the hard one.
+
+<Mermaid caption="The same lost-ack failure produces loss under at-most-once and a duplicate under at-least-once">{`graph LR
+    C[Consumer processes msg] --> A{Ack reaches broker?}
+    A -->|Lost ack, at-most-once| L[Message gone: data loss]
+    A -->|Lost ack, at-least-once| D[Redelivered: duplicate]`}</Mermaid>
+
+### Why exactly-once is hard
+
+The trouble is the **two-generals / dual-action problem**: the consumer must do two things — perform its side effect (write the DB, send the email) **and** record that it did so (commit the offset / ack). These touch two different systems and cannot be made atomic by ordinary means.
+
+- If you **process then ack** and crash in between → the message is redelivered → **duplicate processing**.
+- If you **ack then process** and crash in between → the message is gone → **lost processing**.
+
+There is no ordering of the two steps that is safe against crashes, and the network can always lose the ack so the broker can never be *sure* the consumer succeeded. So end-to-end exactly-once across arbitrary external systems (charging a card, calling a third-party API) is generally **impossible** to guarantee purely at the transport layer.
+
+What systems like **Kafka's exactly-once semantics (EOS)** actually deliver is exactly-once **within Kafka's own boundary** — idempotent producers (dedup via producer ID + sequence number) plus **transactions** that atomically commit produced messages and consumed offsets in the same transaction. That covers the **consume-process-produce** loop *as long as the side effect is another Kafka write*. It does not magically make an external HTTP call exactly-once.
+
+### The practical answer: idempotency
+
+You get **effectively-once** processing by combining **at-least-once delivery** with an **idempotent consumer** — so that reprocessing a duplicate is harmless:
+
+- **Idempotency key / dedup table.** Attach a unique message ID; the consumer records processed IDs and skips anything it has seen (often atomically with the side effect: `INSERT ... ON CONFLICT DO NOTHING`).
+- **Idempotent operations.** Design the side effect to be naturally repeatable — upserts instead of inserts, "set status = SHIPPED" instead of "increment", conditional writes.
+- **Atomic dedup + effect.** Where the side effect is a DB write, write the dedup record in the **same transaction** so the check and the effect commit together.
+
+```text
+on message(id, payload):
+  in one DB transaction:
+    if exists(processed, id): return        # duplicate -> skip
+    apply side effect
+    insert into processed(id)                # commit dedup + effect together
+  ack
+```
+
+<Callout kind="warn" title="Idempotency needs a real key and a retention policy">
+"Just make it idempotent" only works if you have a stable, producer-supplied **idempotency key** (not a server-generated timestamp) and you keep the dedup record long enough to outlive the maximum redelivery window. A dedup table also grows unbounded — give it a TTL or partition it by time.
+</Callout>
+
+<ProbeNote>
+The interviewer wants the three definitions crisply (loss vs duplicates) and the insight that **at-least-once + idempotency = effectively-once**. The strongest signal is explaining *why* true exactly-once is hard — the non-atomicity of side effect and ack — and noting that Kafka's EOS is scoped to its own consume-process-produce loop, not arbitrary external effects.
+</ProbeNote>

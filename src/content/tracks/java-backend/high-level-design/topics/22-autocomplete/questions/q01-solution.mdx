@@ -1,0 +1,106 @@
+## 1. Functional requirements
+
+- Given a **prefix**, return the **top-K** (e.g., 5–10) suggestions.
+- Rank by **popularity** (query frequency); support **trending** terms.
+- Optional **personalization** (boost the user's / locale's history).
+- Suggestions update as the corpus of queries evolves (near-real-time-ish).
+- Out of scope (state it): the search itself; this is only the suggest layer.
+
+## 2. Non-functional requirements
+
+- **Scale:** **100K QPS** of prefix lookups; ~10B distinct historical queries.
+- **Latency:** **p99 < 100 ms** end-to-end (fires on every keystroke).
+- **Freshness:** new trends appear within minutes–hours (tunable).
+- **Availability:** 99.9%+; degrade gracefully (stale suggestions beat none).
+
+## 3. Capacity estimation
+
+- Read QPS: **100K/s** (each typing session = several lookups).
+- Write/log volume: if 100K lookups/s and ~10% are *submitted* queries → ~10K query-events/s into the aggregation pipeline.
+- Trie size: ~10M *popular* terms (the long tail is dropped) × ~30 B + per-node top-K cache. Holding top-10 × ~8 B at branch nodes ≈ a few GB → **fits in memory** on each serving node (shard if larger).
+- Cache: a small set of hot prefixes (single + double letters) serves a large fraction of traffic → an LRU in front of the trie absorbs most reads.
+
+## 4. High-level architecture
+
+<Mermaid caption="Autocomplete — fast in-memory trie read path, decoupled offline rebuild path">{`graph LR
+    U[Client] --> LB[Load Balancer]
+    LB --> SVC[Suggest Service]
+    SVC --> CACHE[(Prefix Cache - Redis)]
+    SVC --> TRIE[In-Memory Trie - sharded by prefix]
+    U -.query logs.-> KAFKA[(Kafka - query events)]
+    KAFKA --> AGG[Aggregator - Spark / Flink]
+    AGG --> BUILD[Trie Builder - top-K per node]
+    BUILD --> SNAP[(Trie Snapshot Store)]
+    SNAP -.hot swap.-> TRIE`}</Mermaid>
+
+## 5. API design
+
+```
+GET /api/v1/suggest?q=java%20int&k=8&locale=en
+  200: {
+    "prefix": "java int",
+    "suggestions": [
+      { "text": "java interview questions", "score": 98213 },
+      { "text": "java integer parseint",    "score": 41002 }
+    ]
+  }
+
+# Internal: query-event ingestion (fire-and-forget from the search box)
+POST /internal/queryEvent  { "query": "java interview", "userId": "u-42", "ts": ... }
+```
+
+The read endpoint is **idempotent and cacheable** (`Cache-Control` on hot prefixes).
+
+## 6. Data model
+
+```sql
+-- Aggregated query frequencies (the offline pipeline's output, input to trie build)
+CREATE TABLE query_freq (
+  query       TEXT PRIMARY KEY,
+  freq        BIGINT NOT NULL,         -- rolling count over a window
+  updated_at  TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX ON query_freq (freq DESC);
+
+-- The serving trie is NOT stored row-by-row in SQL; it is built into a compact
+-- in-memory structure and persisted as a versioned snapshot (e.g., serialized
+-- blob in object storage), then hot-swapped into serving nodes.
+-- Each trie node caches: char edges + a precomputed top-K list of completions.
+```
+
+## 7. Detailed component design
+
+**The trie (read path).** A prefix tree where each node represents a character; walking the prefix is **O(length of prefix)**, independent of how many queries match. The key optimization: **store the top-K completions *at each node*** during the build, so a lookup is "walk to the prefix node, return its cached list" — no traversal of the subtree at query time. (See the DSA tries topic for the structure itself and its space trade-off vs a hash set.) Tries are sharded by first character(s) so the structure scales horizontally.
+
+**Ranking.** Candidates are scored by **popularity** (frequency from the aggregation pipeline). Add a **recency/trend boost** (exponential decay favoring recent spikes) and optional **personalization** (re-rank top candidates against the user's locale/history at query time — cheap because it operates on ~K items, not the whole subtree).
+
+**The offline update pipeline (write path).** Query events stream into Kafka → a Spark/Flink job aggregates frequencies over a rolling window → the **trie builder** recomputes top-K lists per node and produces a new immutable **snapshot** → serving nodes **hot-swap** the new trie atomically (build a fresh one, flip a pointer). This keeps the read path lock-free and the expensive ranking entirely offline.
+
+## 8. Scaling considerations
+
+- **Everything hot stays in memory** — that's how p99 < 100 ms is met; no DB on the query path.
+- **Shard the trie by prefix** across nodes; a router sends `q` to the owning shard.
+- **Cache hot prefixes** (1–2 char prefixes get enormous traffic) in Redis / local LRU.
+- **Immutable snapshots + atomic swap** let you rebuild without downtime or read locks.
+- **Sampling** the query log keeps the aggregation pipeline cheap at high volume.
+
+## 9. Trade-offs and alternatives
+
+- **Trie vs prefix-indexed DB (`LIKE 'abc%'`)** — a SQL prefix scan is fine at small scale and trivially fresh, but can't hit 100K QPS / 100 ms; the trie wins at scale (regional vs FAANG answer).
+- **Top-K per node vs compute-on-read** — caching top-K bloats the trie (more memory) but turns a subtree traversal into an O(1) read; almost always worth it.
+- **Freshness vs cost** — real-time trie updates are expensive; periodic rebuilds (hourly) plus a small "trending overlay" is the pragmatic middle ground.
+- **Trie vs ternary search tree / FST** — an FST (as Lucene uses) is far more memory-compact at the cost of build complexity.
+
+## 10. Common follow-up questions
+
+- How do **new/trending** terms surface? → short-window trend job feeding a small overlay merged at query time, between full rebuilds.
+- How do you **personalize**? → re-rank the top candidates using user/locale signals (operate on K items only).
+- How do you handle **misspellings**? → fuzzy matching (edit-distance) as a fallback when the exact-prefix node is sparse.
+- How do you **filter** offensive suggestions? → a blocklist applied at build time, not query time.
+- What about **multi-word / mid-string** matches? → index suffixes or use n-gram tries (costs more memory).
+
+## 11. What interviewers are really probing
+
+<ProbeNote>
+**All styles:** that you split the system into a *fast in-memory read path* (trie with cached top-K) and a *decoupled offline rebuild path* — recognizing that ranking must not happen on the hot path. **FAANG:** depth on the trie + top-K caching, sharding by prefix, the aggregation/rebuild pipeline, and the latency math at 100K QPS. **EU/contracting:** a freshness-vs-cost conversation and a pragmatic periodic-rebuild design. **Regional:** a clean service with a trie (or prefix index for smaller scale) and a defensible diagram. The classic failure is computing rankings on every keystroke (scanning the subtree or querying the DB live), which blows the 100 ms budget instantly.
+</ProbeNote>

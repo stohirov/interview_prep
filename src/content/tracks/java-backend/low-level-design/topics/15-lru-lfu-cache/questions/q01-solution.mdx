@@ -1,0 +1,232 @@
+## 1. Functional requirements
+
+- A fixed-**capacity** key/value cache with `get(key)` and `put(key, value)`.
+- When full, evict one entry by the configured **policy**: LRU (least recently used), LFU (least frequently used), FIFO, or random.
+- `get` returns the value and counts as a use (for LRU/LFU ordering); `put` of an existing key updates the value and counts as a use.
+- Both operations must run in **O(1)** average time.
+- Pluggable eviction policy; optional **TTL** per entry and hit/miss **stats**.
+
+## 2. Non-functional requirements
+
+- **O(1)** `get` and `put` — no scanning to find the eviction victim.
+- **Thread-safe** variant for a shared service cache (single-threaded variant is fine for a per-request cache).
+- **Extensible** — adding an eviction policy or a cross-cutting concern (TTL, stats, persistence) must not modify the core cache (Open/Closed).
+- **Bounded memory** — exactly `capacity` live entries plus O(capacity) bookkeeping.
+
+## 3. Core entities
+
+| Entity | Responsibility |
+| --- | --- |
+| `Cache<K,V>` | Public interface: `get`, `put`. |
+| `LRUCache` | HashMap (`key → Node`) + doubly-linked list with sentinels. |
+| `Node` | DLL node holding key, value, prev/next (and `freq` for LFU). |
+| `LFUCache` | `key → Node` map + `freq → DLL` map + `minFreq` pointer. |
+| `FrequencyList` (DLL per freq) | Recency-ordered list of nodes sharing a frequency. |
+| `EvictionPolicy` | Strategy interface selecting the victim / ordering. |
+| `TtlCache`, `StatsCache` | Decorators wrapping any `Cache`. |
+
+## 4. Class diagram
+
+<Mermaid caption="Cache class model — eviction Strategy plus Decorators over a Cache interface">{`classDiagram
+    class Cache~K,V~ {
+      <<interface>>
+      +get(K) V
+      +put(K, V) void
+    }
+    class LRUCache {
+      -Map~K,Node~ map
+      -Node head
+      -Node tail
+      -int capacity
+    }
+    class LFUCache {
+      -Map~K,Node~ map
+      -Map~Integer,DLL~ freqLists
+      -int minFreq
+    }
+    class Node {
+      -K key
+      -V value
+      -int freq
+      -Node prev
+      -Node next
+    }
+    class TtlCache {
+      -Cache inner
+      -long ttlMillis
+    }
+    class StatsCache {
+      -Cache inner
+      -long hits
+      -long misses
+    }
+    Cache <|.. LRUCache
+    Cache <|.. LFUCache
+    Cache <|.. TtlCache
+    Cache <|.. StatsCache
+    TtlCache o-- Cache
+    StatsCache o-- Cache
+    LRUCache o-- Node
+    LFUCache o-- Node`}</Mermaid>
+
+## 5. Key interfaces and classes
+
+```java
+interface Cache<K, V> {
+    V get(K key);              // null if absent
+    void put(K key, V value);
+}
+```
+
+### O(1) LRU — HashMap + doubly-linked list with sentinels
+
+The map maps a key to its `Node`, so lookup is O(1). The DLL keeps usage order: **most-recently-used right behind `head`**, least-recently-used right before `tail`. Sentinel `head`/`tail` nodes mean `addFirst`/`remove` never touch null. On `get` we splice the node to the front; on `put` past capacity we drop the node before `tail`.
+
+```java
+final class LRUCache<K, V> implements Cache<K, V> {
+    private final int capacity;
+    private final Map<K, Node<K, V>> map = new HashMap<>();
+    private final Node<K, V> head = new Node<>(null, null);   // sentinels
+    private final Node<K, V> tail = new Node<>(null, null);
+
+    LRUCache(int capacity) {
+        this.capacity = capacity;
+        head.next = tail; tail.prev = head;
+    }
+
+    public V get(K key) {
+        Node<K, V> n = map.get(key);
+        if (n == null) return null;
+        moveToFront(n);                       // mark as most-recently-used
+        return n.value;
+    }
+
+    public void put(K key, V value) {
+        Node<K, V> n = map.get(key);
+        if (n != null) { n.value = value; moveToFront(n); return; }
+        if (map.size() == capacity) {         // evict LRU = node before tail
+            Node<K, V> lru = tail.prev;
+            remove(lru);
+            map.remove(lru.key);
+        }
+        Node<K, V> fresh = new Node<>(key, value);
+        addFirst(fresh);
+        map.put(key, fresh);
+    }
+
+    private void addFirst(Node<K, V> n) {
+        n.prev = head; n.next = head.next;
+        head.next.prev = n; head.next = n;
+    }
+    private void remove(Node<K, V> n) {
+        n.prev.next = n.next; n.next.prev = n.prev;
+    }
+    private void moveToFront(Node<K, V> n) { remove(n); addFirst(n); }
+
+    static final class Node<K, V> {
+        K key; V value; int freq = 1; Node<K, V> prev, next;
+        Node(K key, V value) { this.key = key; this.value = value; }
+    }
+}
+```
+
+### O(1) LFU — key→node map + freq→DLL map + minFreq pointer
+
+Each node carries its access `freq`. `freqLists.get(f)` is a DLL of all nodes currently at frequency `f`, ordered by recency (front = most recent), so ties break by LRU. `minFreq` always points at the lowest occupied frequency, giving O(1) eviction. On any access we **bump** a node: remove it from list `f`, append to list `f+1`, and if list `f` is now empty *and* it was `minFreq`, advance `minFreq`. A fresh `put` resets `minFreq = 1`.
+
+```java
+final class LFUCache<K, V> implements Cache<K, V> {
+    private final int capacity;
+    private int minFreq = 0;
+    private final Map<K, Node<K, V>> map = new HashMap<>();
+    private final Map<Integer, LinkedHashSet<Node<K, V>>> freqLists = new HashMap<>();
+
+    LFUCache(int capacity) { this.capacity = capacity; }
+
+    public V get(K key) {
+        Node<K, V> n = map.get(key);
+        if (n == null) return null;
+        bump(n);
+        return n.value;
+    }
+
+    public void put(K key, V value) {
+        if (capacity == 0) return;
+        Node<K, V> n = map.get(key);
+        if (n != null) { n.value = value; bump(n); return; }
+        if (map.size() == capacity) {                 // evict LFU, LRU-tie-broken
+            LinkedHashSet<Node<K, V>> minList = freqLists.get(minFreq);
+            Node<K, V> victim = minList.iterator().next();   // oldest at minFreq
+            minList.remove(victim);
+            map.remove(victim.key);
+        }
+        Node<K, V> fresh = new Node<>(key, value);    // new entries start at freq 1
+        fresh.freq = 1;
+        map.put(key, fresh);
+        freqLists.computeIfAbsent(1, f -> new LinkedHashSet<>()).add(fresh);
+        minFreq = 1;
+    }
+
+    private void bump(Node<K, V> n) {
+        LinkedHashSet<Node<K, V>> cur = freqLists.get(n.freq);
+        cur.remove(n);
+        if (cur.isEmpty() && n.freq == minFreq) minFreq++;   // advance the pointer
+        n.freq++;
+        freqLists.computeIfAbsent(n.freq, f -> new LinkedHashSet<>()).add(n);
+    }
+
+    static final class Node<K, V> { K key; V value; int freq; Node(K k, V v) { key = k; value = v; } }
+}
+```
+
+`LinkedHashSet` gives both O(1) membership removal and recency ordering (insertion order = recency), so it doubles as the per-frequency DLL. A hand-rolled DLL works too if the interviewer wants no JDK shortcuts.
+
+### Eviction as a Strategy + Decorators
+
+```java
+interface EvictionPolicy<K> {
+    void recordAccess(K key);
+    void recordInsert(K key);
+    K evictionCandidate();      // which key to drop next
+}
+
+final class StatsCache<K, V> implements Cache<K, V> {   // Decorator
+    private final Cache<K, V> inner;
+    private long hits, misses;
+    StatsCache(Cache<K, V> inner) { this.inner = inner; }
+    public V get(K key) {
+        V v = inner.get(key);
+        if (v != null) hits++; else misses++;
+        return v;
+    }
+    public void put(K key, V value) { inner.put(key, value); }
+    double hitRatio() { return hits / (double) (hits + misses); }
+}
+```
+
+## 6. Design patterns used
+
+- **Strategy** — `EvictionPolicy` lets LRU / LFU / FIFO / Random be swapped without editing the cache core.
+- **Decorator** — `TtlCache`, `StatsCache`, and a persistence wrapper add expiry, metrics, and write-through to *any* `Cache` without subclassing.
+- **Facade** — the `Cache<K,V>` interface hides the map + DLL bookkeeping from callers.
+
+## 7. Trade-offs and alternatives
+
+- **LRU build vs `LinkedHashMap`.** Java's `LinkedHashMap(cap, 0.75f, true)` in access-order mode, overriding `removeEldestEntry`, is a five-line LRU — the right answer when production-readiness beats showing internals. Hand-roll the HashMap + DLL only when asked for the mechanism. (Cross-reference: Collections module → **LinkedHashMap & LRU Cache**.)
+- **LFU complexity.** The two-map + `minFreq` design is the only way to keep eviction O(1); a priority queue keyed on frequency makes eviction O(log n) and is the common wrong answer. The subtle bug interviewers hunt for is forgetting to advance `minFreq` when the current min-frequency list empties.
+- **Thread-safety.** Wrap operations in a `ReentrantLock` (the DLL splice is multi-step and cannot be made lock-free trivially), or use `ConcurrentHashMap` for the lookup plus striped/segment locks for the lists. A single global lock is simplest and usually acceptable; mention `Caffeine`, which uses lock-free ring buffers + an async eviction thread to avoid contention entirely.
+- **LRU vs LFU policy fit.** LRU adapts fast to changing hot sets but is fooled by a one-time scan that evicts genuinely hot keys. LFU protects long-term-popular keys but can ossify — old high-frequency keys never leave (mitigated by frequency aging / window-TinyLFU).
+
+## 8. Common follow-up questions
+
+- **Make it thread-safe.** Guard `get`/`put` with a `ReentrantLock`; `ConcurrentHashMap` alone is insufficient because the eviction + DLL splice is a compound action that must be atomic. For high throughput, point to `Caffeine` / segmented locking.
+- **TTL / expiry.** Store an `expiresAt` per node; lazily evict on access and/or run a background sweeper. A `TtlCache` Decorator keeps it orthogonal to the eviction policy.
+- **Distributed cache.** Shard keys across nodes with **consistent hashing** to minimize remapping when a node joins/leaves (links to the HLD caching topic). Each node runs a local LRU/LFU; Redis with `maxmemory-policy allkeys-lru`/`allkeys-lfu` is the off-the-shelf answer.
+- **Write policies.** Write-through (write cache + DB synchronously — consistent, slower writes), write-back (write cache, flush DB async — fast, risks loss on crash), write-around (write DB, skip cache — good when written data is rarely re-read).
+- **Why O(1) for LFU eviction?** Because `minFreq` + the per-frequency LRU list locate the victim directly; no scan over frequencies.
+
+## 9. What interviewers are really probing
+
+<ProbeNote>
+That you (1) reached for **HashMap + doubly-linked list with sentinels** for LRU and can explain why each gives O(1); (2) got LFU right — the **`key→node` + `freq→DLL` + `minFreq`** triad, and specifically *advanced `minFreq` when its list empties* (the classic LFU bug); (3) recognized that `LinkedHashMap` access-order is the production shortcut and chose deliberately between it and the hand-rolled version; and (4) named the real concurrency story — that the multi-step DLL splice needs a lock, `ConcurrentHashMap` alone won't save you, and `Caffeine` is the production-grade option. Coding LFU O(1) cleanly under time pressure is the senior discriminator here.
+</ProbeNote>

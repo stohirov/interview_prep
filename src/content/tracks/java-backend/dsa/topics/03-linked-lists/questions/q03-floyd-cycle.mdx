@@ -1,0 +1,29 @@
+**Floyd's tortoise-and-hare** detects a cycle in O(n) time and O(1) space using two pointers moving at different speeds.
+
+## Detection
+
+Advance `slow` by one node and `fast` by two on each step. If the list ends (`fast` or `fast.next` becomes `null`), there is **no cycle**. If there is a cycle, the fast pointer laps the slow one inside the loop and they eventually **meet at the same node** — that meeting is the proof of a cycle.
+
+Why must they meet? Once both pointers are inside the cycle, the gap between them shrinks by exactly one node per step (fast gains one on slow each step). A gap that decreases by one every step inside a finite loop must hit zero — they collide.
+
+## Finding the cycle's start
+
+This is the elegant part. Let the distance from head to the cycle entry be `a`, and let the meeting point be `b` nodes into the cycle (cycle length `c`).
+
+<Diagram caption="Tortoise and hare distances">{`
+  head ──a──▶ (entry) ──b──▶ (meet)
+                  ▲             │
+                  └──── c-b ────┘   (cycle length c)
+`}</Diagram>
+
+When they meet, slow has traveled `a + b` and fast has traveled twice that, `2(a + b)`. Fast's extra distance is some whole number of laps: `2(a + b) − (a + b) = a + b = k·c`. Therefore `a = k·c − b`, meaning **the distance from the head to the entry equals the distance from the meeting point to the entry** (modulo full laps).
+
+So: reset one pointer to the head, keep the other at the meeting point, and advance **both one step at a time**. They meet exactly at the cycle's entry node.
+
+<Callout kind="tip" title="Why two-speed and not a HashSet">
+A `HashSet` of visited nodes also detects cycles in O(n) time — but O(n) space. Floyd's wins because it is O(1) space. The cycle-start derivation is the part interviewers probe; be ready to write the `a = k·c − b` algebra.
+</Callout>
+
+<ProbeNote>
+Expect the follow-up "now find where the cycle begins" — the reset-to-head trick is the whole point of asking Floyd over a HashSet. Be precise that fast moves two and the *speed difference of one* guarantees they meet. The coding version lives in q07.
+</ProbeNote>

@@ -1,0 +1,42 @@
+**Problem.** Given an array of distinct integers, return all possible permutations. For `[1,2,3]` there are `3! = 6`: `[1,2,3]`, `[1,3,2]`, `[2,1,3]`, `[2,3,1]`, `[3,1,2]`, `[3,2,1]`.
+
+## Brute force
+
+There is no meaningfully cheaper "brute force" — you must produce all `n!` permutations, so the output alone is `Θ(n · n!)`. The naive idea (generate strings/tuples and discard those with repeats) only adds waste. The real question is generating them cleanly *without* duplicating work.
+
+## Optimal — backtracking with a `used[]` flag
+
+Unlike combinations, order matters and every element is used exactly once, so we **do not** use a `start` index — at each position we may pick any element not yet chosen. A boolean `used[]` array tracks which elements are already in the current path.
+
+```java
+List<List<Integer>> permute(int[] nums) {
+    List<List<Integer>> result = new ArrayList<>();
+    backtrack(nums, new boolean[nums.length], new ArrayList<>(), result);
+    return result;
+}
+
+void backtrack(int[] nums, boolean[] used, List<Integer> path, List<List<Integer>> result) {
+    if (path.size() == nums.length) {            // complete permutation
+        result.add(new ArrayList<>(path));       // snapshot copy
+        return;
+    }
+    for (int i = 0; i < nums.length; i++) {
+        if (used[i]) continue;                   // skip already-placed elements
+        used[i] = true;                          // choose
+        path.add(nums[i]);
+        backtrack(nums, used, path, result);     // explore
+        path.remove(path.size() - 1);            // unchoose
+        used[i] = false;
+    }
+}
+```
+
+The tree has depth `n` and branching factor that shrinks from `n` down to 1, giving `n!` leaves. Building each leaf's copy is O(n), so the total is **O(n · n!)** time and **O(n)** auxiliary space (path + `used` + recursion depth), which is optimal — the output cannot be smaller.
+
+The choose/unchoose pair toggles both `path` and `used[i]` together; forgetting to reset `used[i]` is the classic bug, leaking state into sibling branches.
+
+<Callout kind="tip" title="If the input has duplicates">
+For "Permutations II" (duplicate values), sort first, then add `if (i > 0 && nums[i] == nums[i-1] && !used[i-1]) continue;` to skip a duplicate whose identical predecessor wasn't used at this level — that fixes a canonical ordering and avoids duplicate permutations.
+</Callout>
+
+<ProbeNote>Be ready to contrast this with combinations: permutations need a `used[]` flag (every element, any order), combinations need a `start` index (no reuse, order irrelevant). State the O(n · n!) bound and note the output itself is that large, so it's optimal. Have the duplicate-handling tweak ready as a follow-up.</ProbeNote>

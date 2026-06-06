@@ -1,0 +1,42 @@
+**Problem.** Given an array `nums`, return an array where each position holds the **next greater element** — the first element to its right that is strictly larger. If none exists, use `-1`. Example: `[2,1,2,4,3]` → `[4,2,4,-1,-1]`.
+
+## Brute force — O(n²) time
+
+For each index, scan rightward until a larger value appears. Quadratic, and it redundantly re-scans the same suffixes over and over.
+
+## Optimal — O(n) time with a monotonic stack
+
+Keep a stack of **indices** whose answers are still pending, maintained so their values are **decreasing**. When a new element arrives, it is the "next greater" for every pending index with a smaller value — pop and resolve them in a batch. Then push the current index to wait for *its* next greater.
+
+```java
+int[] nextGreater(int[] nums) {
+    int n = nums.length;
+    int[] res = new int[n];
+    Arrays.fill(res, -1);                       // default: no greater element
+    Deque<Integer> stack = new ArrayDeque<>();  // indices, values decreasing
+
+    for (int i = 0; i < n; i++) {
+        // nums[i] resolves every pending index it dominates
+        while (!stack.isEmpty() && nums[stack.peek()] < nums[i]) {
+            res[stack.pop()] = nums[i];
+        }
+        stack.push(i);
+    }
+    return res;   // indices left on the stack keep -1
+}
+```
+
+The loop looks nested, but each index is pushed once and popped once, so the total pop work is bounded by *n* — **O(n)** overall, O(n) stack space.
+
+<ComplexityTable rows={[
+  {op: "nextGreater", best: "O(n)", average: "O(n)", worst: "O(n)", note: "each index pushed and popped once"},
+  {op: "space", best: "O(n)", average: "O(n)", worst: "O(n)", note: "strictly decreasing input fills the stack"},
+]} />
+
+<Callout kind="info" title="The circular variant">
+"Next Greater Element II" wraps around: the answer may be to the *left* if the array is treated as circular. Handle it by iterating `2n` times and indexing with `i % n` — the stack logic is unchanged, you just feed it the array twice.
+</Callout>
+
+<ProbeNote>
+Say the invariant out loud — "stack holds indices in decreasing value order" — and store **indices**, not values, so you can write the result in place (and compute distances for the Daily Temperatures variant). The strict-less-than comparison (`<`) leaves equal elements unresolved until a truly greater one appears, which is what "strictly larger" requires; switch to `<=` if the problem wants the next *greater-or-equal*.
+</ProbeNote>

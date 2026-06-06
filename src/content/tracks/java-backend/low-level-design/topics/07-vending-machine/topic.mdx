@@ -1,0 +1,18 @@
+The **vending machine** is *the* canonical **State pattern** problem. Interviewers love it because the machine is obviously a finite-state machine — coins go in, a product is selected, change is returned — and the naive implementation degenerates into a swamp of `if (state == HAS_MONEY && ...)` conditionals. The whole point of the exercise is to watch you replace that conditional sprawl with polymorphic state objects.
+
+## What the interviewer is testing
+
+- Do you see the **state machine** under the prompt and model it explicitly, or do you smear transition logic across one giant `process()` method?
+- Does each state own its own legal transitions, so adding a state (e.g. `Maintenance`) doesn't force edits to every method?
+- Can you separate the *payment mechanism* (coins, notes, card) from the *machine flow* — i.e. reach for **Strategy** without being told?
+- Do you handle the unhappy paths: insufficient funds, exact-change-unavailable, sold-out, mid-transaction cancel/refund?
+
+## How to frame it
+
+Lead with the transition table — this is the centerpiece. The machine sits in **Idle** until money arrives, moves to **HasMoney** as the balance accumulates, transitions to **Dispensing** on a valid selection, then returns to **Idle** (or **OutOfStock** if that slot emptied). Every illegal action — selecting a product while Idle, inserting more money mid-dispense — is rejected *by the current state object*, not by a central `switch`.
+
+<Callout kind="tip" title="State transitions at a glance">
+`Idle` --insert money--> `HasMoney` --select (funds ok)--> `Dispensing` --done--> `Idle`. From `HasMoney`: `select` with insufficient funds stays in `HasMoney`; `cancel` refunds and returns to `Idle`. Any state where the chosen slot is empty routes to `OutOfStock`, which only accepts a refund/restock.
+</Callout>
+
+Then layer in **Strategy** for payment (so a card reader slots in beside coin/note handling), **Singleton** for the machine instance, and an inventory abstraction that tracks per-slot counts and fires a **threshold alert** when stock runs low. State the trade-off you'll defend: a State object per state is more classes than a `switch`, but it localizes change and makes illegal transitions impossible to forget. The worked solution below follows the full 9-section structure.

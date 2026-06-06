@@ -1,0 +1,27 @@
+**Problem.** Why prefer `lo + (hi - lo) / 2` over `(lo + hi) / 2` for the midpoint? They're algebraically identical — does it really matter?
+
+## The two are equal in math, not in machine arithmetic
+
+Over the integers, `(lo + hi) / 2 == lo + (hi - lo) / 2`. But Java's `int` is **32-bit and wraps around** at `2³¹ − 1 = 2,147,483,647`. The intermediate sum `lo + hi` can exceed that ceiling even when both `lo` and `hi` are valid indices.
+
+```java
+int lo = 1_500_000_000, hi = 2_000_000_000;
+int badMid  = (lo + hi) / 2;        // lo + hi = 3.5e9 -> overflows to NEGATIVE
+int safeMid = lo + (hi - lo) / 2;   // hi - lo = 5e8, always in range -> correct
+```
+
+`lo + hi` overflows to a negative number, integer division yields a negative `mid`, and the next array access throws `ArrayIndexOutOfBoundsException` (or silently corrupts the search).
+
+## Why the safe form never overflows
+
+`hi - lo` is the *width* of the search window. Whenever `lo` and `hi` are both legal non-negative indices with `lo <= hi`, their difference is at most `hi`, which already fits in `int`. Adding `(hi - lo) / 2` back onto `lo` lands between `lo` and `hi` — never out of range. So the safe form is correct for the entire valid index domain.
+
+## This is not hypothetical
+
+The bug existed in `java.util.Arrays.binarySearch` (and the JDK's merge sort) for nine years before Joshua Bloch documented it in 2006 ("Nearly All Binary Searches and Mergesorts Are Broken"). It only manifests on arrays larger than ~1 billion elements — rare in 2006, routine for modern in-memory datasets.
+
+<Callout kind="info" title="Other languages, same idea">
+In C/C++ the analog is `low + (high - low) / 2` for the same overflow reason; some codebases use the unsigned shift `(lo + hi) >>> 1` in Java, which also avoids the sign flip. The subtractive form is the most portable and readable.
+</Callout>
+
+<ProbeNote>The answer is "32-bit integer overflow on `lo + hi`," not "rounding." Give the concrete overflow example, explain why `hi - lo` is always safe, and cite the real JDK bug. Mentioning `(lo + hi) >>> 1` as an alternative shows depth.</ProbeNote>

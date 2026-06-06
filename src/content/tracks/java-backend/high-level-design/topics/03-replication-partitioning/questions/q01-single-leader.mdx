@@ -1,0 +1,49 @@
+## Single-leader replication — why it's the default, and its failure modes
+
+Single-leader replication (also called leader-follower, primary-replica, or master-slave) is the replication model of nearly every relational database — Postgres, MySQL, SQL Server — and many others. It's the default because it's the **simplest model that gives strong consistency**: a single node imposes a total order on writes, so there are never write conflicts to reconcile.
+
+### How it works
+
+<Mermaid caption="Single-leader replication: writes to the leader, reads scale across followers">{`graph LR
+    C[Clients] -->|writes| L[(Leader)]
+    C -->|reads| F1[(Follower 1)]
+    C -->|reads| F2[(Follower 2)]
+    L -->|replication log| F1
+    L -->|replication log| F2`}</Mermaid>
+
+- **All writes go to the leader.** The leader applies them, then streams its change log (WAL shipping, MySQL binlog, or logical replication) to the followers.
+- **Reads can go to any follower** (or the leader). This is the main scaling lever: a read-heavy workload scales by adding followers.
+- Followers apply the log in the same order, so they converge to the leader's state — eventually.
+
+### Synchronous vs asynchronous replication
+
+This is the central tunable:
+
+| Mode | Leader waits for | Trade-off |
+|---|---|---|
+| **Synchronous** | At least one follower to confirm | No data loss on leader failure, but a slow/down follower stalls writes |
+| **Asynchronous** | Nothing — acks immediately | Fast and available, but writes acked-but-not-replicated are lost if the leader dies |
+| **Semi-synchronous** | One sync follower, rest async | Common compromise: durability of one copy, speed of the rest |
+
+Pure synchronous replication to *all* followers is impractical (any single follower outage blocks all writes), so production systems use semi-synchronous or async.
+
+### Failure modes
+
+- **Follower failure — catch-up recovery.** A follower that crashes knows its last applied log position; on restart it requests everything since and catches up. Low impact: reads just route elsewhere meanwhile.
+- **Leader failure — failover.** The hard case. Steps: detect the leader is down (timeout — risks false positives), elect a new leader (ideally the most up-to-date follower), and reconfigure clients/replicas to point at it. Failover is where the dragons live.
+
+<Callout kind="danger" title="Failover hazards">
+**Data loss:** with async replication, writes the old leader acked but hadn't shipped are gone when a new leader is promoted. **Split-brain:** if the old leader comes back and still thinks it's leader, you get two leaders accepting conflicting writes — requires fencing (e.g., STONITH, leases). **Timeout tuning:** too short → unnecessary failovers under load; too long → extended downtime. Automatic failover is genuinely difficult; many shops keep a human in the loop.
+</Callout>
+
+### The fundamental limitation
+
+Single-leader replication **scales reads but not writes** — every write funnels through one node. When write throughput exceeds what one leader can handle, you must either **partition (shard)** so each shard has its own leader, or move to **multi-leader / leaderless** replication. It also means **stale reads** from followers due to replication lag (covered in its own question).
+
+### Style note
+
+For **EU/contracting** and **regional** interviews, single-leader Postgres with read replicas is often the *right, cost-justified* answer up to large scale — don't over-reach for leaderless complexity. For **FAANG**, be ready to explain failover, split-brain fencing, and the write-scaling wall that pushes you toward sharding.
+
+<ProbeNote>
+The interviewer wants you to know *why* it's the default (single writer = no conflicts = strong consistency, simple to operate) and to volunteer the failure modes — especially leader failover, split-brain, and the sync/async durability trade-off. The senior insight is that it scales reads but not writes, which is the bridge to partitioning.
+</ProbeNote>

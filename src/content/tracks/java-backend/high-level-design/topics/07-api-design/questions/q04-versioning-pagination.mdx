@@ -1,0 +1,50 @@
+## API versioning and pagination (offset vs cursor)
+
+Both are about **change over time**: versioning lets the *contract* evolve without breaking callers; pagination lets a *result set* grow without returning megabytes or drifting under concurrent writes.
+
+### Versioning — why and when
+
+You version when a change is **backward-incompatible**: removing/renaming a field, changing a type, tightening validation, altering semantics. Additive changes (a new optional field, a new endpoint) generally don't need a new version — clients should ignore unknown fields. The goal is to **let old and new clients coexist** while you migrate.
+
+**Where to put the version:**
+
+| Approach | Example | Pros | Cons |
+| --- | --- | --- | --- |
+| **URL path** | `GET /api/v2/orders` | obvious, easy to route/cache/curl, browseable | "version" leaks into resource identity; mass URL changes |
+| **Header** | `Accept: application/vnd.acme.v2+json` | clean URLs, content negotiation, per-request | invisible in a browser, easy to forget, harder to cache |
+| **Query param** | `GET /orders?version=2` | simple | muddies caching and the URL semantics |
+
+In practice **URL versioning wins for public APIs** — it's explicit, cache-friendly, and easy for callers to discover; **header versioning** is favored by purists who want URLs to identify resources, not contracts. State the trade-off; don't dogmatize.
+
+<Callout kind="tip" title="Version sparingly">
+A new major version is expensive — you maintain two code paths. Prefer **additive, non-breaking** evolution and tolerant readers (ignore unknown fields). Reserve `v2` for genuinely breaking changes, and publish a deprecation window + sunset date for the old one.
+</Callout>
+
+### Pagination — offset vs cursor
+
+You never return an unbounded list. The two strategies differ sharply at scale.
+
+**Offset (limit/offset) pagination** — `GET /items?limit=20&offset=40`. The DB does `LIMIT 20 OFFSET 40`. Simple, supports jumping to an arbitrary page ("page 5"), and shows a total count. Two serious problems at scale:
+
+- **Slow deep pages.** `OFFSET 1000000` forces the DB to scan and discard a million rows — cost grows with page depth.
+- **Drift under writes.** If a row is inserted/deleted while the user pages, items **shift**: you re-see or skip rows because offsets are positional, not anchored to data.
+
+**Cursor (keyset / seek) pagination** — `GET /items?limit=20&after=eyJpZCI6MTIzfQ`. The cursor encodes the **last item's sort key** (e.g. `(created_at, id)`); the next page is `WHERE (created_at, id) < (:ts, :id) ORDER BY ... LIMIT 20`. Because it seeks by an indexed key instead of counting offsets:
+
+- **Constant cost** at any depth — it's an index range scan, no skip.
+- **Stable under inserts/deletes** — you anchor on data, not position, so concurrent writes don't shift the window.
+
+The cost: **no random "jump to page N"** and **no cheap total count**; you go next/previous only. The cursor is opaque (base64) so clients don't depend on its internals.
+
+<Mermaid caption="Why cursor pagination stays cheap as you go deeper">{`graph LR
+    O["Offset: OFFSET 1,000,000<br/>scan + discard 1M rows<br/>cost grows with depth"]
+    K["Cursor: WHERE key < lastSeen<br/>indexed seek + LIMIT<br/>constant cost"]`}</Mermaid>
+
+### Decision rule
+
+- **Cursor** for large, append-heavy, or infinite-scroll feeds (timelines, logs, search) and any API exposed to high-volume clients — it's the default for serious APIs.
+- **Offset** only for small, bounded datasets where users genuinely need numbered pages and a total count, and deep paging is rare (admin tables, small catalogs).
+
+<ProbeNote>
+For versioning, name URL-vs-header with the trade-off and stress "version only on breaking changes, prefer additive evolution." For pagination, the senior signal is explaining *why* offset breaks at scale — slow deep scans **and** drift under concurrent writes — and that cursor/keyset fixes both by seeking on an indexed key, at the cost of no page jumps or totals.
+</ProbeNote>

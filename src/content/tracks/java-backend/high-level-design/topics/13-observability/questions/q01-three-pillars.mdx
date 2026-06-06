@@ -1,0 +1,52 @@
+## The three pillars: logs, metrics, traces — what each gives you
+
+Observability rests on three telemetry types that answer **different questions**. The senior point is not to recite them but to know *which one you reach for* when something breaks — and why no single pillar is enough on its own.
+
+### Logs — what happened, in detail
+
+A **log** is a discrete, timestamped record of a specific event: an HTTP request, an exception, a state transition. Logs are **high cardinality and high detail** — they can carry the full context (user id, parameters, stack trace). That richness is their strength and their cost: storing and indexing every event at scale is expensive, so you sample or tier them.
+
+Logs answer: *"What exactly happened to this one request / at this one moment?"* They're your forensic record. The key practice is **structured logging** — emit JSON key-value pairs, not free text, so logs are queryable and aggregatable, and always include a **correlation/trace ID** so you can pull every log line for one request across services.
+
+### Metrics — how much, how many, how fast (aggregated)
+
+A **metric** is a numeric measurement aggregated over time: request rate, error count, p99 latency, CPU usage. Metrics are **cheap** — they're pre-aggregated numbers with a few labels, so you can keep them at high resolution for a long time and query them fast. That makes them the basis of **dashboards and alerts**.
+
+Metrics answer: *"Is the system healthy right now, and how is it trending?"* Their weakness is the flip side of their strength: aggregation **discards detail**. A spike in p99 latency tells you *that* things are slow, not *which request* or *why* — and high-cardinality dimensions (per-user) blow up metric storage, so you can't slice arbitrarily.
+
+### Traces — where the time went, across services
+
+A **trace** follows a **single request as it fans out across services**, recording a tree of **spans** (each span = one unit of work, with start/end and parent). A trace answers the question that neither logs nor metrics can in a distributed system: *"This request was slow — which of the twelve services it touched caused it, and where in the call graph?"*
+
+Tracing is what makes microservices debuggable. Without it, a slow checkout is a needle in a haystack of independent service logs; with it, you see the waterfall and the offending span immediately.
+
+<Mermaid caption="Each pillar answers a different question about the same system">{`graph TB
+    M[Metrics] -->|aggregate trends| Q1[Is it broken? alert + dashboard]
+    T[Traces] -->|request across services| Q2[Where is it slow / which service?]
+    L[Logs] -->|detailed events| Q3[Why exactly did this fail?]`}</Mermaid>
+
+### Why you need all three — the workflow
+
+The pillars are **complementary**, and the canonical incident workflow walks through all three:
+
+1. **Metrics** alert you and tell you *something* is wrong (error rate up, p99 spiking) — they're the smoke detector.
+2. **Traces** localize it — *which* service / span in the request path is responsible.
+3. **Logs** explain it — the detailed event, exception, and context for the failing operation.
+
+<ComplexityTable>
+
+| Pillar | Granularity | Cost | Cardinality | Answers |
+|---|---|---|---|---|
+| Metrics | Aggregated | Low | Low (few labels) | Is it healthy? Trends? Alerting |
+| Traces | Per-request | Medium (sampled) | Medium | Where did the time go across services? |
+| Logs | Per-event | High | High (full detail) | What/why exactly happened? |
+
+</ComplexityTable>
+
+<Callout kind="note" title="The pillars are converging">
+The "three pillars" model is a useful teaching frame, but modern practice stresses **correlation** over silos: a trace ID stamped on every log line and exemplar links from a metric to a sample trace let you pivot between pillars in one click. **OpenTelemetry** deliberately unifies all three under one SDK and wire format. The newer framing is "wide, high-cardinality structured events" you can slice arbitrarily — but for interviews, the three-pillar vocabulary is still what's expected.
+</Callout>
+
+<ProbeNote>
+The interviewer wants each pillar tied to the question it answers — metrics (aggregate health/alerting, cheap, low detail), traces (cross-service request path, where the time went), logs (detailed per-event forensics, expensive). The strongest signal is describing the **incident workflow** that uses all three in sequence, and noting that a shared **trace/correlation ID** is what lets you pivot between them.
+</ProbeNote>

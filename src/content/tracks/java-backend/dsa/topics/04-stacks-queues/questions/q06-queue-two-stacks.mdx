@@ -1,0 +1,52 @@
+**Problem.** Implement a FIFO **queue** using only two **stacks** — `enqueue`, `dequeue`, `peek`, `empty` — with the stacks' LIFO operations as your only primitives.
+
+## The idea
+
+A stack reverses order; **two stacks reverse it twice**, restoring FIFO. Keep an `in` stack for arrivals and an `out` stack for departures. Pushing onto `in` then popping everything into `out` flips the order, so the oldest element ends up on top of `out`.
+
+## Naive — O(n) per operation
+
+Transfer all elements between the two stacks on *every* `dequeue` and transfer them back. Correct but does redundant work.
+
+## Optimal — amortized O(1)
+
+Only refill `out` from `in` when `out` is **empty**, and pour over *all* of `in` at once. Then dequeue straight from `out` until it drains again.
+
+```java
+class MyQueue {
+    private final Deque<Integer> in  = new ArrayDeque<>();
+    private final Deque<Integer> out = new ArrayDeque<>();
+
+    public void push(int x) { in.push(x); }        // enqueue: O(1)
+
+    public int pop() {                              // dequeue
+        shift();
+        return out.pop();
+    }
+
+    public int peek() {
+        shift();
+        return out.peek();
+    }
+
+    public boolean empty() { return in.isEmpty() && out.isEmpty(); }
+
+    private void shift() {                          // refill only when drained
+        if (out.isEmpty())
+            while (!in.isEmpty()) out.push(in.pop());
+    }
+}
+```
+
+## Why amortized O(1)
+
+Each element is moved **at most three times** total: pushed onto `in`, popped from `in` into `out`, popped from `out`. That is O(1) of transfer work *per element over its lifetime*, so a run of *n* operations costs O(n) — amortized O(1) each, even though a single `dequeue` that triggers a refill is O(n).
+
+<ComplexityTable rows={[
+  {op: "push (enqueue)", best: "O(1)", average: "O(1)", worst: "O(1)", note: "just pushes onto in"},
+  {op: "pop / peek (dequeue)", best: "O(1)", average: "O(1)", worst: "O(n)", note: "worst = refill; amortized O(1)"},
+]} />
+
+<ProbeNote>
+The make-or-break detail is the **lazy refill**: only move from `in` to `out` when `out` is empty. Candidates who transfer on every operation get O(n) and miss the point. Be ready to give the amortized argument ("each element is moved a constant number of times across its lifetime"). The mirror problem — **stack from two queues** — has the opposite cost profile, which is worth contrasting.
+</ProbeNote>

@@ -1,0 +1,26 @@
+Board games are a favorite LLD prompt because they scale smoothly with the candidate's level. **Tic-tac-toe** is a 10-minute warm-up that tests basic modeling and win detection; **chess** is the senior version, where polymorphic piece movement, move validation, undo, and a game state machine all come into play. A strong candidate frames the simple version first, then upgrades the design without rewriting it.
+
+## What the interviewer is testing
+
+- Do you separate the **board** (a grid of cells) from the **rules** (what constitutes a legal move) from the **game loop** (turns, win/draw detection)?
+- For chess: do you make movement **polymorphic per piece** — each piece validates its own moves — instead of one monstrous `isValidMove()` with a `switch` on piece type?
+- Can you support **undo/redo** cleanly? This is the tell that you know the **Command** pattern.
+- Do you model the game's lifecycle (in-progress → check → checkmate / stalemate) as an explicit **state machine** rather than scattered boolean flags?
+
+## How to frame it
+
+Start with tic-tac-toe to lock the shared vocabulary: `Board`, `Cell`, `Player`, `Move`, and a `Game` that alternates turns and checks rows/cols/diagonals for a win. State that this is the skeleton — then say "chess keeps the same shape but specializes three things: pieces, move validation, and game state."
+
+For chess, the key decisions:
+
+- **Factory** creates pieces for the initial setup, keeping construction in one place.
+- **Strategy / polymorphism** — each `Piece` subtype implements `canMove(board, from, to)`. The `Rook` knows about straight lines; the `Knight` knows its L-shape. No central type-switch.
+- **Command** — each `Move` is a command with `execute()` and `undo()`, capturing the captured piece so the board can be restored. This is what makes undo/redo a stack of commands.
+- **Observer** — the UI (or a logger / network peer) subscribes to board changes and re-renders.
+- **State** — a `GameState` enum/object drives whether moves are accepted and detects check, checkmate, and stalemate.
+
+<Callout kind="tip" title="Frame the upgrade explicitly">
+Say out loud: "tic-tac-toe and chess share `Board`/`Player`/`Move`/`Game`; chess specializes piece movement (Strategy), creation (Factory), reversibility (Command), and lifecycle (State)." That framing is itself a senior signal.
+</Callout>
+
+The worked solution below uses chess as the running example and follows the full 9-section structure.

@@ -1,0 +1,45 @@
+## B-tree vs LSM-tree — read vs write trade-offs and write amplification
+
+The on-disk structure a database uses is the single biggest determinant of whether it's read-optimized or write-optimized. **B-trees** power most relational stores (Postgres, MySQL/InnoDB); **LSM-trees** power most write-heavy NoSQL stores (Cassandra, RocksDB, LevelDB, ScyllaDB). Knowing the mechanism — not just the names — lets you predict a store's behavior.
+
+### B-tree: update in place
+
+A B-tree is a balanced tree of fixed-size **pages**. A lookup walks from root to leaf in O(log n) page reads; an update finds the page and **modifies it in place**, splitting pages when they fill.
+
+- **Reads:** excellent and predictable — a few page reads, and a given key lives in exactly one place.
+- **Writes:** must locate and rewrite a page (often **random I/O**), append to the **write-ahead log** for durability, and occasionally split pages. This is the source of **write amplification**: one logical row write can cause a WAL write *plus* a full-page rewrite (a page is many KB), so the bytes written to disk far exceed the bytes of data changed.
+
+### LSM-tree: buffer and flush sequentially
+
+An LSM-tree (log-structured merge tree) never updates in place:
+
+1. Writes go to an in-memory **memtable** (plus a commit log for durability) — effectively O(1), all sequential.
+2. When the memtable fills, it's flushed to disk as an immutable, sorted **SSTable** — a single sequential write.
+3. Background **compaction** merges SSTables, discarding superseded/deleted keys.
+
+- **Writes:** superb throughput because every disk write is **sequential** and batched — ideal for ingest-heavy workloads.
+- **Reads:** a key may live in the memtable or any of several SSTables, so a read may check multiple files. **Bloom filters** cheaply rule out SSTables that can't contain the key; **block caches** help; but reads are inherently more work than a B-tree's single location.
+- **Write amplification still exists**, but it's deferred into **compaction**: data is rewritten multiple times as it's merged up the levels. The win is that it's *sequential* rewriting, not random.
+
+<Diagram caption="Where the cost lands: B-tree pays on write (random I/O, page rewrites); LSM pays on read and on background compaction">{`
+ B-TREE                              LSM-TREE
+ write -> find page -> rewrite       write -> memtable (RAM) -> sequential flush
+          (random I/O) + WAL                  |
+ read  -> O(log n) page reads                 v  background
+          one location per key         compaction merges SSTables
+                                       read  -> memtable + N SSTables
+                                                (Bloom filters prune)
+`}</Diagram>
+
+### Choosing between them
+
+- **B-tree** when reads dominate or you need predictable low-latency point reads and rich transactional semantics — most OLTP, most relational systems.
+- **LSM** when writes dominate: time-series, event logs, metrics, write-heavy feeds, ingestion pipelines. You trade some read latency and pay compaction (CPU + I/O, and occasional latency spikes) for far higher write throughput.
+
+<Callout kind="note" title="Read amplification, write amplification, space amplification">
+These are the three LSM knobs, and they trade off against each other: more aggressive compaction lowers read amplification (fewer SSTables to check) but raises write amplification (more rewriting); less compaction does the reverse and also raises space amplification (stale data lingers). Tuning compaction *is* tuning an LSM store.
+</Callout>
+
+<ProbeNote>
+The interviewer wants the mechanism: B-tree updates **in place** (great reads, random-I/O writes, page-level write amplification), LSM **buffers and flushes sequentially** (great writes, multi-SSTable reads pruned by Bloom filters, amplification deferred to compaction). Pairing each with a workload (B-tree → OLTP, LSM → write-heavy time-series/logs) and naming **compaction** and **Bloom filters** signals real depth.
+</ProbeNote>

@@ -1,0 +1,49 @@
+## Edge vs. application-level limiting, and the API-gateway role
+
+Rate limiting can be enforced at several layers of the request path, and mature systems enforce it at **more than one**. The guiding principle: **reject junk as early and as cheaply as possible, but enforce nuanced, identity-aware limits where you have the context to do so.** Each layer earlier than the application saves the resources the rejected request would have consumed downstream.
+
+### The layers, from outside in
+
+<Mermaid caption="Rate limiting is layered: cheap-and-coarse at the edge, rich-and-precise in the app">{`graph LR
+    C[Client] --> E[Edge<br/>CDN / WAF]
+    E --> G[API Gateway]
+    G --> A[Application]
+    E -.->|coarse: per-IP,<br/>DDoS, geo| E
+    G -.->|per-API-key,<br/>per-route, tiers| G
+    A -.->|per-business-rule,<br/>per-tenant quota| A`}</Mermaid>
+
+**1. Edge (CDN / WAF) — Cloudflare, AWS WAF, Akamai.**
+Runs in points of presence close to clients, *before* traffic reaches your origin. Best for **coarse, high-volume defenses**: per-IP floods, volumetric DDoS, bot mitigation, geo rules. It is the only layer that can absorb an attack without consuming *your* bandwidth or compute — the request never reaches your data center. The downside: minimal application context (it does not know who the authenticated user is or which tenant they belong to).
+
+**2. API gateway — Kong, NGINX, Spring Cloud Gateway, AWS API Gateway.**
+The single ingress to your services. This is the **natural home for most rate limiting** because it sees every request, already terminates TLS and authenticates, and can key limits on the API key, route, or plan tier — typically backed by Redis for shared state across gateway instances. Centralizing here keeps individual services from each re-implementing limiting. Spring Cloud Gateway ships a `RequestRateLimiter` filter (Redis + token bucket) keyed by a `KeyResolver`; Kong and NGINX have equivalent plugins/modules.
+
+**3. Application — Bucket4j, Resilience4j, custom.**
+In-process limiting for **business-specific rules** the gateway can't easily express: per-tenant monthly quotas, limits that depend on the user's subscription state pulled from the DB, or protecting one expensive internal endpoint. It has the richest context but is the most expensive place to reject — the request has already traversed every prior layer.
+
+### Why layer them
+
+- **Defense in depth.** The edge blunts volumetric attacks; the gateway enforces fair per-key limits; the app enforces business quotas. No single layer has both the position and the context to do all three.
+- **Cost gradient.** A request rejected at the edge costs you nothing; one rejected in the app has already consumed LB, gateway, auth, and connection resources. Push coarse rejections outward.
+
+### The 429 contract
+
+Whatever layer rejects, the response must be a clean, machine-readable contract so well-behaved clients can self-throttle:
+
+```http
+HTTP/1.1 429 Too Many Requests
+Retry-After: 30                       # seconds to wait (or an HTTP-date)
+X-RateLimit-Limit: 100                # ceiling for the window
+X-RateLimit-Remaining: 0              # requests left
+X-RateLimit-Reset: 1700000060         # epoch when the window resets
+```
+
+`Retry-After` is the important one: it tells clients *when* to retry, turning blind retry storms (which amplify the overload) into coordinated backoff. Returning `429` without `Retry-After` invites clients to hammer immediately.
+
+<Callout kind="warn" title="429 vs 503, and trusting client IPs">
+Use **429** for "you exceeded *your* quota" (client should slow down) and **503** for "the *server* is overloaded" (try later, not the caller's fault). Also: at the edge the client IP is real, but behind proxies the app sees the proxy's IP — only trust `X-Forwarded-For` when it is set by infrastructure you control, or attackers spoof it to evade per-IP limits.
+</Callout>
+
+<ProbeNote>
+The interviewer wants the layering insight — reject cheaply at the edge, enforce identity-aware limits at the gateway, reserve the app for business rules — plus the cost gradient that justifies it. The 429 + `Retry-After` contract is the detail that signals you've operated these systems, not just read about them.
+</ProbeNote>

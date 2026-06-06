@@ -1,0 +1,53 @@
+**Problem.** Given an array of strings, group the anagrams together. Two strings are anagrams if one is a permutation of the other (`"eat"`, `"tea"`, `"ate"`). Return the groups in any order.
+
+## Brute force — O(n² · k) time
+
+Compare every string against every group's representative by checking if they're anagrams (sort or count chars each time). With `n` strings of length `k`, that's O(n²) comparisons, each O(k log k) — too slow and clumsy.
+
+## Optimal — a canonical key in a hash map
+
+The insight: all anagrams share a **canonical form**. Map each string to its canonical key, then group by that key in a `HashMap<String, List<String>>`. One pass, O(1) grouping per string.
+
+### Approach A — sorted-character key
+
+```java
+List<List<String>> groupAnagrams(String[] strs) {
+    Map<String, List<String>> groups = new HashMap<>();
+    for (String s : strs) {
+        char[] c = s.toCharArray();
+        Arrays.sort(c);                       // "tea" -> "aet"
+        String key = new String(c);
+        groups.computeIfAbsent(key, k -> new ArrayList<>()).add(s);
+    }
+    return new ArrayList<>(groups.values());
+}
+```
+
+**Time:** O(n · k log k) — sorting each string dominates. **Space:** O(n · k).
+
+### Approach B — char-count key (no sort)
+
+When strings are lowercase a–z, a 26-length count is a cheaper canonical form than sorting:
+
+```java
+List<List<String>> groupAnagrams(String[] strs) {
+    Map<String, List<String>> groups = new HashMap<>();
+    for (String s : strs) {
+        int[] count = new int[26];
+        for (char ch : s.toCharArray()) count[ch - 'a']++;
+        // build a delimited signature so counts can't run together: "1#0#2#..."
+        StringBuilder key = new StringBuilder();
+        for (int n : count) key.append(n).append('#');
+        groups.computeIfAbsent(key.toString(), k -> new ArrayList<>()).add(s);
+    }
+    return new ArrayList<>(groups.values());
+}
+```
+
+**Time:** O(n · k) — each char counted once, key built in O(26). **Space:** O(n · k). This beats the sort by a `log k` factor and is the answer to give when the interviewer fixes a small alphabet.
+
+<Callout kind="tip" title="Why the # delimiter">
+Without separators, counts collide: `[1,12]` and `[11,2]` both render as `"112"`. The `#` delimiter (or any non-digit) makes the signature unambiguous.
+</Callout>
+
+<ProbeNote>The move is "map each element to a canonical key, group in a HashMap" — the same shape as Two Sum. Edge cases: empty strings (valid key `""`), single characters, and the delimiter bug in the count approach. State both complexities and mention you'd pick the count key when the alphabet is small/fixed, the sort key when it isn't (Unicode, mixed case).</ProbeNote>

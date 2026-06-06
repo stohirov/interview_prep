@@ -1,0 +1,38 @@
+**Problem.** Merge two sorted linked lists into one sorted list and return its head. Splice the existing nodes together rather than allocating new ones.
+
+## Approach — dummy head + two pointers, O(n + m) time, O(1) space
+
+This is the merge step of merge sort. Walk both lists with a pointer each, always appending the smaller current node to a result list, and advancing that list's pointer. A **dummy head** gives us a fixed anchor (`tail`) to append to, so we never special-case the first node.
+
+```java
+ListNode mergeTwoLists(ListNode a, ListNode b) {
+    ListNode dummy = new ListNode(0);   // sentinel anchor
+    ListNode tail = dummy;
+    while (a != null && b != null) {
+        if (a.val <= b.val) {           // <= keeps the merge stable
+            tail.next = a;
+            a = a.next;
+        } else {
+            tail.next = b;
+            b = b.next;
+        }
+        tail = tail.next;
+    }
+    tail.next = (a != null) ? a : b;    // attach whatever remains
+    return dummy.next;
+}
+```
+
+When one list runs out, the other is already sorted, so we splice its remaining tail on in one move — no need to keep iterating.
+
+## Why O(1) space
+
+We rewire existing nodes; nothing is copied. The only allocation is the single dummy node.
+
+<Callout kind="tip" title="Brute force, for contrast">
+You *could* dump all values into an array, sort it (O((n+m) log(n+m))), and rebuild a list. It works but throws away the gift of pre-sorted input — the linear merge is strictly better and is what the interviewer is after. The recursive variant is also clean but costs O(n + m) stack space.
+</Callout>
+
+<ProbeNote>
+Two signals: reach for a dummy head immediately, and use `<=` rather than `<` so equal elements preserve relative order (stability — it matters when this is the merge step inside merge-sort on objects). Edge cases: one or both lists empty (the loop is skipped and the `tail.next = ...` line handles it). This generalizes to "merge k sorted lists" via a min-heap.
+</ProbeNote>

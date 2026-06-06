@@ -1,0 +1,40 @@
+**Problem.** Design a stack supporting `push`, `pop`, `top`, and **`getMin`** — the minimum element currently on the stack — all in **O(1)**.
+
+## Brute force — O(n) getMin
+
+Keep a single stack and scan it on every `getMin`. Push/pop stay O(1), but `getMin` becomes O(n), which defeats the point. Tracking a single `min` field also fails: when you pop the current minimum you have no idea what the *previous* minimum was.
+
+## Optimal — O(1) everything, O(n) space
+
+The fix to the "what was the previous min?" problem is to remember the minimum **at each level** of the stack. Use a second stack that, at every push, records the running minimum. Pop both together and the top of the min-stack is always the current minimum.
+
+```java
+class MinStack {
+    private final Deque<Integer> stack = new ArrayDeque<>();
+    private final Deque<Integer> mins  = new ArrayDeque<>();
+
+    public void push(int x) {
+        stack.push(x);
+        // running min: smaller of x and the previous min
+        mins.push(mins.isEmpty() ? x : Math.min(x, mins.peek()));
+    }
+
+    public void pop() {
+        stack.pop();
+        mins.pop();          // discard this level's min in lockstep
+    }
+
+    public int top()    { return stack.peek(); }
+    public int getMin() { return mins.peek(); }
+}
+```
+
+Every operation touches only stack tops, so all four are O(1). Space is O(n) for the auxiliary stack.
+
+<Callout kind="tip" title="The O(1)-extra-space variant">
+You can avoid the second stack by storing an **encoded delta** when a new minimum arrives: push `2*x - min`, then update `min`. On pop, if the top is below `min` it was an encoding, so recover the previous minimum as `2*min - top`. It is clever but error-prone under interview pressure and overflows for large values — lead with the two-stack solution and mention this only if asked to optimize space.
+</Callout>
+
+<ProbeNote>
+The trap is the naive single-`min`-field approach — make sure you can articulate *why* it breaks (popping the min loses history) before reaching for the second stack. A small optimization worth mentioning: the min-stack only needs a new entry when `x <= currentMin`, which saves space on mostly-increasing inputs, but you must use `<=` (not `<`) so duplicate minimums pop correctly.
+</ProbeNote>

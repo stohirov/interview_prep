@@ -1,0 +1,83 @@
+When shared state lives in a collection or a counter, you rarely need to write locks yourself — `java.util.concurrent` gives you battle-tested primitives. Knowing which to reach for, and the trade-offs, is core LLD concurrency vocabulary. (Internals are covered in the Collections module; here it's selection under interview time.)
+
+## ConcurrentHashMap vs Collections.synchronizedMap
+
+Both are thread-safe, but they differ fundamentally:
+
+| | `Collections.synchronizedMap` | `ConcurrentHashMap` |
+| --- | --- | --- |
+| Locking | One lock for the **whole map** | Per-bin / CAS — fine-grained |
+| Concurrency | Readers block writers and each other | Concurrent reads, mostly-concurrent writes |
+| Iteration | Must manually `synchronized` the block | Weakly consistent, no external lock needed |
+| Null keys/values | Allowed | **Not** allowed |
+| Use when | Legacy / trivial contention | Default for concurrent maps |
+
+```java
+// Atomic compound ops are the real win — no external lock:
+ConcurrentHashMap<SpotType, Integer> free = new ConcurrentHashMap<>();
+free.merge(type, -1, Integer::sum);          // atomic decrement
+free.computeIfAbsent(type, t -> loadCount(t));// atomic get-or-compute
+```
+
+<Callout kind="warn" title="Thread-safe methods ≠ thread-safe compound logic">
+`ConcurrentHashMap` makes each *call* atomic, but `if (map.containsKey(k)) map.get(k)...` across two calls still races. Use the atomic combinators — `compute`, `merge`, `putIfAbsent`, `computeIfAbsent` — to make the whole check-then-act indivisible.
+</Callout>
+
+## Atomics — lock-free counters
+
+For a single number or reference, an atomic beats a lock: it uses a hardware compare-and-set (CAS).
+
+```java
+AtomicInteger tokens = new AtomicInteger(capacity);   // rate limiter
+boolean allow() {
+    int t;
+    do { t = tokens.get(); if (t == 0) return false; }
+    while (!tokens.compareAndSet(t, t - 1));           // retry on contention
+    return true;
+}
+```
+
+`AtomicReference` (and `updateAndGet`) does the same for objects — useful for lock-free state swaps.
+
+## ReadWriteLock and StampedLock
+
+When reads vastly outnumber writes (a cache, a config registry), a `ReadWriteLock` lets readers run in parallel and only serializes writers.
+
+```java
+ReadWriteLock lock = new ReentrantReadWriteLock();
+V get(K k) { lock.readLock().lock();  try { return map.get(k); }  finally { lock.readLock().unlock(); } }
+void put(K k, V v) { lock.writeLock().lock(); try { map.put(k, v); } finally { lock.writeLock().unlock(); } }
+```
+
+`StampedLock` (Java 8+) adds an **optimistic read** mode — read without locking, then validate; even faster for read-heavy paths, but it's not reentrant. Mention it as the optimization when reads dominate.
+
+## BlockingQueue — producer/consumer
+
+The go-to for handing work between threads: task schedulers, async loggers, pub/sub, thread pools. It blocks on `put` when full and `take` when empty — backpressure for free.
+
+```java
+BlockingQueue<Task> queue = new LinkedBlockingQueue<>(1000);
+// producer: queue.put(task);        blocks when full
+// consumer: Task t = queue.take();  blocks when empty
+```
+
+## CopyOnWriteArrayList — read-mostly lists
+
+Every write copies the backing array; reads are lock-free and never see a mutation mid-iteration. Ideal for **observer/listener lists** that are read on every event but mutated rarely. Avoid it for write-heavy collections — copying is O(n) per write.
+
+```java
+List<SpotObserver> observers = new CopyOnWriteArrayList<>();   // safe iteration during notify
+```
+
+## Quick selection guide
+
+<Diagram caption="Pick the primitive by shape of access">{`map, concurrent access ........... ConcurrentHashMap (+ merge/compute)
+single counter ................... AtomicInteger / LongAdder
+single object swap ............... AtomicReference (CAS)
+read-heavy, write-rare map ....... ReentrantReadWriteLock / StampedLock
+listener list (read-mostly) ...... CopyOnWriteArrayList
+hand work between threads ........ BlockingQueue`}</Diagram>
+
+<ProbeNote>
+Two senior signals here: (1) preferring a concurrent collection over hand-rolled `synchronized` blocks, and (2) knowing that per-call atomicity doesn't make multi-call logic atomic — and reaching for `merge`/`computeIfAbsent` to fix it. The check-then-act trap reappears constantly; naming it scores.
+</ProbeNote>

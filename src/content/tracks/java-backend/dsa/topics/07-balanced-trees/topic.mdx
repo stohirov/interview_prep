@@ -1,0 +1,28 @@
+A plain BST gives you O(log n) search *only if it stays bushy*. Feed it sorted input and it degenerates into a linked list — every operation back to O(n). **Balanced trees** add rebalancing rules that bound the height at O(log n) no matter the insertion order. That bound is the whole point: it is what makes `TreeMap`, database indexes, and treeified `HashMap` buckets safe against adversarial input.
+
+## Why balancing matters
+
+Height drives cost. For `n` keys the best achievable height is `⌊log₂ n⌋`; an unbalanced tree can reach `n - 1`. Balanced trees keep height within a small constant factor of the optimum by doing O(log n) extra work on each insert/delete — a trade you almost always want.
+
+## AVL trees — strict balance via rotations
+
+An **AVL tree** stores a *balance factor* (height of right subtree − height of left) at each node and requires it to stay in `{-1, 0, +1}`. After an insert or delete walks back up, the first node that violates this is rebalanced with one or two **rotations**:
+
+- **LL / RR** — a single rotation.
+- **LR / RL** — a double rotation (rotate the child, then the node).
+
+Rotations are O(1) pointer rewires; you do at most O(log n) of them per operation.
+
+## Red-black trees — looser balance, fewer rotations
+
+A **red-black tree** colors nodes red or black and enforces five invariants (see q03). The key consequence: the longest root-to-leaf path is at most twice the shortest, so height ≤ 2·log₂(n+1). They rebalance with rotations **and recoloring**, but tolerate more imbalance than AVL — so they rotate less on writes.
+
+## B-trees and B+ trees — built for disk
+
+A **B-tree** is a multi-way balanced tree where each node holds many keys and has many children. High **fan-out** means a shallow tree, so reaching any key costs only a few node fetches. **B+ trees** push all values to the leaves and chain leaves into a linked list, making range scans trivial — which is why nearly every relational database and filesystem indexes with them (see q05).
+
+<Callout kind="tip" title="Java standard library mapping">
+- **`TreeMap` / `TreeSet`** are red-black trees: sorted iteration plus O(log n) `floor`, `ceiling`, `higher`, `lower`, `firstKey`, `subMap`.
+- **`HashMap`** *treeifies* a bucket into a red-black tree once it holds ≥ 8 entries and capacity ≥ 64, capping a pathological bucket at O(log n) instead of O(n) (see q06).
+- There is no AVL tree in the JDK — red-black's cheaper writes won for general-purpose use.
+</Callout>

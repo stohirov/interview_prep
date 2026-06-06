@@ -1,0 +1,19 @@
+The **URL shortener** (TinyURL, bit.ly) is the most common HLD warm-up because it is small enough to finish in 45 minutes yet still exercises the whole toolkit: ID generation, read-heavy caching, database choice, and sharding. Almost every interviewer — FAANG, EU contracting, or regional — opens with it or something shaped like it.
+
+## The shape of the problem
+
+Two operations dominate: **write** (`POST /shorten` → create a short code for a long URL) and **read** (`GET /{code}` → 301-redirect to the long URL). The defining characteristic is the **read/write skew** — roughly **100:1** reads to writes — which makes this fundamentally a *caching and read-scaling* problem, not a write problem.
+
+## What the interviewer is probing, by style
+
+- **FAANG** — go deep on ID generation collisions, consistent hashing for sharding the key-value store, and replication for read scaling. Expect "what happens at 100M new URLs/day?"
+- **EU / remote contracting** — pragmatism: "Postgres + Redis gets you very far." Justify ID strategy and caching choices on cost and operational simplicity.
+- **Regional (EPAM / Uzum)** — a clean Spring service with a REST API, a sensible schema, and a defensible diagram. Show you can build the real thing.
+
+## The key decisions
+
+1. **ID generation** — counter+base62 (short, sequential, needs a distributed counter), random/hash+base62 (needs collision check), or a Snowflake-style ID. This is the heart of the problem.
+2. **Storage** — the access pattern is a pure key-value lookup, so a KV store or a simple indexed table both work; choose by scale and ops budget.
+3. **Caching** — with 100:1 reads, an LRU cache (Redis) in front of the DB absorbs the vast majority of traffic.
+
+The worked solution applies the full 11-section structure and shows all three style angles where they diverge.

@@ -1,0 +1,40 @@
+## Polyglot persistence — pros, cons, and operational cost
+
+**Polyglot persistence** is the deliberate use of *different* data stores for *different* workloads within one system, each chosen for the access pattern it serves best. It is powerful and often correct — but the cost is paid by the operations team, not the schema, so seniority shows in weighing that cost honestly.
+
+### What it looks like
+
+A single product, several stores, each playing to its strength:
+
+<Diagram caption="A polyglot architecture — one system of record, several specialized stores fed from it">{`
+                 +-----------------------+
+   writes  --->  |  Postgres (source     |   orders, users, money
+                 |  of truth, ACID)      |
+                 +-----------+-----------+
+                             | change data capture (CDC / outbox)
+        +--------------------+--------------------+
+        v                    v                    v
+  Elasticsearch          Redis               Cassandra
+  (full-text search)     (cache, sessions)   (event log / feed)
+`}</Diagram>
+
+### The pros
+
+- **Right tool per job.** Each workload runs on an engine tuned for it — full-text on a search index, sessions on a key-value store, analytics on a columnar store — instead of forcing everything through one model.
+- **Independent scaling.** The cache scales separately from the system of record; the search index can be rebuilt without touching transactional data.
+- **Failure isolation.** Search being down degrades search, not checkout.
+
+### The cons — and the real cost is operational
+
+- **Operational sprawl.** Every store you add is another thing to provision, monitor, back up, patch, secure, capacity-plan, and be paged for at 3am. On-call complexity grows faster than the number of stores.
+- **The dual-write / consistency problem.** Writing to Postgres *and* Elasticsearch in one request is two operations that can partially fail, leaving stores inconsistent. The correct fix is **not** two writes in a transaction (you can't span systems) but the **outbox pattern + CDC**: commit to the system of record plus an outbox row atomically, then stream changes to the other stores. This is real engineering, not free.
+- **No cross-store transactions or joins.** Data spread across stores can't be joined or transactionally updated together; the application stitches it back, often with eventual consistency to reason about.
+- **Cognitive load.** Each store has its own query language, failure modes, and tuning knobs. Team expertise dilutes.
+
+<Callout kind="warning" title="The default should be one store, not five">
+Polyglot persistence earns its keep at scale, but every store added is a permanent tax. Start with one system of record (usually Postgres), add a cache when reads demand it, and introduce a specialized store only when a measured access pattern outgrows the primary — never speculatively.
+</Callout>
+
+<ProbeNote>
+The interviewer wants the trade-off, not a list of databases. Strong answers name the **dual-write problem** and solve it with **outbox + CDC**, and frame the main cost as **operational** (more systems to run, back up, and be paged for) plus the loss of cross-store transactions and joins. Volunteering "I'd start with one store and add others only on evidence" reads as mature.
+</ProbeNote>

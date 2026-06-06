@@ -1,0 +1,37 @@
+The six-step framework is the spine of every LLD answer. Internalize it so you can narrate your approach out loud while you work — interviewers reward a visible, repeatable method far more than a lucky leap to the right classes.
+
+## The six steps
+
+<Diagram caption="The LLD framework, with a rough time budget for a 45-minute round">{`1. CLARIFY        scope, requirements, assumptions          ~5 min
+2. ENTITIES       the nouns -> candidate classes            ~5 min
+3. RELATIONSHIPS  has-a / is-a / uses  (the edges)          ~5 min
+4. CLASS DESIGN   fields, methods, interfaces               ~15 min
+5. PATTERNS       apply where an axis of change exists      ~5 min
+6. TRADE-OFFS     concurrency, alternatives, extensions     ~10 min`}</Diagram>
+
+### 1. Clarify
+Turn the one-line prompt into a bulleted list of functional and non-functional requirements, and state your assumptions explicitly. Covered in depth in *clarifying questions* and *scope in five minutes*.
+
+### 2. Identify entities
+Extract the **nouns** from the requirements — they become candidate classes. "A *user* parks a *vehicle* in a *spot* on a *floor* and gets a *ticket*" yields `User`, `Vehicle`, `Spot`, `Floor`, `Ticket`. Don't model everything; keep the entities that have state or behavior.
+
+### 3. Map relationships
+Decide how entities connect. A `ParkingLot` **has** floors (composition), a `Car` **is a** `Vehicle` (inheritance), a `Gate` **uses** a `PricingStrategy` (dependency).
+
+<Mermaid caption="Relationship vocabulary you'll use on every problem">{`classDiagram
+    ParkingLot "1" o-- "*" Floor : has-a (aggregation)
+    Vehicle <|-- Car : is-a (inheritance)
+    Gate ..> PricingStrategy : uses (dependency)`}</Mermaid>
+
+### 4. Design the classes
+Now write the fields, the methods, and — critically — the **interfaces** that pin down the seams. Favor composition over inheritance. Give each class one reason to change (SRP).
+
+### 5. Apply patterns
+Only now reach for patterns, and only where a real **axis of variation** exists: varying algorithms → Strategy; varying object families → Factory; one-to-many notification → Observer. See the *Design Pattern Quick Reference* topic.
+
+### 6. Discuss trade-offs
+Close by talking about concurrency, alternative modelings, what you'd change at scale, and likely follow-ups. This is where senior candidates separate themselves.
+
+<ProbeNote>
+The framework is itself a signal. An interviewer who watches you clarify → entities → relationships → classes → patterns → trade-offs sees a calm, senior engineer who has done this before — even if the final design has gaps. Narrate the steps; don't perform them silently.
+</ProbeNote>

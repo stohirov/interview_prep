@@ -1,0 +1,55 @@
+## Queue vs log — the conceptual difference (RabbitMQ vs Kafka)
+
+Both move messages from producers to consumers, but they are built on opposite primitives. Conflating them — "Kafka is just a faster queue" — is a common junior tell. The real distinction is **who owns the read position** and **what happens to a message after it's consumed**.
+
+### The traditional queue (RabbitMQ, SQS, ActiveMQ)
+
+A queue treats each message as a **transient work item**. The broker pushes a message to a consumer, the consumer **acks**, and the broker then **deletes** it. The broker is the authority on what's been delivered — it tracks per-message state, redelivers un-acked messages, and load-balances messages across competing consumers (the **competing-consumers** pattern). Adding consumers spreads the *same* work over more workers; each message is handled once, by one of them.
+
+This is ideal for **task distribution**: send-email jobs, image-resize jobs, order-processing commands — work that should be done once and then forgotten.
+
+### The distributed log (Kafka, Pulsar, Kinesis)
+
+A log is an **append-only, durably retained sequence** of records. The broker does *not* track per-consumer delivery and does *not* delete on consume — records stay for a configured **retention** (hours, days, or forever). Each consumer tracks its own position (the **offset**) and **pulls** at its own pace. Multiple independent consumer groups read the *same* records without interfering, each at its own offset.
+
+This is ideal for **event streams** with many independent readers and the ability to **replay**: a fraud detector, an analytics pipeline, and a cache updater can all consume the same order-event stream, and a new consumer can rewind to the beginning to rebuild its state.
+
+<Mermaid caption="Queue: broker deletes on ack and load-balances. Log: records retained, consumers track offsets independently.">{`graph TB
+    subgraph Queue["Queue (RabbitMQ)"]
+      QP[Producer] --> Q[(Queue)]
+      Q -->|msg, then delete| W1[Worker 1]
+      Q -->|msg, then delete| W2[Worker 2]
+    end
+    subgraph Log["Log (Kafka)"]
+      LP[Producer] --> L[(Partitioned log<br/>retained)]
+      L -->|offset 42| G1[Group A: analytics]
+      L -->|offset 17| G2[Group B: fraud]
+    end`}</Mermaid>
+
+### The trade-off table
+
+<ComplexityTable>
+
+| Dimension | Queue (RabbitMQ) | Log (Kafka) |
+|---|---|---|
+| Message after consume | Deleted on ack | Retained for retention period |
+| Read position owned by | Broker | Consumer (offset) |
+| Replay | No (it's gone) | Yes (seek to any offset) |
+| Multiple independent readers | Hard (need fan-out exchanges) | Native (consumer groups) |
+| Ordering | Per-queue, weakened by redelivery | Strict per-partition |
+| Routing | Rich (exchanges, topics, bindings) | Simple (topic + partition key) |
+| Throughput | High | Very high (sequential disk I/O) |
+| Best for | Task/command distribution | Event streaming, replay, many consumers |
+
+</ComplexityTable>
+
+### How to choose
+
+- Reach for a **queue** when work is a command done once (jobs, RPC-style async tasks), you need **rich routing** (priority, per-message TTL, complex bindings), and you don't need replay.
+- Reach for a **log** when you have an **event stream**, **multiple independent consumers**, need **replay / event sourcing**, or want very high throughput with strict per-key ordering.
+
+The deeper point: a queue is about *delivering work*, a log is about *recording facts*. Many mature systems run both.
+
+<ProbeNote>
+The interviewer wants the structural difference — broker-owned deletion-on-ack vs consumer-owned offsets on a retained log — not a feature list. Strong signal: connecting it to use case (commands vs events), noting Kafka's replay and multi-consumer-group story, and acknowledging that RabbitMQ's richer routing is a real advantage for task workloads.
+</ProbeNote>

@@ -1,0 +1,57 @@
+## L4 vs L7 load balancing — what can L7 do that L4 cannot?
+
+The distinction is **how much of the request the balancer can see**, which follows directly from the OSI layer it operates at.
+
+### L4 — transport layer (TCP/UDP)
+
+An L4 load balancer makes its decision from the **connection 4-tuple**: source IP/port and destination IP/port. It does **not** parse the payload — to it, an HTTP request is just bytes inside a TCP stream. It picks a backend (often by hashing the tuple or round-robin), and then typically forwards the connection unchanged, sometimes via NAT or direct server return.
+
+Consequences:
+
+- **Very fast, very cheap** — minimal per-packet work, line-rate throughput, low latency.
+- **Protocol-agnostic** — balances anything over TCP/UDP (databases, gRPC, custom protocols), not just HTTP.
+- **TLS passes through** — the LB never sees plaintext, so end-to-end encryption is trivial, but it also can't act on anything inside the request.
+- **Connection-sticky by nature** — a TCP connection stays pinned to one backend for its lifetime.
+
+### L7 — application layer (HTTP)
+
+An L7 load balancer **terminates the connection and parses the HTTP request** — method, path, headers, cookies, body. That visibility is the entire point: it can make decisions and transformations a packet-level device fundamentally cannot.
+
+### What L7 can do that L4 cannot
+
+- **Content/path-based routing** — `/api/*` → API fleet, `/static/*` → asset servers, `/v2/*` → new deployment. Routing on the *request*, not just the destination IP.
+- **Host-based routing** — route by the `Host` header (virtual hosting: many domains, one IP).
+- **TLS termination** — decrypt at the edge, centralizing certificate management and offloading crypto from backends (and enabling everything below, which needs plaintext).
+- **Header inspection & rewriting** — add `X-Forwarded-For`/`X-Request-Id`, strip internal headers, route on auth/tenant headers.
+- **Cookie-based sticky sessions** — pin a user via an application cookie, not just by IP.
+- **Request-aware retries, timeouts, and circuit breaking** — safely retry an idempotent failed request on another backend (L4 only sees a dead connection).
+- **HTTP-level health and observability** — check an actual `/health` endpoint and emit per-route metrics, status-code rates, and latency.
+- **Compression, rate limiting, WAF, redirects** — anything that requires understanding the request.
+
+<Mermaid caption="L4 forwards the connection blind; L7 reads the request and routes on it">{`graph TB
+    subgraph L4["L4 — sees IP:port only"]
+      C1[Client] --> LB4[L4 LB]
+      LB4 --> B1[Any backend]
+    end
+    subgraph L7["L7 — reads the HTTP request"]
+      C2[Client] --> LB7[L7 LB]
+      LB7 -->|/api/*| API[API fleet]
+      LB7 -->|/static/*| ST[Asset fleet]
+      LB7 -->|/v2/*| V2[New version]
+    end`}</Mermaid>
+
+### The trade-off
+
+| | L4 | L7 |
+| --- | --- | --- |
+| Sees | IP + port | full HTTP request |
+| Speed | highest | lower (parses + often terminates TLS) |
+| Protocols | any TCP/UDP | HTTP(S)/gRPC/WebSocket |
+| Routing | tuple/round-robin | path, host, header, cookie |
+| TLS | pass-through | terminates |
+
+L7's intelligence costs CPU (parsing + TLS) and adds a hop of latency. A common production pattern is **L4 at the very edge** (raw throughput, DDoS absorption) **fronting L7** proxies that do the smart routing.
+
+<ProbeNote>
+The question is testing whether you understand *why* the capabilities differ — L7 parses the request, L4 doesn't. Name concrete L7-only abilities (path/host routing, TLS termination, cookie stickiness, request-aware retries) and acknowledge the cost: L7 is slower and must terminate TLS, so edge designs often layer L4 in front of L7.
+</ProbeNote>

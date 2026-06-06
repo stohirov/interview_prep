@@ -1,0 +1,62 @@
+**Problem.** Given a binary tree, determine whether it is a valid **binary search tree**: for every node, *all* keys in its left subtree are strictly less, and *all* in its right subtree are strictly greater.
+
+## The classic wrong answer — O(n) but incorrect
+
+The tempting check: at each node, verify `left.val < node.val < right.val`. This is wrong because it only compares against *immediate* children. The BST property is about the *entire* subtree, not just the neighbors.
+
+```java
+// BUG: passes a tree that is not a valid BST
+//        5
+//       / \
+//      1   6
+//         / \
+//        3   7    <- 3 is in the right subtree of 5 but 3 < 5!
+boolean wrong(TreeNode n) {
+    if (n == null) return true;
+    if (n.left  != null && n.left.val  >= n.val) return false;
+    if (n.right != null && n.right.val <= n.val) return false;
+    return wrong(n.left) && wrong(n.right);
+}
+```
+
+The node `3` is a valid right-child of `6`, but it lives in 5's right subtree where everything must exceed 5. A local check misses it.
+
+## Optimal A — range bounds, O(n) time, O(h) space
+
+Carry down the **valid open interval** `(low, high)` each node must fall in. Descending left tightens the upper bound to the parent's value; descending right tightens the lower bound. Use `Long` (or nullable bounds) so the extreme `Integer.MIN_VALUE`/`MAX_VALUE` keys validate correctly.
+
+```java
+boolean isValidBST(TreeNode root) {
+    return validate(root, Long.MIN_VALUE, Long.MAX_VALUE);
+}
+private boolean validate(TreeNode n, long low, long high) {
+    if (n == null) return true;
+    if (n.val <= low || n.val >= high) return false;   // outside allowed range
+    return validate(n.left,  low, n.val)               // left: cap high at n.val
+        && validate(n.right, n.val, high);             // right: raise low to n.val
+}
+```
+
+## Optimal B — inorder must be strictly increasing
+
+A BST's **inorder traversal yields sorted keys**. So walk inorder and verify each value strictly exceeds the previous one. This avoids the bounds bookkeeping and reads naturally.
+
+```java
+private Integer prev = null;
+boolean isValidBSTInorder(TreeNode n) {
+    if (n == null) return true;
+    if (!isValidBSTInorder(n.left)) return false;
+    if (prev != null && n.val <= prev) return false;   // not strictly increasing
+    prev = n.val;
+    return isValidBSTInorder(n.right);
+}
+```
+
+Both are single O(n) passes with O(h) stack space.
+
+<ComplexityTable rows={[
+  {op: "Range bounds", best: "O(n)", average: "O(n)", worst: "O(n)", note: "use long bounds for MIN/MAX vals"},
+  {op: "Inorder increasing", best: "O(n)", average: "O(n)", worst: "O(n)", note: "BST inorder is sorted"},
+]} />
+
+<ProbeNote>Almost everyone reaches for the broken local check first — interviewers *want* to see whether you catch that the property is subtree-wide. Two edge cases they push on: **strict vs non-strict** (LeetCode forbids duplicates, so use `<`/`>`, not `<=`/`>=`), and boundary values equal to `Integer.MIN_VALUE`/`MAX_VALUE`, which is why `long` bounds or nullable `Integer` bounds are safer than `int`.</ProbeNote>

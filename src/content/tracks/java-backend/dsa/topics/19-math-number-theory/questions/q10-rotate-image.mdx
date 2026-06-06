@@ -1,0 +1,60 @@
+**Problem.** Rotate an `n × n` matrix **90° clockwise, in place** (O(1) extra space).
+
+## The two-step decomposition — transpose then reverse rows
+
+A clockwise 90° rotation equals **transpose** (swap across the main diagonal) followed by **reversing each row**. This is the cleanest, least error-prone approach and the one to present first.
+
+```java
+void rotate(int[][] m) {
+    int n = m.length;
+
+    // 1. Transpose: swap m[i][j] with m[j][i] for j > i (upper triangle only)
+    for (int i = 0; i < n; i++)
+        for (int j = i + 1; j < n; j++) {
+            int tmp = m[i][j];
+            m[i][j] = m[j][i];
+            m[j][i] = tmp;
+        }
+
+    // 2. Reverse each row
+    for (int[] row : m) {
+        int lo = 0, hi = n - 1;
+        while (lo < hi) {
+            int tmp = row[lo]; row[lo] = row[hi]; row[hi] = tmp;
+            lo++; hi--;
+        }
+    }
+}
+```
+
+**Why `j = i + 1`:** the transpose loop must touch each off-diagonal pair *once*. Iterating the full square would swap every pair twice, undoing the transpose. Restricting to the upper triangle (`j > i`) fixes that.
+
+For **counterclockwise** 90°, transpose then reverse each *column* (or reverse rows first, then transpose).
+
+## Alternative — four-way cycle swap (layer by layer)
+
+Rotate the matrix in concentric rings, moving four elements per step with one temporary. Same O(n²) time, O(1) space, but far more index-juggling and easier to get wrong under pressure:
+
+```java
+void rotate(int[][] m) {
+    int n = m.length;
+    for (int layer = 0; layer < n / 2; layer++) {
+        int first = layer, last = n - 1 - layer;
+        for (int i = first; i < last; i++) {
+            int offset = i - first;
+            int top = m[first][i];                          // save top
+            m[first][i]            = m[last - offset][first];   // left  -> top
+            m[last - offset][first] = m[last][last - offset];   // bottom-> left
+            m[last][last - offset] = m[i][last];                // right -> bottom
+            m[i][last]             = top;                        // top   -> right
+        }
+    }
+}
+```
+
+<ComplexityTable rows={[
+  {op: "Transpose + reverse", best: "O(n²)", average: "O(n²)", worst: "O(n²)", note: "O(1) extra; two clean passes"},
+  {op: "Four-way cycle", best: "O(n²)", average: "O(n²)", worst: "O(n²)", note: "O(1) extra; tricky indices"},
+]} />
+
+<ProbeNote>Lead with **transpose + reverse rows** — it's almost impossible to get wrong and easy to explain ("clockwise = transpose then mirror"). The trap is the transpose loop bound: `j = i + 1` (upper triangle) so you don't swap each pair twice. Know the counterclockwise variant (transpose then reverse columns) and have the four-way cycle swap as a backup if asked for the single-pass version.</ProbeNote>

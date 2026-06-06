@@ -1,0 +1,117 @@
+## 1. Functional requirements
+
+- Start from a **seed set** of URLs and crawl outward via extracted links.
+- **Fetch** HTML, **store** raw content, and **extract** new URLs.
+- **Deduplicate** URLs (don't re-crawl) and **detect duplicate content**.
+- Be **polite**: honor `robots.txt` and per-domain rate limits.
+- Support **re-crawl / freshness** (revisit pages on a schedule).
+- Out of scope (state it): the search index / ranking that consumes the output.
+
+## 2. Non-functional requirements
+
+- **Scale:** crawl **1B pages** in ~30 days; average page ~100 KB.
+- **Throughput:** sustained **~400 pages/s** (1B / 30d / 86,400s), ×~3 peak.
+- **Politeness:** never exceed a per-host crawl rate (e.g., 1 req / domain / sec).
+- **Extensibility:** pluggable parsers (HTML, PDF), respectful of new content types.
+- **Robustness:** survive crawler traps, slow hosts, and node failures without stalling.
+
+## 3. Capacity estimation
+
+- Fetch rate: 1B / (30 × 86,400) ≈ **~385 pages/s** sustained (~1,200/s at peak).
+- Bandwidth: 385 × 100 KB ≈ **~38 MB/s ≈ ~308 Mbps** ingest (×3 peak ≈ ~1 Gbps).
+- Raw storage: 1B × 100 KB = **~100 TB** raw (compressed ~3–5× → **~25 TB**).
+- URL-seen set: 1B URLs × ~8 bits (Bloom, ~1% FP) = **~1 GB** of RAM — vs ~100 GB to store the URLs themselves. This is *why* a Bloom filter is used.
+- DNS: at 385 fetches/s, uncached DNS would be a bottleneck → cache aggressively.
+
+## 4. High-level architecture
+
+<Mermaid caption="Web crawler — frontier feeds worker fetchers; parsed links loop back through dedup">{`graph LR
+    SEED[Seed URLs] --> FRONT[URL Frontier]
+    FRONT --> WORK[Fetcher Workers]
+    WORK --> DNS[(DNS Cache)]
+    WORK --> ROB[robots.txt Cache]
+    WORK --> STORE[(Content Store - S3 / HDFS)]
+    WORK --> PARSE[Parser / Link Extractor]
+    PARSE --> DEDUP[URL Dedup - Bloom Filter]
+    PARSE --> CDUP[Content Dedup - SimHash]
+    DEDUP -->|unseen| FRONT
+    COORD[Coordinator - Zookeeper] --- FRONT
+    COORD --- WORK`}</Mermaid>
+
+## 5. API design
+
+A crawler is mostly internal, but expose control + a worker contract:
+
+```
+POST /api/v1/crawl            # submit seeds / scope
+  Body: { "seeds": ["https://example.com"], "maxDepth": 5, "scope": "example.com" }
+  202:  { "jobId": "c-7781" }
+
+GET  /api/v1/crawl/{jobId}    # progress
+  200:  { "fetched": 4210334, "frontierSize": 9123, "errors": 1204 }
+
+# Internal frontier contract used by workers:
+next()  -> { url, host, scheduledAt }   # respects per-host delay
+ack(url, status, contentHash)           # mark done; feed extracted links back
+```
+
+## 6. Data model
+
+```sql
+-- URL frontier (logical view; in practice backed by per-host queues + a priority heap)
+CREATE TABLE url_state (
+  url_hash     BYTEA PRIMARY KEY,        -- hash of normalized URL
+  url          TEXT NOT NULL,
+  host         TEXT NOT NULL,            -- partition / politeness key
+  priority     SMALLINT NOT NULL,        -- freshness/importance bucket
+  status       SMALLINT NOT NULL,        -- queued | in_flight | done | error
+  last_crawled TIMESTAMPTZ,
+  content_hash BYTEA                      -- checksum for exact-dup detection
+);
+CREATE INDEX ON url_state (host, status);
+
+CREATE TABLE robots_cache (
+  host        TEXT PRIMARY KEY,
+  rules       TEXT NOT NULL,             -- parsed allow/deny + crawl-delay
+  fetched_at  TIMESTAMPTZ NOT NULL
+);
+-- Raw page bodies live in object storage (S3/HDFS), keyed by url_hash, not in SQL.
+```
+
+## 7. Detailed component design
+
+**URL frontier (the crux).** Mercator-style two-level design: a **front set** of priority queues (high-priority/fresh URLs jump ahead) feeds a **back set** of *per-host* FIFO queues. A min-heap keyed on each host's `nextFetchTime` enforces politeness — a worker only pulls a host whose delay has elapsed. This decouples *what to crawl next* (priority) from *when we're allowed to* (politeness).
+
+**URL deduplication.** Normalize the URL (lowercase host, strip fragments, sort query params, resolve relative links), hash it, and test membership in a **Bloom filter** held in RAM. A 1% false-positive rate occasionally drops a new URL — acceptable. The authoritative set lives in the KV store; the Bloom filter is the cheap pre-check.
+
+**Content deduplication.** Two pages with different URLs can be identical (mirrors, session-id URLs). Store a **checksum (e.g., MD5)** of the body for *exact* duplicates, and **SimHash** for *near*-duplicates (boilerplate templates with one changed line) — compare by Hamming distance.
+
+**Politeness & DNS.** Fetch and cache `robots.txt` per host (honor `Crawl-delay` and `Disallow`). Cache DNS resolutions with a TTL so resolution doesn't dominate latency. Detect **crawler traps** (infinite calendars, session-id loops) via depth limits and URL-pattern heuristics.
+
+## 8. Scaling considerations
+
+- **Partition by host.** Hash each URL's host to a crawler node so a given domain has exactly **one owner** — this is what makes per-host rate limiting *correct* in a distributed system. Coordinate ownership via Zookeeper/consistent hashing.
+- **Workers are stateless and horizontal**; the frontier and dedup set are the shared state.
+- **Bloom filter sharding** — partition the seen-set by host alongside the frontier, so dedup is local to the node that owns the host.
+- **Storage** — raw bodies stream to object storage (S3/HDFS); only metadata sits in the KV/SQL store.
+
+## 9. Trade-offs and alternatives
+
+- **Bloom filter vs exact set** — Bloom saves ~100× RAM (1 GB vs 100 GB) at the cost of rare false positives (a few URLs never crawled). At 1B scale this trade is almost always worth it.
+- **BFS vs priority crawl** — pure BFS is simple but wastes budget on low-value pages; a priority frontier (by PageRank/freshness) crawls the important web first, at the cost of complexity.
+- **Per-host queue vs global rate limiter** — per-host queues make politeness a *data-structure* property rather than a runtime check; cleaner and trap-resistant.
+- **301 vs content dedup** — handle redirects at fetch time; use SimHash for the harder near-duplicate case.
+
+## 10. Common follow-up questions
+
+- How do you detect **near-duplicate** content? → SimHash + Hamming distance threshold.
+- How do you handle **crawler traps / infinite spaces**? → depth caps, URL-pattern budgets, per-host page quotas.
+- How do you keep the index **fresh**? → adaptive re-crawl: frequently-changing pages get a shorter revisit interval.
+- What if a **worker dies mid-crawl**? → in-flight URLs have a lease/timeout; unacked ones return to the frontier (at-least-once).
+- How do you avoid getting **blocked**? → honor `robots.txt`, throttle, rotate user-agents responsibly, back off on 429/503.
+
+## 11. What interviewers are really probing
+
+<ProbeNote>
+**All styles:** that you treated the frontier and dedup as the hard parts — not the HTTP fetch — and that you can reason about politeness as a first-class constraint. **FAANG:** depth on the Bloom filter sizing math, the priority+politeness frontier, content-level dedup (SimHash), and partition-by-host coordination. **EU/contracting:** good web citizenship — `robots.txt`, DNS caching, trap handling, back-off. **Regional:** a clean producer/consumer pipeline with a real queue, a sensible schema, and a diagram you can defend. The classic failure is designing a single-threaded "fetch → extract → repeat" loop with an in-memory `HashSet` of seen URLs that OOMs at scale and rate-limits nothing.
+</ProbeNote>

@@ -1,0 +1,41 @@
+A **dummy head** (or *sentinel*) is a throwaway node you place in front of the real head before you start manipulating a list. You operate on `dummy.next` as the logical head and `return dummy.next` at the end. It costs one extra allocation and erases an entire class of edge cases.
+
+## The edge case it kills
+
+Without a sentinel, every routine that might modify the *first* node needs a special branch:
+
+```java
+// Remove all nodes with value `val` — WITHOUT a dummy: head is a special case
+while (head != null && head.val == val) head = head.next;   // separate loop!
+ListNode curr = head;
+while (curr != null && curr.next != null) {
+    if (curr.next.val == val) curr.next = curr.next.next;
+    else curr = curr.next;
+}
+return head;
+```
+
+The leading `while` exists only because removing the head has no predecessor to rewire. A sentinel gives the head a predecessor:
+
+```java
+ListNode removeElements(ListNode head, int val) {
+    ListNode dummy = new ListNode(0, head);   // sentinel before head
+    ListNode curr = dummy;
+    while (curr.next != null) {
+        if (curr.next.val == val) curr.next = curr.next.next;  // uniform
+        else curr = curr.next;
+    }
+    return dummy.next;   // new head, even if the old head was removed
+}
+```
+
+Now **every** node — including the original head — is "some node's `next`," so one uniform loop handles all of them.
+
+<Callout kind="tip" title="Two places it always helps">
+1. **Deletion / filtering**, where the head itself might be removed.
+2. **Building a result list** (merge two lists, add two numbers), where you want a fixed anchor to append to so you never branch on "is this the first node I'm adding?" — you append to a `tail` pointer that starts at `dummy`.
+</Callout>
+
+<ProbeNote>
+The interviewer is checking whether you reach for the sentinel *before* hitting the head-is-special bug, not after. Say it explicitly: "I'll use a dummy head so removing or prepending the first node isn't a special case, and return `dummy.next`." It signals you have written enough linked-list code to know where the off-by-one bugs hide.
+</ProbeNote>

@@ -1,0 +1,46 @@
+**Problem.** Determine whether an integer is a power of two, and (the follow-up) a power of four.
+
+## Power of two — exactly one set bit
+
+A power of two in binary is a single `1` followed by zeros (`1, 10, 100, ...`). Clearing the lowest set bit with `n & (n - 1)` then yields zero:
+
+```java
+boolean isPowerOfTwo(int n) {
+    return n > 0 && (n & (n - 1)) == 0;
+}
+```
+
+The `n > 0` guard is essential: `0 & -1 == 0` would wrongly report `0`, and negatives must be rejected (their sign bit means they're never powers of two). An equivalent test using lowest-bit isolation: `n > 0 && (n & -n) == n`.
+
+## Power of four — one set bit, in an even position
+
+Every power of four is also a power of two (one set bit), but the bit must sit at an **even position** (`4^0 = 1` at bit 0, `4^1 = 100` at bit 2, `4^2 = 10000` at bit 4, ...). Add a mask check for even-position bits:
+
+```java
+boolean isPowerOfFour(int n) {
+    return n > 0
+        && (n & (n - 1)) == 0           // power of two: single bit set
+        && (n & 0x55555555) != 0;       // that bit is in an even position
+}
+```
+
+`0x55555555` is `0101...0101` — it has `1`s in all even bit positions. Since we already know exactly one bit is set, requiring it to land inside the mask forces an even position.
+
+## Alternative power-of-four test — modular
+
+A power of four always satisfies `n % 3 == 1` (because `4 ≡ 1 (mod 3)`, so `4^k ≡ 1`). Combined with the power-of-two check:
+
+```java
+boolean isPowerOfFour(int n) {
+    return n > 0 && (n & (n - 1)) == 0 && n % 3 == 1;
+}
+```
+
+Both approaches are accepted; the mask version is the more "bit-manipulation" answer.
+
+<ComplexityTable rows={[
+  {op: "Power of two", best: "O(1)", average: "O(1)", worst: "O(1)", note: "single n & (n-1) test"},
+  {op: "Power of four (mask)", best: "O(1)", average: "O(1)", worst: "O(1)", note: "add even-position mask 0x55555555"},
+]} />
+
+<ProbeNote>Never forget the `n > 0` guard — it's the most common bug, since `0` and negatives sneak past `(n & (n-1)) == 0`. For power of four, be ready to explain *why* `0x55555555` selects even positions and the alternative `n % 3 == 1` derivation. These two facts show you understand the structure, not just a memorized mask.</ProbeNote>

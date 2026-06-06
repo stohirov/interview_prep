@@ -1,0 +1,44 @@
+**Problem.** Given a set of intervals, return the **minimum number of intervals to remove** so the rest are non-overlapping.
+
+## Reframe: maximize what you keep
+
+Removing the fewest is equivalent to **keeping the most** non-overlapping intervals — the classic activity-selection problem. The answer is `n - (max non-overlapping set)`.
+
+## Greedy — sort by end, keep earliest-finishing
+
+Sort by **end** coordinate. Greedily keep an interval if its start is `>=` the end of the last kept interval. Keeping the earliest-finishing compatible interval leaves the most room for future intervals — provable by exchange argument.
+
+```java
+int eraseOverlapIntervals(int[][] intervals) {
+    if (intervals.length == 0) return 0;
+
+    Arrays.sort(intervals, (a, b) -> Integer.compare(a[1], b[1]));   // by end, overflow-safe
+
+    int kept = 1;                       // always keep the earliest-finishing interval
+    int prevEnd = intervals[0][1];
+
+    for (int i = 1; i < intervals.length; i++) {
+        if (intervals[i][0] >= prevEnd) {   // no overlap -> keep it
+            kept++;
+            prevEnd = intervals[i][1];
+        }
+        // else: overlaps the kept interval -> drop it (it ends no earlier, so keeping
+        // the previous one is at least as good)
+    }
+    return intervals.length - kept;
+}
+```
+
+## Why sort by end (not start)
+
+Sorting by end guarantees that the interval we keep finishes as early as possible, maximizing remaining space. If two intervals overlap, dropping the one that ends *later* is always safe — it can only conflict with more future intervals. Sorting by start would force extra bookkeeping to decide which of an overlapping pair to discard.
+
+## The boundary: `>=` vs `>`
+
+`[1,2]` and `[2,3]` are considered non-overlapping (touching endpoints don't count as overlap in this problem), so the condition is `intervals[i][0] >= prevEnd`. If the problem defined touching as overlapping, you'd use `>`.
+
+<ComplexityTable rows={[
+  {op: "Sort + sweep", best: "O(n log n)", average: "O(n log n)", worst: "O(n log n)", note: "sort dominates; O(1) extra space"},
+]} />
+
+<ProbeNote>Identical skeleton to Minimum Arrows to Burst Balloons — the only differences are the boundary condition (`>=` here vs `>` there) and that you count what you *remove* rather than the arrows. The senior move is reframing "min to remove" as "max to keep" and naming activity selection. Use `Integer.compare` to dodge the overflow trap.</ProbeNote>

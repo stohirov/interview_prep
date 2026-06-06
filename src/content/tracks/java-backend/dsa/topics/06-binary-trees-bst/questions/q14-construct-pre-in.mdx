@@ -1,0 +1,59 @@
+**Problem.** Given the **preorder** and **inorder** traversal arrays of a binary tree (all values distinct), reconstruct and return the tree.
+
+## The two insights
+
+1. **Preorder** is (node, left, right), so its **first element is always the root** of the current subtree.
+2. **Inorder** is (left, node, right), so once you locate the root within it, **everything to the left of the root is the left subtree** and everything to the right is the right subtree.
+
+So: take the root from preorder, split inorder around it to learn the *size* of each subtree, then recurse. The left-subtree size also tells you how to split the *preorder* range.
+
+<Diagram caption="Root from preorder, split point from inorder">{`
+preorder: [3, 9, 20, 15, 7]      root = 3 (first)
+inorder:  [9, 3, 15, 20, 7]      3 at index 1
+
+  left subtree  = inorder[0..1) = [9]          (1 node)
+  right subtree = inorder[2..5) = [15,20,7]    (3 nodes)
+  -> next preorder root for left is 9, for right is 20
+`}</Diagram>
+
+## Brute force — O(n²)
+
+Naively, each recursion scans inorder to find the root — O(n) per node, O(n²) total, plus O(n) array slicing.
+
+## Optimal — index map + moving preorder pointer, O(n)
+
+Two refinements bring it to linear time: a **HashMap from value to inorder index** kills the per-node scan, and a single **moving `preIdx`** consumes preorder left-to-right (each call takes the next root) so we never slice arrays.
+
+```java
+private int preIdx = 0;
+private Map<Integer, Integer> inIndex;
+
+TreeNode buildTree(int[] preorder, int[] inorder) {
+    preIdx = 0;
+    inIndex = new HashMap<>();
+    for (int i = 0; i < inorder.length; i++) inIndex.put(inorder[i], i);
+    return build(preorder, 0, inorder.length - 1);
+}
+
+// builds the subtree whose nodes occupy inorder[inLo..inHi]
+private TreeNode build(int[] preorder, int inLo, int inHi) {
+    if (inLo > inHi) return null;                 // empty range
+
+    int rootVal = preorder[preIdx++];             // next preorder value is this root
+    TreeNode root = new TreeNode(rootVal);
+
+    int mid = inIndex.get(rootVal);               // root's position in inorder
+    root.left  = build(preorder, inLo, mid - 1);  // left subtree first...
+    root.right = build(preorder, mid + 1, inHi);  // ...so preIdx advances correctly
+    return root;
+}
+```
+
+Building the left subtree *before* the right is what keeps `preIdx` synchronized: preorder lists the entire left subtree before the right, so consuming it in that order lines up exactly. Each node is created once with O(1) map lookups — **O(n) time**, O(n) for the map plus O(h) recursion.
+
+<ComplexityTable rows={[
+  {op: "Brute (scan + slice)", best: "O(n²)", average: "O(n²)", worst: "O(n²)", note: "O(n) root search per node"},
+  {op: "Index map + preIdx", best: "O(n)", average: "O(n)", worst: "O(n)", note: "O(1) lookups, no slicing"},
+]} />
+
+<ProbeNote>The make-or-break detail is **recursing left before right** so the shared `preIdx` advances in the correct order — explain *why* (preorder emits the whole left subtree first). Note which pairs actually determine a unique tree: preorder+inorder and postorder+inorder both work, but **preorder+postorder does not** (it cannot distinguish a left-only from a right-only child). Distinct values are assumed; duplicates break the inorder split.</ProbeNote>

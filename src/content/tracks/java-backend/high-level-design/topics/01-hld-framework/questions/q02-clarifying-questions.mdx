@@ -1,0 +1,48 @@
+## Questions to ALWAYS ask before designing
+
+The prompt is intentionally vague. Spending the first 5–8 minutes clarifying is not stalling — it is the work. It scopes the problem, surfaces the constraints that drive the architecture, and demonstrates that you design from requirements rather than from habit.
+
+Group your questions into three buckets.
+
+### Functional requirements — what does it do?
+
+Establish the core operations and explicitly bound scope.
+
+- What are the **must-have** operations? (For a chat app: send/receive 1:1 messages. Group chat, presence, media — confirm in or out.)
+- Who are the **actors**? (End users, admins, third-party integrations.)
+- What's explicitly **out of scope** for this session? (Proposing the cut yourself is a senior move — it shows time management.)
+
+### Non-functional requirements — how well must it do it?
+
+These constrain the design far more than the feature list does.
+
+| Dimension | Question to ask | Why it drives design |
+|---|---|---|
+| **Latency** | p99 target? Is this on the user's critical path? | Decides caching, CDN, sync vs async |
+| **Availability** | 99.9% or 99.99%? | Decides replication and failover cost |
+| **Consistency** | Is stale data acceptable? Read-your-writes needed? | Decides SQL vs NoSQL, quorum, sync replication |
+| **Durability** | Can we ever lose a write? | Decides write-ahead logging, replication factor |
+| **Read/write ratio** | Read-heavy or write-heavy? | Decides caching vs sharding emphasis |
+
+### Scale — how big?
+
+- **DAU / MAU**, and the **read/write ratio**.
+- **Data size** per record and **growth rate** (records/day).
+- **Peak vs average** traffic (a 2–5× peak multiplier is standard).
+- **Retention** — how long is data kept? (Drives total storage.)
+
+These feed directly into capacity estimation, which is why you ask them before estimating.
+
+<Callout kind="tip" title="Turn answers into design constraints out loud">
+Don't just collect answers — convert them immediately: "100:1 reads to writes, so this is a caching problem, not a write problem." "Stale reads acceptable, so an eventually-consistent store is fine." Narrating the *implication* is what scores.
+</Callout>
+
+### Style differences
+
+- **FAANG** — they often answer with the hardest numbers ("assume 500M DAU") to push you toward sharding and consistency trade-offs. Expect them to probe peak and growth.
+- **EU / contracting** — they value the question "what's actually required?" because it leads to a cheaper, simpler system. Over-engineering is a red flag here.
+- **Regional (EPAM / Uzum)** — they want concrete, bounded requirements that map to a buildable schema and API. Vague scope worries them.
+
+<ProbeNote>
+The interviewer is testing whether you design from requirements or pattern-match to a memorized solution. Asking about consistency and the read/write ratio specifically signals that you understand what actually shapes a distributed system. Skipping straight to the diagram is the most common junior tell.
+</ProbeNote>

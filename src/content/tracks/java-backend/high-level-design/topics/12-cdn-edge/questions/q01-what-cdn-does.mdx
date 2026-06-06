@@ -1,0 +1,38 @@
+## What does a CDN actually do? When is it essential?
+
+A CDN is a **globally distributed cache layer in front of your origin**. It runs thousands of cache servers in **points of presence (PoPs)** across the world; a user's request is routed to the nearest PoP, which serves the content from its local cache if it has a fresh copy and otherwise fetches once from origin and caches it for the next user nearby. It does three jobs at once: cut latency, offload the origin, and absorb spikes.
+
+### The three things it actually does
+
+**1. Reduce latency by being close to the user.** Network latency is bounded by round-trip time, which is bounded by distance. Serving a São Paulo user from a São Paulo PoP (~5 ms) instead of a Virginia origin (~120 ms each way) is a 20×+ improvement no amount of backend tuning can match — the bytes simply travel less far.
+
+**2. Offload the origin.** A high edge hit ratio means the origin sees only cache misses. At a 95% hit rate the origin handles 1/20th of the traffic, which slashes compute and bandwidth cost and lets a modest origin serve a global audience.
+
+**3. Absorb spikes and attacks.** Because the edge fans traffic across a huge distributed fleet, a viral spike or a volumetric DDoS is absorbed at the edge rather than hitting your origin. CDNs are a standard first layer of DDoS protection and WAF enforcement.
+
+<Mermaid caption="Edge hit served locally; only a miss reaches origin and warms the PoP">{`graph LR
+    U[User] --> POP[Nearest PoP]
+    POP -->|hit| U
+    POP -->|miss: fetch once| O[(Origin)]
+    O -->|fill + cache| POP`}</Mermaid>
+
+### What it serves
+
+- **Static assets** — JS, CSS, images, fonts, video segments. The classic case: long TTLs plus content-hashed filenames so a deploy changes the URL and invalidation is free.
+- **Cacheable dynamic content** — API `GET`s and HTML fragments, with short TTLs or surrogate-key purges.
+- **Streaming media** — HLS/DASH segments from the nearest edge are what make global video delivery feasible.
+
+### When is it essential?
+
+- **Geographically distributed users** — the moment your audience spans regions, an origin in one place is slow for everyone else.
+- **Heavy static / media payloads** — large or numerous assets where origin bandwidth is the cost and bottleneck.
+- **Traffic spikes or attack exposure** — public sites that must survive virality or DDoS.
+
+### When it adds little
+
+- A **single-region, internal** tool whose users sit next to the origin.
+- **Highly personalized, uncacheable** responses (though edge compute can still help with routing/TLS even when the body isn't cacheable).
+
+<ProbeNote>
+The interviewer wants the three-part value — latency (proximity), origin offload, and spike/DDoS absorption — plus the "free invalidation via content-hashed URLs" trick for static assets. A strong answer also names when a CDN is *not* worth it: single-region internal traffic or fully personalized, uncacheable responses.
+</ProbeNote>

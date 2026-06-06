@@ -1,0 +1,29 @@
+**Design a chat / messaging system** (WhatsApp, Telegram) is the canonical **stateful, real-time, fan-out-to-online-devices** interview. With **2B users and ~100B messages/day**, the problem is not storing messages — it's maintaining millions of persistent connections, delivering each message to every device of every recipient exactly once and in order, and degrading gracefully when a recipient is offline.
+
+## The shape of the problem
+
+A message has a simple lifecycle: **sent → delivered → read**, and the system must persist it, route it to the recipient's connected devices, and reconcile when devices come back online. The hard parts:
+
+- **Connection management** — clients hold long-lived **WebSocket** connections to gateway servers; the system must know which gateway each user's devices are pinned to.
+- **Delivery + receipts** — every message needs *delivered* and *read* receipts, which are themselves small messages flowing back.
+- **1:1 vs group** — a 1:1 chat fans out to 2 users; a **group of up to 10K members** fans out to thousands of devices and needs server-side fan-out.
+- **Offline + ordering** — store the message, queue it, and replay in order when the device reconnects.
+- **Presence** — online/last-seen, a high-churn, best-effort signal.
+
+The transport choice — **WebSocket vs long-polling** — and the **shard-by-chat-ID** data model are the two structural decisions.
+
+## What the interviewer is probing, by style
+
+- **FAANG** — connection-gateway architecture, the routing layer that maps user → gateway, ordering and exactly-once delivery, group fan-out, and presence at scale. Expect "how do you deliver to a user connected to a different data center?"
+- **EU / remote contracting** — pragmatism: WebSockets + a message store + a queue; correct receipts; **mention E2E encryption** (Signal protocol) and where it constrains the design (server can't read or rank messages).
+- **Regional (EPAM / Uzum)** — a clean Spring + WebSocket (STOMP) service, a message schema sharded by chat, and a defensible delivery flow.
+
+## The key decisions
+
+1. **Transport** — WebSocket for push (vs polling); the gateway is stateful and must be tracked.
+2. **Routing** — a presence/session registry mapping `userId/deviceId → gatewayNode` so a sender's gateway can find the recipient's.
+3. **Storage & sharding** — messages sharded by **chat ID** so a conversation is co-located; ordered by a per-chat sequence.
+4. **Group fan-out** — server expands group membership and enqueues per-recipient.
+5. **E2E encryption** — payloads opaque to the server; receipts and routing use metadata only.
+
+The worked solution applies the full 11-section structure and shows all three style angles where they diverge.

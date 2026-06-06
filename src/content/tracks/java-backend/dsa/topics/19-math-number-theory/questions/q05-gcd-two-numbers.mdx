@@ -1,0 +1,52 @@
+**Problem.** Compute the greatest common divisor of two integers, then derive their least common multiple.
+
+## Euclidean algorithm — O(log min(a, b))
+
+Repeatedly replace `(a, b)` with `(b, a mod b)` until the second argument is zero. The recursive form is a one-liner:
+
+```java
+long gcd(long a, long b) {
+    return b == 0 ? a : gcd(b, a % b);
+}
+```
+
+The iterative form avoids recursion depth entirely:
+
+```java
+long gcd(long a, long b) {
+    while (b != 0) {
+        long temp = b;
+        b = a % b;       // remainder
+        a = temp;
+    }
+    return a;
+}
+```
+
+Each step reduces the larger argument by at least a factor related to the golden ratio, so it terminates in **O(log min(a, b))** steps — the Fibonacci pair being the worst case.
+
+## LCM from GCD — mind the overflow
+
+`lcm(a, b) = |a · b| / gcd(a, b)`. The trap is computing `a * b` first — it can overflow `long`. **Divide before multiplying:**
+
+```java
+long lcm(long a, long b) {
+    if (a == 0 || b == 0) return 0;
+    return a / gcd(a, b) * b;     // divide first, then multiply -> no overflow
+}
+```
+
+`a / gcd(a, b)` is exact (gcd divides `a`), and multiplying that smaller quotient by `b` stays in range far longer than `a * b` would.
+
+## Edge cases
+
+- `gcd(a, 0) = a` (and `gcd(0, 0)` is conventionally `0`).
+- Negative inputs: take absolute values, since divisibility ignores sign. Watch `Long.MIN_VALUE`, whose `abs` overflows.
+- Production: `BigInteger.gcd` handles arbitrary precision and is the right call for unbounded inputs.
+
+<ComplexityTable rows={[
+  {op: "Euclidean GCD", best: "O(1)", average: "O(log min(a,b))", worst: "O(log min(a,b))", note: "Fibonacci pair is worst case"},
+  {op: "LCM via GCD", best: "O(log min(a,b))", average: "O(log min(a,b))", worst: "O(log min(a,b))", note: "divide before multiply"},
+]} />
+
+<ProbeNote>The interviewer is watching for the overflow-safe LCM: `a / gcd(a, b) * b`, never `a * b / gcd`. Be able to state the O(log min(a,b)) bound and the Fibonacci worst case. Offering both recursive and iterative GCD, plus the negative/zero edge cases, rounds out a clean answer.</ProbeNote>

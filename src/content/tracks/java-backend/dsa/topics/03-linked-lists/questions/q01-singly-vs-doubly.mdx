@@ -1,0 +1,20 @@
+A **singly linked** node holds one pointer (`next`); a **doubly linked** node holds two (`next` and `prev`). That single extra pointer changes the trade-off surface.
+
+## What the extra pointer buys you
+
+- **O(1) deletion given only the node.** In a singly linked list you cannot delete a node without its predecessor — you have to walk from the head to find it (O(n)). With a `prev` pointer you splice it out directly: `node.prev.next = node.next; node.next.prev = node.prev`.
+- **Backward traversal.** Iterate from the tail, implement a `descendingIterator`, or move "left" — impossible in a singly linked list without reversing it.
+- **O(1) tail operations** when you also keep a tail pointer (true for both, but doubly linked makes removing the tail O(1) too).
+
+## What it costs
+
+- **Memory.** An extra reference per node — 4 or 8 bytes plus the object-header tax. For a list of millions of small values that is real.
+- **More invariants to maintain.** Every insert and delete touches twice as many pointers, so there are twice as many places to get the wiring wrong.
+
+<Callout kind="info" title="Where each shows up">
+Singly linked is the default for interview problems and lightweight stacks/forward queues. Doubly linked is the backbone of **LRU caches** (you must evict and promote nodes in O(1) given the node itself) and of Java's `LinkedList` and `LinkedHashMap`'s access-order chain.
+</Callout>
+
+<ProbeNote>
+The signal interviewers want: name the *one* operation that flips the decision — "O(1) removal of an arbitrary node when I already hold a reference to it." If you can articulate that the LRU cache needs exactly this property, you have shown you understand *why* the structure exists, not just its definition. Mention the memory and bug-surface cost to show balance.
+</ProbeNote>

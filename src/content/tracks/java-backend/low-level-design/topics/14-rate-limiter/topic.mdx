@@ -1,0 +1,21 @@
+The **rate limiter** is the highest-leverage senior LLD problem because it sits at the intersection of clean OO modeling, real algorithmic depth, and production concurrency. Every API gateway, every public SaaS endpoint, and every payment processor (Stripe, Amazon) ships one — so interviewers can drill from a 10-minute class sketch all the way to distributed coordination and HTTP semantics.
+
+## Why it scores so well
+
+- **Five distinct algorithms**, each with a sharp trade-off, drop naturally behind a single `RateLimitStrategy` interface. Naming Token Bucket vs Sliding Window Counter and explaining *why* you'd pick each is an instant senior signal.
+- **Thread-safety is mandatory.** A rate limiter is hammered by many threads at once; if your `allow()` is not atomic you will under- or over-count. This is where `AtomicLong`, CAS loops, and `ReentrantLock` earn their keep.
+- It opens cleanly into **distributed** territory (Redis `INCR` + `EXPIRE`, Lua atomicity), graceful degradation (fail-open vs fail-closed), and the `Retry-After` / `429` response contract.
+
+## How to frame it
+
+Start by clarifying the limit's *shape*: requests-per-second? Per user, per IP, or per API key? Is a short **burst** acceptable, or must traffic be perfectly smooth? Those two answers alone pick your algorithm:
+
+- Need to allow bursts up to a cap, then steady refill → **Token Bucket**.
+- Need to *smooth* bursts into a constant outflow → **Leaky Bucket**.
+- Cheapest possible, boundary spikes acceptable → **Fixed Window**.
+- Need exact correctness → **Sliding Window Log** (memory-heavy).
+- Need near-exact at low memory → **Sliding Window Counter**.
+
+Then declare your design seam: a `RateLimiter` facade holds a `Map<key, Strategy-state>`, delegates the accept/reject decision to a pluggable `RateLimitStrategy` (Strategy pattern), is shared as a `Singleton`, and can be **Decorated** to chain multiple limits — e.g. per-IP AND per-user AND per-API together. State the concurrency model out loud: each key's bucket mutates under its own atomic/lock so independent keys never contend.
+
+The worked solution gives full, thread-safe Java for all five algorithms behind the Strategy interface, then walks the distributed and HTTP follow-ups interviewers almost always reach for.

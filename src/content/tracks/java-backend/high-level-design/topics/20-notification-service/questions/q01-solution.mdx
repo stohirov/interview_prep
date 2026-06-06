@@ -1,0 +1,134 @@
+## 1. Functional requirements
+
+- Accept a notification request from any internal service (`POST /notifications`).
+- Deliver across **channels**: push, SMS, email, in-app.
+- Render from **templates** with per-recipient variables.
+- Honor **user preferences** (opt-outs, channel choice, quiet hours).
+- **Retry** failures with backoff; route exhausted messages to a **DLQ**.
+- **Rate-limit** per channel/provider and **fail over** to backup providers.
+- Track delivery status (sent / delivered / failed).
+
+## 2. Non-functional requirements
+
+- **Scale:** 10B notifications/day across all channels.
+- **Latency:** transactional notifications delivered in < 5 s p99; bulk can lag.
+- **Availability:** 99.95%; the send API must accept even when a provider is down.
+- **Delivery guarantee:** **at-least-once** with idempotency (no critical message lost; duplicates suppressed).
+- **Isolation:** one failing channel/provider must not block others.
+
+## 3. Capacity estimation
+
+- Throughput: 10B/day ÷ 86,400 s ≈ **~116K notifications/s** average (×~3 peak ≈ 350K/s).
+- Channel mix (assume push 60% / email 25% / SMS 10% / in-app 5%): push ≈ **~70K/s**, email ≈ **~29K/s**, SMS ≈ **~12K/s** — each queue sized independently.
+- Storage (status logs): 10B/day × ~200 B ≈ **~2 TB/day**; keep 30 days hot ≈ **~60 TB** → time-partitioned store, then archive.
+- Queue buffer: at 350K/s peak with a 5-min provider outage ≈ 350K × 300 ≈ **~105M backlogged messages** must sit durably in the queue → size queues/partitions for this.
+
+## 4. High-level architecture
+
+<Mermaid caption="Notification service — API enqueues per channel; workers deliver via pluggable providers with retries, rate limiting, failover, and a DLQ">{`graph LR
+    SVC[Calling Services] --> API[Notification API]
+    API --> PREF[Preference / Dedup Check]
+    PREF --> TPL[Template Renderer]
+    TPL --> Q[(Kafka - per-channel topics)]
+    Q --> WP[Push Workers]
+    Q --> WE[Email Workers]
+    Q --> WS[SMS Workers]
+    WP --> RL[Rate Limiter + Failover]
+    WE --> RL
+    WS --> RL
+    RL --> PUSH[APNs / FCM]
+    RL --> MAIL[SES / SendGrid]
+    RL --> SMS[Twilio / backup]
+    RL -->|exhausted retries| DLQ[(Dead-Letter Queue)]
+    WP -->|status| LOG[(Status Store)]`}</Mermaid>
+
+## 5. API design
+
+```http
+POST /api/v1/notifications
+  Idempotency-Key: 3f9a-...                 # dedup; required for critical sends
+  Body: {
+    "userId": "u123",
+    "templateId": "order_shipped",
+    "channels": ["push","email"],           # or "auto" -> resolve via prefs
+    "data": { "orderId": "A-77", "eta": "Tue" },
+    "priority": "transactional"             # transactional | bulk
+  }
+  202: { "notificationId": "n_88f3", "status": "queued" }
+
+GET  /api/v1/notifications/{id}             # delivery status per channel
+PUT  /api/v1/users/{userId}/preferences    # opt-outs, channels, quiet hours
+```
+
+The API is **accept-and-enqueue**: it validates, dedups, and returns `202` fast. Actual delivery is asynchronous, so a slow/down provider never blocks the caller.
+
+## 6. Data model
+
+```sql
+CREATE TABLE notification (
+  notification_id BIGINT PRIMARY KEY,      -- snowflake
+  user_id         BIGINT NOT NULL,
+  template_id     TEXT NOT NULL,
+  idempotency_key TEXT UNIQUE,             -- suppress duplicates
+  priority        TEXT NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE delivery (
+  notification_id BIGINT NOT NULL,
+  channel         TEXT NOT NULL,           -- push|sms|email|in_app
+  provider        TEXT,                    -- fcm|apns|twilio|ses...
+  status          TEXT NOT NULL,           -- queued|sent|delivered|failed|dlq
+  attempts        INT NOT NULL DEFAULT 0,
+  next_retry_at   TIMESTAMPTZ,
+  PRIMARY KEY (notification_id, channel)
+);
+
+CREATE TABLE user_preference (
+  user_id     BIGINT NOT NULL,
+  channel     TEXT NOT NULL,
+  enabled     BOOLEAN NOT NULL DEFAULT true,
+  quiet_from  TIME, quiet_to TIME,
+  PRIMARY KEY (user_id, channel)
+);
+-- Templates stored versioned in a templates table / object store.
+```
+
+## 7. Detailed component design
+
+- **Channel abstraction.** Every channel implements a common `ChannelSender` interface; concrete providers (FCM, APNs, Twilio, SES) sit behind a Strategy/Factory selection. Adding a channel or swapping a provider is a plug-in, not a rewrite — this is exactly what the **LLD notification-system topic** designs at the class level.
+- **Preference + dedup gate.** Before enqueue, resolve channels against `user_preference` (opt-outs, quiet hours) and reject duplicates by `idempotency_key`. GDPR-relevant: respect opt-outs and store consent.
+- **Per-channel queues.** Each channel is its own Kafka topic (or SQS queue) with its own worker pool, so a backlogged SMS provider can't block push — **no head-of-line blocking across channels**.
+- **Retry + backoff + DLQ.** Workers deliver at-least-once. On transient failure they retry with **exponential backoff + jitter** (e.g. 1s, 4s, 16s…), tracking `attempts`. After N attempts the message goes to a **DLQ** for inspection/replay rather than being dropped.
+- **Rate limiting + failover.** A per-provider token bucket respects each provider's throughput ceiling; on provider errors/timeouts a circuit breaker trips and traffic **fails over** to a backup provider for that channel.
+- **Templates.** Server-side, versioned templates rendered with per-recipient data; localization handled here.
+
+## 8. Scaling considerations
+
+- **Partition by channel and by user** — independent worker pools scale each channel separately to its provider ceiling.
+- **Backpressure** — durable queues absorb provider outages; workers drain when providers recover (sized for the ~100M-message backlog math above).
+- **Priority lanes** — transactional vs bulk on separate queues so a marketing blast can't delay a 2FA code.
+- **Idempotency store** — a fast dedup cache (Redis) keyed on idempotency_key in front of the DB.
+- **Status writes** are async/batched into a time-partitioned store; not on the critical send path.
+
+## 9. Trade-offs and alternatives
+
+- **At-least-once vs exactly-once.** Exactly-once is impractical across third-party providers; at-least-once + idempotency keys + provider-side dedup is the standard answer.
+- **Kafka vs SQS/RabbitMQ.** Kafka for high-throughput, replayable, partitioned streams (FAANG scale); SQS/managed for operational simplicity (EU/regional).
+- **Push to caller vs poll for status** — webhooks/callbacks vs `GET status`; pick per consumer.
+- **Per-provider rate limiting** — central limiter (accurate, a coordination point) vs per-worker local buckets (cheap, approximate).
+- **Synchronous send vs enqueue** — enqueue is the only thing that survives provider outages; never call a provider on the request path.
+
+## 10. Common follow-up questions
+
+- Twilio is down for 10 minutes — what happens? (Circuit breaker → failover provider; otherwise backlog in queue, retry on recovery, DLQ only after exhaustion.)
+- How do you prevent sending a 2FA code twice? (Idempotency key + dedup gate; at-least-once with suppression.)
+- Quiet hours / time-zone-aware delivery — schedule into a delayed queue.
+- Fan-out to 50M users for one announcement — bulk priority lane, batched enqueue, rate-limited drain.
+- How do you replay DLQ messages safely? (Re-enqueue with the same idempotency key.)
+
+## 11. What interviewers are really probing
+
+<ProbeNote>
+**All styles:** that you treated unreliable third-party providers as the core problem — accept-and-enqueue, channel abstraction, retries with backoff, DLQ, and idempotency for at-least-once delivery. **FAANG:** depth on per-channel partitioning (no head-of-line blocking), rate limiting, provider failover/circuit breaking, and the backlog math during an outage. **EU/contracting:** a pragmatic managed-queue + provider-abstraction stack with retry policy and GDPR-aware preferences. **Regional:** a clean enqueue API, a channel/provider abstraction (cross-linking the LLD notification-system topic), and a templates/preferences/delivery schema. The classic failure is calling the provider synchronously on the request path, or having no idempotency so retries duplicate critical messages.
+</ProbeNote>

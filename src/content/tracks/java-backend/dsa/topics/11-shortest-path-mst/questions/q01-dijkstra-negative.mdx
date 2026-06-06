@@ -1,0 +1,41 @@
+Dijkstra rests on a **greedy invariant**: when a vertex is popped from the priority queue with the smallest tentative distance, that distance is **final** — it can never be improved, so the vertex is "settled" and never revisited. That invariant is only valid when **every edge weight is non-negative**.
+
+## Why a negative edge breaks it
+
+Once you pop a vertex, you commit to its distance. But a negative edge reachable *later* could route back through that vertex and lower the cost — after you have already finalized it.
+
+<Diagram caption="A settles at 1, but the path A→B→C→A is cheaper. Dijkstra never reopens A.">{`        A
+       /|\\
+    1 / | \\ 4         dist(A) finalized at 0
+     /  |  \\          pop B (dist 1) -> settle
+    B   |   C         pop C (dist 4) -> settle, then edge C->B weight -10
+     \\__|__/          would give B a cost of -6, but B is already settled.
+       -10`}</Diagram>
+
+When C is processed and relaxes the negative edge into B, B has already been popped and settled — Dijkstra will not reopen it, so it reports a wrong, too-high distance. The greedy "smallest unsettled is final" assumption is simply false with negatives.
+
+## How Bellman-Ford handles it
+
+Bellman-Ford makes **no** greedy commitment. It relaxes **every edge** `V - 1` times. Since any shortest path has at most `V - 1` edges, after `V - 1` rounds every distance has converged — even if convergence required walking across a negative edge discovered late.
+
+```java
+boolean bellmanFord(int n, int[][] edges, int src, long[] dist) {
+    Arrays.fill(dist, Long.MAX_VALUE);
+    dist[src] = 0;
+    for (int i = 0; i < n - 1; i++)           // V-1 relaxation rounds
+        for (int[] e : edges) {                // u -> v, weight w
+            if (dist[e[0]] != Long.MAX_VALUE && dist[e[0]] + e[2] < dist[e[1]])
+                dist[e[1]] = dist[e[0]] + e[2];
+        }
+    for (int[] e : edges)                       // one more pass detects
+        if (dist[e[0]] != Long.MAX_VALUE && dist[e[0]] + e[2] < dist[e[1]])
+            return false;                       // a negative cycle exists
+    return true;
+}
+```
+
+A `V`-th pass that *still* relaxes an edge proves a **negative cycle** is reachable — at which point "shortest path" is undefined (you could loop forever to drive cost to −∞). Dijkstra cannot detect this at all.
+
+<ProbeNote>
+The interviewer wants the *invariant* in your words ("popped = settled"), a one-line reason it fails, and the cost trade-off: Bellman-Ford buys negative-edge support and cycle detection at O(V·E) versus Dijkstra's O(E log V). Do not propose "just add a constant to every edge" — that changes which path is shortest because longer paths accumulate more added constant.
+</ProbeNote>

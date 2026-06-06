@@ -1,0 +1,28 @@
+A **high-level design (HLD) round** is not a quiz about whether you know what Kafka is. It is a 45–60 minute conversation in which the interviewer watches you take a vague, one-line prompt ("design a URL shortener", "design Instagram") and turn it into a defensible distributed system — under time pressure, while narrating your reasoning. The single biggest differentiator between a pass and a fail is **structure**: candidates who jump straight to drawing boxes fail; candidates who follow a repeatable framework pass.
+
+## Why a framework matters
+
+The prompt is deliberately under-specified. There is no single correct answer — there is a space of reasonable answers, and your job is to navigate it out loud. A framework gives you three things: it stops you freezing on a blank page, it makes sure you cover what the interviewer scores you on (requirements, scale, data, bottlenecks, trade-offs), and it lets you time-box so you don't spend 30 minutes on the API and run out of clock before the interesting deep dive.
+
+## The canonical 4-step approach
+
+Every good HLD answer walks the same path:
+
+1. **Requirements** — clarify functional scope, non-functional targets (latency, availability, consistency), and explicit out-of-scope. Never design what you haven't bounded.
+2. **Capacity estimation** — DAU → QPS → storage → bandwidth. This is what tells you whether one Postgres box suffices or you need sharding, and it directly drives the architecture.
+3. **High-level design** — the boxes-and-arrows diagram: clients, load balancer, services, data stores, caches, queues. The API contract and data model live here.
+4. **Deep dive** — the interviewer picks (or you steer to) one or two hard parts and you go deep: a bottleneck, a consistency decision, a hot-partition problem, an ID-generation scheme.
+
+<Callout kind="tip" title="The framework is the signal">
+Stating the framework explicitly ("Let me start with requirements, then estimate scale, then sketch the design, then deep-dive") is itself a senior signal. It tells the interviewer you've done this before and they can relax.
+</Callout>
+
+## Reading the room — interviewer styles
+
+The same framework applies everywhere, but emphasis shifts by interviewer culture, and **every design topic in this track carries these three angles**:
+
+- **FAANG** — depth and scale. They push on bottlenecks, consistency, and "what breaks at 10×?". Numbers matter.
+- **EU / remote contracting** — pragmatism and cost. "Postgres + Redis gets you a long way." Justify choices on operational simplicity and money.
+- **Regional (EPAM / Uzum)** — a clean, buildable design: a sensible REST API, a real schema, and a diagram you can defend line by line.
+
+The questions in this topic drill each step of the framework and the style differences in detail.

@@ -1,0 +1,44 @@
+**Problem.** Given an array of distinct positive integers `candidates` and a `target`, return all unique combinations that sum to `target`. **Each candidate may be reused unlimited times.** For `candidates = [2,3,6,7], target = 7`: `[2,2,3]` and `[7]`.
+
+## Brute force
+
+Enumerating all subsets doesn't even apply — reuse means combinations can be longer than the input. Blindly exploring every length and discarding wrong sums is exponential with enormous waste. The structured backtracking below prunes by the running sum.
+
+## Optimal — backtracking with reuse and sum pruning
+
+Two design choices distinguish this from plain combinations:
+
+- **Reuse is allowed**, so when we recurse after choosing index `i` we pass `i` again (not `i + 1`) — the same candidate can be picked repeatedly.
+- A **`start` index** still advances across the loop iterations, which prevents producing `[2,3]` and `[3,2]` as separate answers (canonical non-decreasing order).
+
+The prune is on the **remaining target**: subtract the chosen value; if it goes negative, stop. Sorting first lets us `break` (not just `continue`) the moment a candidate exceeds what's left, since all later candidates are larger.
+
+```java
+List<List<Integer>> combinationSum(int[] candidates, int target) {
+    Arrays.sort(candidates);                     // enables the break-prune
+    List<List<Integer>> result = new ArrayList<>();
+    backtrack(candidates, target, 0, new ArrayList<>(), result);
+    return result;
+}
+
+void backtrack(int[] c, int remaining, int start, List<Integer> path, List<List<Integer>> result) {
+    if (remaining == 0) {                         // exact hit
+        result.add(new ArrayList<>(path));
+        return;
+    }
+    for (int i = start; i < c.length; i++) {
+        if (c[i] > remaining) break;              // sorted → no later candidate fits either
+        path.add(c[i]);                           // choose
+        backtrack(c, remaining - c[i], i, path, result);   // explore — i, not i+1 (reuse)
+        path.remove(path.size() - 1);             // unchoose
+    }
+}
+```
+
+Passing `i` (reuse) versus advancing `start` across iterations (no duplicate orderings) is the entire crux. Complexity is bounded by the size of the solution tree — roughly **O(N^(target/min))** in the worst case — with **O(target/min)** recursion depth.
+
+<Callout kind="info" title="Combination Sum II — no reuse, duplicates in input">
+The sibling problem allows each element once but the input has duplicates. There you recurse with `i + 1` (no reuse) and add `if (i > start && c[i] == c[i-1]) continue;` after sorting, to skip duplicate values at the same level.
+</Callout>
+
+<ProbeNote>State the two knobs explicitly: recurse with `i` to allow reuse, advance the loop's `start` to avoid permuted duplicates. The sorted `break` (vs `continue`) is the prune that impresses — explain that once `c[i] > remaining`, every later sorted candidate is too big too.</ProbeNote>

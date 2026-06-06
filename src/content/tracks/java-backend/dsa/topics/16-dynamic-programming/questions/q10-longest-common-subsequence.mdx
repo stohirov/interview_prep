@@ -1,0 +1,54 @@
+**Problem.** Given two strings, return the length of their longest **common subsequence** — characters appearing in both in the same relative order, not necessarily contiguous. `"abcde"` and `"ace" → 3` (`"ace"`).
+
+## The recurrence — the canonical 2D grid DP
+
+State `dp[i][j]` = LCS length of the first `i` chars of `a` and first `j` chars of `b`. Compare the last characters:
+
+```
+if a[i-1] == b[j-1]:  dp[i][j] = dp[i-1][j-1] + 1          // match: extend
+else:                 dp[i][j] = max(dp[i-1][j], dp[i][j-1]) // drop one char
+```
+
+Base cases: an empty prefix gives LCS 0, so row 0 and column 0 are zeros.
+
+The brute force — enumerate all 2ᵐ subsequences of one string and test membership — is exponential. The DP is O(m·n).
+
+## O(m·n) tabulation
+
+```java
+int longestCommonSubsequence(String a, String b) {
+    int m = a.length(), n = b.length();
+    int[][] dp = new int[m + 1][n + 1];     // row/col 0 are the empty-prefix base cases
+    for (int i = 1; i <= m; i++)
+        for (int j = 1; j <= n; j++)
+            dp[i][j] = a.charAt(i - 1) == b.charAt(j - 1)
+                ? dp[i - 1][j - 1] + 1
+                : Math.max(dp[i - 1][j], dp[i][j - 1]);
+    return dp[m][n];
+}
+```
+
+O(m·n) time and space.
+
+## Space optimization — O(min(m, n))
+
+Each row depends only on the current and previous row, so two 1D arrays (or one plus a saved diagonal) suffice:
+
+```java
+int longestCommonSubsequence(String a, String b) {
+    int m = a.length(), n = b.length();
+    int[] prev = new int[n + 1], cur = new int[n + 1];
+    for (int i = 1; i <= m; i++) {
+        for (int j = 1; j <= n; j++)
+            cur[j] = a.charAt(i - 1) == b.charAt(j - 1)
+                ? prev[j - 1] + 1
+                : Math.max(prev[j], cur[j - 1]);
+        int[] tmp = prev; prev = cur; cur = tmp;   // roll the rows
+    }
+    return prev[n];
+}
+```
+
+<ProbeNote>
+LCS is the template behind edit distance, longest common substring (reset to 0 on mismatch instead of taking the max), and diff tools. Interviewers often ask you to **reconstruct** the actual subsequence — that requires the full 2D table and a backtrack from `dp[m][n]`, which the rolling-array version sacrifices. Mention that trade-off proactively.
+</ProbeNote>

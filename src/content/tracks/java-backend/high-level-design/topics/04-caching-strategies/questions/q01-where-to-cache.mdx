@@ -1,0 +1,35 @@
+## Where to cache: client, edge, application, database
+
+Caching is not one decision — there is a cache at almost every layer between the user and your data. The senior move is to reason about each layer's trade-offs explicitly rather than reflexively reaching for Redis. The governing rule: **the closer a cache is to the user, the faster and cheaper the hit — and the harder it is to invalidate.**
+
+### The layers, from the user inward
+
+<Mermaid caption="Caching layers between the user and the source of truth">{`graph LR
+    U[Browser] --> CDN[CDN / Edge]
+    CDN --> LB[Load Balancer]
+    LB --> APP[App + local cache - Caffeine]
+    APP --> R[(Distributed cache - Redis)]
+    R --> DB[(Database + buffer pool)]`}</Mermaid>
+
+| Layer | What it caches | Latency | Invalidation difficulty |
+| --- | --- | --- | --- |
+| **Client / browser** | Static assets, API responses (`Cache-Control`, `ETag`) | 0 (no network) | Hardest — you can't reach the client; rely on TTL/versioned URLs |
+| **CDN / edge** | Static + cacheable dynamic content, close to user (PoPs) | ~10–50 ms | Hard — purge APIs, surrogate keys |
+| **Application local** (Caffeine) | Hot keys, per-instance | nanoseconds | Medium — per-node, needs pub/sub to coordinate |
+| **Distributed** (Redis/Memcached) | Shared hot data across instances | ~0.2–1 ms | Easy — single shared copy, one place to evict |
+| **Database** (buffer pool, query cache) | Pages, plans | ~ms | Automatic, managed by the DB |
+
+### How to choose
+
+- **Static, versioned assets (JS, CSS, images)** → push to the **CDN and browser** with long TTLs and content-hashed filenames. Invalidation is "free" because a new deploy changes the URL.
+- **Read-heavy dynamic data shared across users** (product catalog, user profiles) → **distributed cache (Redis)**. One coherent copy, easy to invalidate on write.
+- **Ultra-hot keys read thousands of times/second** → add an **L1 local cache** in front of Redis to skip the network hop, accepting brief staleness.
+- **Personalized or rarely-reused data** → often *not* worth caching; a low hit rate wastes memory and adds an invalidation burden for little gain.
+
+### The trade-off to articulate
+
+Every cache adds a **staleness window** and a **second source of truth to keep coherent**. Caching closer to the user multiplies the speed/cost win but also multiplies the number of stale copies you can't easily reach. State where the data sits on the **read frequency × tolerance-for-staleness** matrix: cache aggressively where both are high, don't bother where reuse is low.
+
+<ProbeNote>
+The interviewer wants to hear that you treat caching as a layered decision, not a single Redis box — and that you tie the choice to read frequency and staleness tolerance. Bonus signal: noting that CDN/browser caches are the cheapest hit but the hardest to invalidate, which is why versioned URLs are the standard escape hatch.
+</ProbeNote>

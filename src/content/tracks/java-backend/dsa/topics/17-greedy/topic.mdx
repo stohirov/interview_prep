@@ -1,0 +1,30 @@
+A **greedy algorithm** builds a solution one step at a time, at each step taking the choice that looks best *right now* and never reconsidering it. No backtracking, no table of subproblems — just commit and move on. When it works, it is the simplest and fastest paradigm you have. When it doesn't, it silently returns a wrong answer, which is exactly why interviewers reach for it.
+
+## The greedy-choice property
+
+Greedy is correct only when the problem has the **greedy-choice property**: a globally optimal solution can be reached by making a locally optimal choice at each step. Combined with **optimal substructure** (an optimal solution contains optimal solutions to subproblems), this is what licenses "commit and never look back."
+
+The hard part is that locally optimal *feels* right far more often than it *is* right. Coin change with US denominations works greedily; with coins `{1, 3, 4}` and target `6`, greedy takes `4 + 1 + 1 = 3` coins but the optimum is `3 + 3 = 2`. Same shape of problem, no greedy-choice property.
+
+## The exchange argument — how you actually prove it
+
+The standard proof technique is the **exchange argument**: assume an optimal solution that differs from the greedy one, then show you can transform it — swapping in the greedy choice — without making it worse. If every optimal solution can be massaged toward the greedy one without losing optimality, greedy is optimal. In interviews you rarely write the full proof, but you must be able to *sketch* it; "I'd argue by exchange that swapping any non-greedy choice for the greedy one doesn't increase the cost" is the senior signal.
+
+## Greedy vs DP
+
+Both need optimal substructure. The difference is whether one local choice suffices:
+
+<ComplexityTable rows={[
+  {op: "Greedy", best: "one safe local choice per step", average: "no revisiting", worst: "fails without greedy-choice property"},
+  {op: "Dynamic programming", best: "tries all choices, keeps best", average: "memoizes overlapping subproblems", worst: "more time/space"},
+]} />
+
+If you can prove a single local choice is always safe, use greedy — it's faster and simpler. If a choice's effect depends on future choices you can't yet evaluate, you need DP to explore them.
+
+<Callout kind="tip" title="The interview tell">
+Sorting is the most common greedy enabler: interval problems, deadline scheduling, and "smallest/largest first" all start with a sort, then a single linear pass making one safe choice per element. If your instinct is "sort, then sweep," you're probably looking at a greedy problem.
+</Callout>
+
+<Callout kind="warn" title="The trap">
+The danger is *plausibility*. A greedy heuristic that passes the examples can still be wrong. Before committing, either construct a proof sketch (exchange argument) or hunt for a counterexample — like the `{1,3,4}` coins. If you can't do either, fall back to DP.
+</Callout>

@@ -1,0 +1,27 @@
+A **red-black tree** is a BST where every node carries one extra bit of color — **red** or **black** — and five invariants keep it approximately balanced. They are not arbitrary: together they force the longest root-to-leaf path to be at most twice the shortest, which bounds height at `≤ 2·log₂(n + 1)`.
+
+## The five invariants
+
+1. **Every node is either red or black.**
+2. **The root is black.** (You can always recolor the root black without violating anything else.)
+3. **Every leaf (the null/NIL sentinel) is black.** Red-black analysis treats the empty children as explicit black leaves.
+4. **Red nodes have black children** — no two red nodes are adjacent. Equivalently, a red node never has a red parent.
+5. **Every root-to-leaf path passes through the same number of black nodes** — the **black-height** is uniform across all paths.
+
+## Why these five give you balance
+
+Property 5 says all paths have the same black-height `b`. Property 4 says reds can't be consecutive, so on any path reds are at most half the nodes — a path can be at most `2b` long. The shortest possible path (all black) is `b`. Therefore **the longest path is at most twice the shortest**, and the tree can never get more lopsided than 2×. That ratio is exactly the O(log n) height guarantee.
+
+<Diagram caption="A valid red-black tree. Every root-to-NIL path crosses 2 black nodes; no red node has a red child.">{`            13(B)
+           /     \\
+        8(R)      17(R)
+        /  \\      /   \\
+     1(B)  11(B) 15(B) 25(B)
+       \\
+       6(R)`}</Diagram>
+
+## Maintaining them
+
+Inserts color the new node **red** (red can't break property 5, only possibly property 4) and then fix any red-red violation by **recoloring** and, when recoloring alone can't resolve it, **rotating**. Deletes track a "double-black" deficit and repair property 5 with a small set of cases. Both run in O(log n) with at most O(1) rotations on insert and O(log n) recolorings.
+
+<ProbeNote>Memorize the five and, more importantly, the consequence: no-two-reds (4) plus equal black-height (5) bounds the longest path at 2× the shortest. Common slip — forgetting that NIL leaves count as black (property 3), which is what makes black-height well-defined. Java's `TreeMap` and `TreeSet` are exactly this structure.</ProbeNote>

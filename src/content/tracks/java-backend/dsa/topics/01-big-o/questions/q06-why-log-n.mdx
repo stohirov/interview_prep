@@ -1,0 +1,44 @@
+**O(log n) is dramatically better than O(n)** because the logarithm grows so slowly that, for any input size you will ever process, a logarithmic algorithm does a *handful* of steps where a linear one does millions. The reason is the **doubling argument**: every time you *double* the input, a log-n algorithm does just **one more step**.
+
+## The doubling argument
+
+`log₂ n` answers the question: "how many times can I halve `n` before reaching 1?" — equivalently, "how many times must I double from 1 to reach `n`?" That means:
+
+- `n = 1,000` → ~10 steps
+- `n = 1,000,000` → ~20 steps
+- `n = 1,000,000,000` → ~30 steps
+
+Going from a thousand to a *billion* — six orders of magnitude — adds only **20 steps**. A linear algorithm over those same inputs goes from a thousand operations to a billion: it grew a million-fold. Each doubling of `n` costs the linear algorithm *twice* as much but costs the log algorithm *one extra step*.
+
+<Diagram caption="Each doubling of n adds one step to a log-n algorithm">{`n:        1    2    4    8    16   32   ...   2^k
+log2(n):  0    1    2    3    4    5    ...    k
+          +1 step per doubling  ──────────►
+
+binary search on a sorted array of 1,000,000:
+  1M → 500k → 250k → ... → 1     (≈20 halvings)`}</Diagram>
+
+## Where it comes from
+
+Logarithmic time appears whenever each step **discards a constant fraction** of the remaining work. Binary search throws away half the array per comparison. Balanced BST and `TreeMap` operations descend one level per step, and a balanced tree of `n` nodes has height `log n`. Heap push/pop bubbles through `log n` levels.
+
+```java
+// Binary search: O(log n). Each iteration halves [lo, hi].
+int binarySearch(int[] a, int target) {
+    int lo = 0, hi = a.length - 1;
+    while (lo <= hi) {
+        int mid = lo + (hi - lo) / 2;   // overflow-safe midpoint
+        if (a[mid] == target) return mid;
+        if (a[mid] < target) lo = mid + 1;   // discard lower half
+        else hi = mid - 1;                   // discard upper half
+    }
+    return -1;
+}
+```
+
+## The practical payoff
+
+Because `log n` is effectively bounded (≈40 even for a *trillion* elements), a log-n operation is "basically constant" at human scales. This is precisely why sorted/indexed structures — B-tree database indexes, `TreeMap`, binary search — turn an unscalable O(n) scan into something that does not care how big the dataset grows.
+
+<ProbeNote>
+Two probes to anticipate: (1) "What makes something log n?" — discarding a *constant fraction* each step (halving, thirding, anything geometric). (2) The base of the log is irrelevant to Big-O (`log₂` vs `log₁₀` differ by a constant factor), which is why we just write O(log n).
+</ProbeNote>

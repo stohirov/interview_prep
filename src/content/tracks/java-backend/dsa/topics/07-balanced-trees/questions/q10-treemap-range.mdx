@@ -1,0 +1,60 @@
+**Problem.** Given a sorted map of keys to values, answer **range queries**: return all entries with keys in `[lo, hi)` (or some inclusive/exclusive combination), and support follow-ups like "sum the values in this range" or "count keys in this range." Example: a time-series of `timestamp → reading`, asked for everything between two timestamps.
+
+## Brute force — O(n) scan per query
+
+Iterate the whole map and filter:
+
+```java
+List<Integer> rangeBrute(TreeMap<Integer, Integer> map, int lo, int hi) {
+    List<Integer> out = new ArrayList<>();
+    for (var e : map.entrySet())
+        if (e.getKey() >= lo && e.getKey() < hi) out.add(e.getValue());
+    return out;
+}
+```
+
+O(n) regardless of how small the range is — wasteful when the answer is a handful of entries inside a huge map.
+
+## Optimal — TreeMap.subMap, O(log n + m)
+
+`subMap` returns a **live, sorted view** of the entries in the requested range. It does *not* copy: it locates the range boundaries in O(log n) (two red-black descents) and then iteration costs O(m) where `m` is the number of entries actually in the range.
+
+```java
+import java.util.NavigableMap;
+import java.util.TreeMap;
+
+class RangeQueries {
+    private final TreeMap<Integer, Integer> map = new TreeMap<>();
+
+    void add(int key, int value) { map.put(key, value); }
+
+    // entries with lo <= key < hi  (lo inclusive, hi exclusive)
+    NavigableMap<Integer, Integer> range(int lo, int hi) {
+        return map.subMap(lo, true, hi, false);
+    }
+
+    // sum of values in [lo, hi)
+    long rangeSum(int lo, int hi) {
+        long sum = 0;
+        for (int v : map.subMap(lo, true, hi, false).values()) sum += v;
+        return sum;   // O(log n + m)
+    }
+
+    // count of keys in [lo, hi)
+    int rangeCount(int lo, int hi) {
+        return map.subMap(lo, true, hi, false).size();
+    }
+
+    // open-ended ranges
+    NavigableMap<Integer, Integer> atMost(int hi)  { return map.headMap(hi, true); }
+    NavigableMap<Integer, Integer> atLeast(int lo) { return map.tailMap(lo, true); }
+}
+```
+
+Key points about the view:
+
+- The **two-arg `subMap(lo, hi)`** defaults to `lo` inclusive, `hi` exclusive; the **four-arg `subMap(lo, loInc, hi, hiInc)`** lets you control both ends — say it out loud so the interviewer knows you handle the boundary semantics deliberately.
+- The view is **backed by the map**: changes to the map show through the view (and writes through the view, if within bounds, write to the map). It also throws if you insert a key outside the view's bounds.
+- **`headMap`** / **`tailMap`** handle the one-sided "≤ hi" / "≥ lo" cases.
+
+<ProbeNote>The win is `subMap` finds the boundaries in O(log n) and iterates only the `m` matching entries — O(log n + m), versus an O(n) full scan. Nail the default inclusivity (`lo` inclusive, `hi` exclusive) and know the four-arg overload exists for explicit control. Mention it returns a *live view*, not a copy — cheap, but mutating outside its key bounds throws `IllegalArgumentException`. This pattern is how you'd serve time-window or numeric-range queries from an in-memory index.</ProbeNote>

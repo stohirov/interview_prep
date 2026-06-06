@@ -1,0 +1,37 @@
+**Math and number theory** problems are less about clever data structures and more about knowing a handful of classic algorithms and their complexities. Interviewers use them to check whether you can reason about correctness, overflow, and asymptotics on raw arithmetic.
+
+## GCD and LCM
+
+The **Euclidean algorithm** computes `gcd(a, b)` by repeatedly replacing `(a, b)` with `(b, a mod b)` until the remainder is zero. It runs in **O(log min(a, b))**. LCM follows directly: `lcm(a, b) = a / gcd(a, b) * b` — divide *before* multiplying to avoid overflow.
+
+```java
+long gcd(long a, long b) { return b == 0 ? a : gcd(b, a % b); }
+long lcm(long a, long b) { return a / gcd(a, b) * b; }
+```
+
+## Modular arithmetic
+
+When results blow past `long`, work modulo a prime (often `1_000_000_007`). The rules: `(a + b) % m`, `(a * b) % m`, and `(a - b + m) % m` (add `m` to keep non-negative). Multiplication of two near-`m` values can overflow `long`, so cast to a wider type or apply `Math.floorMod`. There is **no modular division** — you multiply by a modular inverse instead.
+
+## Prime testing and the sieve
+
+- **Trial division** up to `√n` tests one number in O(√n).
+- **Sieve of Eratosthenes** marks composites for all numbers up to `n` in **O(n log log n)** — the standard way to get *all* primes in a range.
+
+## Fast exponentiation (binary exponentiation)
+
+Computing `x^n` by squaring takes **O(log n)** multiplications instead of O(n): square the base, and multiply into the result whenever the current exponent bit is set. The modular variant `x^n mod m` is the backbone of cryptography and combinatorics.
+
+## Combinatorics
+
+`nCk = n! / (k!(n-k)!)`. Under a modulus, use Fermat's little theorem (`a^(p-1) ≡ 1 mod p`) to get the modular inverse of the factorials. Pascal's triangle gives an O(n²) DP alternative for small `n`.
+
+<Callout kind="tip" title="Java standard library">
+- `Math.floorMod(x, m)` — always returns a non-negative remainder, unlike `%` which keeps the sign of the dividend.
+- `BigInteger` — arbitrary precision with `gcd`, `modPow`, `modInverse`, `isProbablePrime` built in. Reach for it when overflow or huge exponents appear.
+- `Math.multiplyHigh` / casting to `long`/`BigInteger` to dodge `int` overflow in products.
+</Callout>
+
+<Callout kind="warn" title="Overflow is the #1 trap">
+`int` overflows silently in Java. `n * (n + 1) / 2`, `a * b` near the modulus, and `mid = (lo + hi) / 2` all overflow for large inputs. Use `long`, reorder operations (divide before multiply), or `Math.floorMod`. Interviewers actively look for whether you spot these.
+</Callout>

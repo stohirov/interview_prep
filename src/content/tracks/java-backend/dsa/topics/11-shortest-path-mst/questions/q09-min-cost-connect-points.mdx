@@ -1,0 +1,42 @@
+**Problem.** Given `points[i] = {x, y}`, the cost to connect two points is their **Manhattan distance** `|x1 - x2| + |y1 - y2|`. Return the minimum total cost to connect **all** points so every pair is reachable. This is a **minimum spanning tree** on the *complete* graph of points — every pair is an implicit edge.
+
+## Brute force — Kruskal on all edges, O(V² log V)
+
+Materialize all `V²` edges, sort them, and union-find the cheapest non-cycling ones. Correct, but the graph is **dense** (E = V²), so sorting V² edges is wasteful. Prim is the better fit.
+
+## Optimal — Prim with a heap, O(V² log V) time, O(V²) worst-case heap
+
+Grow one tree from point 0. Maintain, for each unvisited point, the cheapest edge connecting it to the current tree; repeatedly pull the global minimum from a priority queue. Because the graph is implicit and complete, we generate edges on demand rather than storing them.
+
+```java
+public int minCostConnectPoints(int[][] points) {
+    int n = points.length;
+    boolean[] inTree = new boolean[n];
+    PriorityQueue<int[]> pq = new PriorityQueue<>((a, b) -> a[0] - b[0]); // {cost, point}
+    pq.add(new int[]{0, 0});                 // start at point 0, cost 0
+
+    int total = 0, used = 0;
+    while (used < n) {
+        int[] top = pq.poll();
+        int cost = top[0], u = top[1];
+        if (inTree[u]) continue;             // already connected — skip
+        inTree[u] = true;
+        total += cost;
+        used++;
+        for (int v = 0; v < n; v++) {        // push edges from u to every outsider
+            if (!inTree[v]) {
+                int w = Math.abs(points[u][0] - points[v][0])
+                      + Math.abs(points[u][1] - points[v][1]);
+                pq.add(new int[]{w, v});
+            }
+        }
+    }
+    return total;
+}
+```
+
+Each of the V vertices, when pulled into the tree, pushes up to V edges, so the heap holds O(V²) entries → **O(V² log V)**. On a complete graph an **array-based Prim** (scan for the cheapest crossing edge each step) drops the heap entirely and runs in a tidy **O(V²)** with O(V) space — worth mentioning as the asymptotically better choice for dense graphs.
+
+<ProbeNote>
+Recognize "connect all points at minimum total cost" as **MST**, and that the complete graph (E = V²) favors **Prim** over Kruskal. The `if (inTree[u]) continue` guard plays the role of union-find's cycle check here. If pressed on the optimum for dense graphs, cite array-based Prim at O(V²).
+</ProbeNote>

@@ -1,0 +1,16 @@
+The **elevator system** is the canonical *state-machine plus scheduling* problem. It is a step up from the parking lot because the interesting behavior is dynamic: cars move between floors over time, requests arrive continuously, and the quality of your answer is judged largely on **how you pick which car serves which request and in what order**. Amazon and Uber use it to see whether you can model a real-time system, not just a static CRUD domain.
+
+## What the interviewer is testing
+
+- Can you separate the **mechanism** (a car that moves, opens doors, stops) from the **policy** (which request to serve next)? This is the Strategy-vs-State split, and conflating them is the classic junior mistake.
+- Do you model an elevator as a proper **state machine** (idle, moving up/down, stopped, doors open) rather than a pile of booleans?
+- Can you reason about **scheduling algorithms** — FCFS, SCAN ("elevator algorithm"), LOOK, nearest-car — and articulate their throughput vs fairness trade-offs?
+- Do you distinguish an **internal request** (a passenger inside pressing a floor) from an **external request** (a hall call with a direction), since they feed scheduling differently?
+
+## How to frame it
+
+Clarify scope first: number of cars, building height, do hall buttons specify direction (almost always yes), and is the goal throughput or fairness. State your non-functional bar out loud — concurrent request arrival, extensible scheduling, no starvation.
+
+Then describe the moving parts. A **Button** press creates a **Request** (Command); an external hall call goes to the **ElevatorController** (Singleton dispatcher), which uses a **SchedulingStrategy** to assign it to an **ElevatorCar**. Each car keeps its own pending-stop set and advances through a **Direction**-aware **State** machine, draining stops in its current direction before reversing (that is LOOK). **Observers** — floor displays, a monitoring dashboard — subscribe to car position changes.
+
+Drive the canonical loop: **button press → request → controller assigns car via strategy → car enqueues stop → car moves, stops, opens doors → observers notified → repeat until no pending stops → idle.** The worked solution follows the full 9-section template; SCAN/LOOK and nearest-car are where you earn the senior signal.

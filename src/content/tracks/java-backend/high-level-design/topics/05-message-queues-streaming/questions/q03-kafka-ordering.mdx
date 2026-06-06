@@ -1,0 +1,45 @@
+## Kafka partitions and consumer groups — how is per-partition ordering guaranteed?
+
+Kafka does **not** give you global ordering across a topic, and claiming it does is a red flag. What it guarantees is **strict ordering within a single partition**. Understanding *why* that's the unit of ordering — and how partitions map to consumers — is the whole answer.
+
+### Topics, partitions, offsets
+
+A **topic** is split into **partitions**; each partition is an independent **append-only log**. Within one partition, every record gets a monotonically increasing **offset**, and records are stored and delivered in offset order — period. Across partitions there is **no ordering guarantee**, because they are written and read independently and in parallel.
+
+The producer decides which partition a record goes to:
+
+- If the record has a **key**, Kafka hashes it: `partition = hash(key) % numPartitions`. So **all records with the same key land in the same partition**, and therefore stay in order relative to each other.
+- If there's no key, records are spread across partitions (round-robin / sticky), maximizing throughput but giving up ordering.
+
+This is the central design lever: **choose your partition key to be whatever entity must stay ordered.** For an order-events stream, key by `orderId` so all events for one order are strictly ordered, while different orders parallelize freely.
+
+<Mermaid caption="Partition key routes related records to one partition; that partition is consumed by exactly one member of each group">{`graph LR
+    P[Producer<br/>key = orderId] -->|hash(key)| T{Partitioner}
+    T --> P0[(Partition 0<br/>order A, A, A)]
+    T --> P1[(Partition 1<br/>order B, B)]
+    T --> P2[(Partition 2<br/>order C)]
+    P0 --> C1[Consumer 1]
+    P1 --> C2[Consumer 2]
+    P2 --> C2`}</Mermaid>
+
+### Consumer groups and the one-consumer-per-partition rule
+
+A **consumer group** is a set of consumers that share a topic's work. Kafka's group coordinator **assigns each partition to exactly one consumer in the group**. That assignment is what preserves ordering on the consume side: since a partition is ordered and only one consumer reads it at a time, that consumer sees records in order.
+
+Consequences worth stating:
+
+- **Parallelism is capped by partition count.** A group can have at most as many *active* consumers as there are partitions; extra consumers sit idle. Want more parallelism? Add partitions (up front — repartitioning changes key→partition mapping).
+- **Multiple groups read independently.** Each group has its own offsets, so analytics and fraud detection both consume the full stream without competing.
+- **Rebalancing.** When a consumer joins/leaves/dies, the group **rebalances** partition assignments. During a rebalance, in-flight ordering and offset commits need care to avoid duplicate or skipped processing.
+
+### What breaks ordering even within a partition
+
+<Callout kind="warn" title="Ordering can still be lost on the producer side">
+Per-partition ordering is only end-to-end if the producer preserves it. With **retries and more than one in-flight request per connection**, a retried earlier batch can land *after* a later one, reordering records. Set `max.in.flight.requests.per.connection=1`, or — better — enable the **idempotent producer** (`enable.idempotence=true`), which lets Kafka keep ordering with up to 5 in-flight requests by deduplicating and sequencing them.
+</Callout>
+
+Also note: if a consumer processes records from a partition on a **thread pool** for speed, you've reintroduced out-of-order processing even though delivery was ordered. Preserve order by processing a partition single-threaded, or by sub-keying work within the consumer.
+
+<ProbeNote>
+The interviewer wants: ordering is **per-partition**, not global; the partition is chosen by hashing the **key**, so same-key records stay ordered; and within a group **each partition is consumed by exactly one consumer**. Strong follow-ups: parallelism is bounded by partition count, multiple groups read independently, and producer retries / consumer-side threading can silently break ordering unless you use the idempotent producer and process partitions in order.
+</ProbeNote>

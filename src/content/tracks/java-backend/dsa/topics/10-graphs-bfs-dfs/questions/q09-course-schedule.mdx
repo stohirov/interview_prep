@@ -1,0 +1,58 @@
+**Problem.** There are `numCourses` courses labeled `0..numCourses-1` and a list of `prerequisites` where `[a, b]` means you must take `b` before `a`. Return `true` if you can finish all courses. This is exactly **cycle detection in a directed graph**: a prerequisite cycle (A needs B needs A) makes completion impossible; if the graph is a DAG, an order exists.
+
+## Approach — Kahn's algorithm (BFS / indegree), O(V + E) time, O(V + E) space
+
+Build the graph `b → a` (edge points from prerequisite to dependent), compute indegrees, and repeatedly remove indegree-0 courses. If you manage to remove **all** of them, the graph is acyclic.
+
+```java
+boolean canFinish(int numCourses, int[][] prerequisites) {
+    List<List<Integer>> g = new ArrayList<>();
+    for (int i = 0; i < numCourses; i++) g.add(new ArrayList<>());
+    int[] indeg = new int[numCourses];
+    for (int[] p : prerequisites) {        // p = [course, prereq]
+        g.get(p[1]).add(p[0]);             // prereq -> course
+        indeg[p[0]]++;
+    }
+
+    Queue<Integer> q = new ArrayDeque<>();
+    for (int i = 0; i < numCourses; i++) if (indeg[i] == 0) q.add(i);
+
+    int taken = 0;
+    while (!q.isEmpty()) {
+        int u = q.poll();
+        taken++;                           // this course is now schedulable
+        for (int v : g.get(u))
+            if (--indeg[v] == 0) q.add(v);
+    }
+    return taken == numCourses;            // all taken => no cycle
+}
+```
+
+If a cycle exists, the courses inside it never reach indegree 0, so `taken < numCourses`. **O(V + E)**: every vertex enters the queue once, every edge is relaxed once.
+
+## DFS alternative — white/gray/black
+
+The same problem solved by detecting a back edge to an on-stack (gray) node:
+
+```java
+boolean canFinishDFS(int numCourses, int[][] prerequisites) {
+    List<List<Integer>> g = new ArrayList<>();
+    for (int i = 0; i < numCourses; i++) g.add(new ArrayList<>());
+    for (int[] p : prerequisites) g.get(p[1]).add(p[0]);
+    int[] color = new int[numCourses];     // 0 white, 1 gray, 2 black
+    for (int i = 0; i < numCourses; i++)
+        if (color[i] == 0 && hasCycle(i, g, color)) return false;
+    return true;
+}
+boolean hasCycle(int u, List<List<Integer>> g, int[] color) {
+    color[u] = 1;
+    for (int v : g.get(u)) {
+        if (color[v] == 1) return true;            // back edge
+        if (color[v] == 0 && hasCycle(v, g, color)) return true;
+    }
+    color[u] = 2;
+    return false;
+}
+```
+
+<ProbeNote>Say "this is cycle detection in a directed graph" before writing anything — that reframing earns the point. Get the edge direction right: `[a, b]` means b → a. Both solutions are O(V+E); Kahn is iterative with a built-in cycle check (taken &lt; n), DFS needs the 3-color trick. The natural follow-up is Course Schedule II — return the actual order — which is the same Kahn loop recording the dequeued sequence.</ProbeNote>

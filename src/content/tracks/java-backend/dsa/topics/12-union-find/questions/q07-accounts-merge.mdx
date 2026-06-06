@@ -1,0 +1,49 @@
+**Problem.** Each `accounts[i]` is `[name, email1, email2, ...]`. Two accounts belong to the same person if they share **any** email (transitively). Merge them: return each person as `[name, sorted unique emails...]`. The "share an email ⇒ same person, transitively" rule is a textbook **equivalence-class** problem — union-find over emails.
+
+## Brute force — graph + DFS, O(N·K·log)
+
+Build a graph where every email links to the others in its account, then DFS each connected component to gather emails. Works, but union-find expresses the transitive merge more directly and is the canonical solution.
+
+## Optimal — union-find on emails, O(N·K·α + sorting)
+
+The unit of merging is the **email**, not the account. Union all emails *within* each account; shared emails then transitively link accounts. Map each email to its owner's name so we can label the final groups.
+
+```java
+public List<List<String>> accountsMerge(List<List<String>> accounts) {
+    Map<String, String> emailToName = new HashMap<>();
+    Map<String, Integer> emailToId = new HashMap<>();
+    int id = 0;
+    for (List<String> acc : accounts)              // assign each unique email an id
+        for (int i = 1; i < acc.size(); i++) {
+            String email = acc.get(i);
+            if (!emailToId.containsKey(email)) emailToId.put(email, id++);
+            emailToName.put(email, acc.get(0));
+        }
+
+    DSU dsu = new DSU(id);
+    for (List<String> acc : accounts)              // union all emails in one account
+        for (int i = 2; i < acc.size(); i++)
+            dsu.union(emailToId.get(acc.get(1)), emailToId.get(acc.get(i)));
+
+    Map<Integer, TreeSet<String>> groups = new HashMap<>();   // root -> sorted emails
+    for (String email : emailToId.keySet()) {
+        int root = dsu.find(emailToId.get(email));
+        groups.computeIfAbsent(root, x -> new TreeSet<>()).add(email);
+    }
+
+    List<List<String>> result = new ArrayList<>();
+    for (TreeSet<String> emails : groups.values()) {
+        List<String> entry = new ArrayList<>();
+        entry.add(emailToName.get(emails.first())); // any email gives the name
+        entry.addAll(emails);                        // TreeSet -> already sorted
+        result.add(entry);
+    }
+    return result;
+}
+```
+
+(Uses the reusable `DSU` class with path compression and union by rank from the Number of Provinces answer.) Anchoring each account's emails to its *first* email and unioning the rest against it links the whole account in one sweep. A `TreeSet` per root deduplicates and sorts the emails simultaneously.
+
+<ProbeNote>
+The key modeling decision: the DSU element is the **email**, not the account — same name does **not** mean same person (two different "John"s exist), only a shared email merges them. Map emails to ids to index the DSU, and to names to label output. A `TreeSet` handles "sorted, unique" in one structure. Complexity is dominated by the per-group email sort.
+</ProbeNote>

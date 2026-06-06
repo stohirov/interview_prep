@@ -1,0 +1,34 @@
+## "Postgres for everything until we can't" — when do you outgrow it?
+
+The mature default in modern backend engineering is to run **one Postgres** as long as possible, because its versatility and operational maturity beat the complexity of a polyglot stack for almost all workloads. The senior question is not "is Postgres good enough?" but "what is the *specific* signal that tells me I've hit its limit?"
+
+### How far Postgres actually stretches
+
+Before reaching for another engine, remember Postgres is far more than a relational store:
+
+- **Relational + ACID** for the system of record.
+- **`jsonb`** for schema-flexible document data, with GIN indexes for querying inside.
+- **Full-text search** (`tsvector`/`tsquery`) — enough to defer Elasticsearch for a long time.
+- **Key-value** via simple tables or `hstore`; **time-series** via the TimescaleDB extension.
+- **Geospatial** via PostGIS; **queues** via `SELECT ... FOR UPDATE SKIP LOCKED`.
+- **Read scaling** via streaming replicas, and vertical scaling on modern hardware that reaches surprisingly far (tens of thousands of TPS).
+
+A single Postgres comfortably serves systems with millions of users. "We need NoSQL for scale" is usually premature.
+
+### The concrete signals you've outgrown it
+
+Outgrow it for a **measured** reason, not a feeling:
+
+- **Write throughput exceeds one primary.** You've vertically scaled and batched, and the *write* rate still saturates a single node. Replicas don't help (they scale reads). Now you need **sharding** — either app-level, a Postgres sharding layer (Citus), or a store that shards natively (Cassandra, DynamoDB).
+- **Dataset outgrows one box's working set.** When the hot data no longer fits in RAM and index maintenance / vacuum becomes the bottleneck, horizontal partitioning across nodes is forced.
+- **An access pattern is genuinely a different shape.** Many-hop graph traversal (→ graph DB), relevance-ranked fuzzy search at scale (→ search engine), or billions of high-cardinality time-series points (→ purpose-built TSDB) where the Postgres extension stops keeping up.
+- **OLAP starts hurting OLTP.** Heavy analytical scans on the transactional primary degrade latency for users → move analytics to a **columnar warehouse** (BigQuery, Redshift, ClickHouse), fed by CDC.
+- **Global multi-region writes** with low latency everywhere — beyond a single-primary model; consider a globally distributed store (Spanner, CockroachDB, DynamoDB global tables).
+
+<Callout kind="tip" title="Exhaust the cheap levers first">
+Before adding a store: add indexes, fix N+1 queries, add read replicas, add a Redis cache, partition large tables, and scale the instance up. Most "Postgres can't scale" problems are unindexed queries or a missing cache, not a fundamental ceiling.
+</Callout>
+
+<ProbeNote>
+The interviewer wants discipline: name **single-primary write throughput** and **dataset-no-longer-fits** as the real ceilings, and the cheaper levers (indexes, replicas, cache, partitioning) you'd exhaust first. Bonus signals: moving analytics off the OLTP primary to a columnar store, and knowing Postgres covers JSON, search, and time-series so you don't add engines prematurely.
+</ProbeNote>

@@ -1,0 +1,37 @@
+A **graph** is a set of **vertices** connected by **edges**. It is the most general data structure on this list — trees and linked lists are just graphs with extra constraints — and it models almost everything: road networks, dependencies, social connections, web pages, state machines. Mastering BFS and DFS lets you solve a huge fraction of "real" interview problems, because so many of them are a graph in disguise.
+
+## The four axes
+
+- **Directed vs undirected** — an edge `u → v` is one-way (directed) or two-way (undirected). A follower graph is directed; a friendship graph is undirected.
+- **Weighted vs unweighted** — edges carry a cost or not. Weights push you toward Dijkstra/Bellman-Ford (next topic); unweighted shortest path is plain BFS.
+- **Cyclic vs acyclic** — a **DAG** (directed acyclic graph) is the precondition for topological sort.
+- **Dense vs sparse** — `E ≈ V²` (dense) vs `E ≈ V` (sparse). This decides your representation.
+
+## Representation
+
+<ComplexityTable rows={[
+  {op: "Adjacency list", best: "space O(V+E)", average: "edge query O(deg)", worst: "iterate neighbors O(deg)", note: "default; sparse graphs"},
+  {op: "Adjacency matrix", best: "space O(V²)", average: "edge query O(1)", worst: "iterate neighbors O(V)", note: "dense graphs; fast edge lookup"},
+]} />
+
+The **adjacency list** is the interview default. In Java the idiom is `Map<Node, List<Node>>` (or `List<List<Integer>>` when vertices are `0..V-1`). A **matrix** `boolean[V][V]` wins only when the graph is dense or you need O(1) "is there an edge?" checks.
+
+## BFS — shortest path in an unweighted graph
+
+BFS explores level by level with a **queue**, so the first time it reaches a vertex it has used the fewest edges. That is exactly the **shortest path when every edge has the same weight**. Mark a node *visited the moment you enqueue it*, never when you dequeue — otherwise it lands in the queue many times.
+
+## DFS — connectivity, cycles, ordering
+
+DFS dives as deep as possible before backtracking, via recursion or an explicit **stack**. It is the workhorse for **connectivity** (can I reach everything?), **cycle detection**, **topological sort**, and **counting connected components** — run DFS from each unvisited vertex; each launch discovers one component.
+
+<Diagram caption="BFS fans out by levels; DFS plunges down one branch first.">{`     A                BFS order: A B C D E F
+    / \\               DFS order: A B D F C E
+   B   C
+  / \\   \\
+ D   E   F`}</Diagram>
+
+<Callout kind="warn" title="The one rule that prevents infinite loops">
+Graphs have cycles, so you **must** track a `visited` set (a `boolean[]` or `Set<Node>`). Forgetting it turns any traversal into an infinite loop. This is the single most common graph bug in interviews.
+</Callout>
+
+Both traversals are **O(V + E)** time and **O(V)** space — you touch every vertex and every edge once. The problems below — islands, clone graph, course schedule, word ladder — are all this same V+E traversal wearing different costumes.

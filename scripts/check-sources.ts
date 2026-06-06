@@ -7,6 +7,9 @@ import { SOURCES } from '../src/content/tracks/java-backend/sources';
 import { OOP_SOURCES } from '../src/content/tracks/java-backend/oop/sources';
 import { PG_SOURCES } from '../src/content/tracks/java-backend/postgresql/sources';
 import { SPRING_SOURCES } from '../src/content/tracks/java-backend/spring/sources';
+import { DSA_SOURCES } from '../src/content/tracks/java-backend/dsa/sources';
+import { LLD_SOURCES } from '../src/content/tracks/java-backend/low-level-design/sources';
+import { HLD_SOURCES } from '../src/content/tracks/java-backend/high-level-design/sources';
 
 // Every module keeps its sources in a Record<topicId, Source[]>; check them all.
 // Prefix topic ids with the module so the report is unambiguous and so identically
@@ -16,6 +19,9 @@ const MODULE_SOURCES: Array<[string, Record<string, Source[]>]> = [
   ['oop', OOP_SOURCES],
   ['postgresql', PG_SOURCES],
   ['spring', SPRING_SOURCES],
+  ['dsa', DSA_SOURCES],
+  ['low-level-design', LLD_SOURCES],
+  ['high-level-design', HLD_SOURCES],
 ];
 
 const REQUEST_TIMEOUT_MS = 15_000;

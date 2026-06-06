@@ -1,0 +1,27 @@
+**`PriorityQueue.iterator()` does *not* return elements in priority order.** It walks the backing array, which is only *heap-ordered*, not sorted. The single guarantee is that `peek()` returns the head; everything after that is in whatever arrangement the heap happens to hold.
+
+```java
+PriorityQueue<Integer> pq = new PriorityQueue<>();
+pq.addAll(List.of(5, 1, 3, 2, 4));
+
+for (int x : pq) System.out.print(x + " ");   // e.g. 1 2 3 5 4  -- NOT sorted
+System.out.println();
+
+while (!pq.isEmpty()) System.out.print(pq.poll() + " ");  // 1 2 3 4 5  -- sorted
+```
+
+## Why
+
+The heap invariant is **local**: each node ≤ its children. That orders root-to-leaf *paths* but says nothing about left-vs-right siblings or across subtrees. The array is a valid heap with many internal orderings, and the iterator simply exposes the raw array. The same applies to `toString()`, `toArray()`, `stream()`, and enhanced-for — all reflect array order.
+
+## How to actually get sorted order
+
+- **Drain it:** repeatedly `poll()` until empty — each poll is O(log n), total O(n log n), and it destroys the queue.
+- **Copy and sort:** `pq.stream().sorted().toList()` if you must keep the queue.
+- Don't reach for `iterator()` expecting order — this is the classic trap.
+
+## The deeper interview point
+
+This is the same lesson as "a hash set has no order": picking a structure for one fast operation (here, O(1) min) means giving up other guarantees (here, total order on iteration). If you need both fast-min *and* ordered iteration, a heap is the wrong tool — use a `TreeSet`/`TreeMap`.
+
+<ProbeNote>EPAM-style gotcha. The trap is asserting iteration is sorted. State plainly: only `poll()` (or copy-then-sort) yields order; `iterator()`, `toArray()`, `stream()`, and `toString()` all expose raw heap-array order because the heap invariant is local, not total.</ProbeNote>

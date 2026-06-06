@@ -1,0 +1,45 @@
+**Problem.** Given an array of distinct integers, return all possible subsets (the power set). For `[1,2,3]`: `[]`, `[1]`, `[2]`, `[3]`, `[1,2]`, `[1,3]`, `[2,3]`, `[1,2,3]` — `2ⁿ` subsets in all.
+
+## Brute force — bitmask enumeration
+
+Each of the `2ⁿ` subsets corresponds to an `n`-bit mask; bit `i` set means element `i` is in. Loop masks `0..2ⁿ-1` and build each subset:
+
+```java
+for (int mask = 0; mask < (1 << n); mask++) {
+    List<Integer> sub = new ArrayList<>();
+    for (int i = 0; i < n; i++)
+        if ((mask & (1 << i)) != 0) sub.add(nums[i]);
+    result.add(sub);
+}
+```
+
+Clean and O(2ⁿ · n), but it doesn't generalize to constraints (duplicates, sums) the way backtracking does.
+
+## Optimal — backtracking, record every node
+
+Subsets differ from combinations in one way: **every node of the tree is a valid answer**, not just the leaves. So we record `path` on entry to every call (no size test), then extend it with each later element using a `start` index to avoid reuse and duplicate orderings.
+
+```java
+List<List<Integer>> subsets(int[] nums) {
+    List<List<Integer>> result = new ArrayList<>();
+    backtrack(0, nums, new ArrayList<>(), result);
+    return result;
+}
+
+void backtrack(int start, int[] nums, List<Integer> path, List<List<Integer>> result) {
+    result.add(new ArrayList<>(path));           // every node is a subset
+    for (int i = start; i < nums.length; i++) {
+        path.add(nums[i]);                       // choose
+        backtrack(i + 1, nums, path, result);    // explore from the next index
+        path.remove(path.size() - 1);            // unchoose
+    }
+}
+```
+
+There is no explicit base case — the loop simply doesn't execute once `start` passes the end, so recursion stops naturally. The tree has `2ⁿ` nodes and each copy is O(n), giving **O(2ⁿ · n)** time and **O(n)** space beyond the output.
+
+<Callout kind="tip" title="Subsets II — handling duplicates">
+If the input has duplicates, sort first and add `if (i > start && nums[i] == nums[i-1]) continue;` inside the loop. This skips a repeated value at the *same tree level* (so `[1,2]` from the first vs second `2` isn't produced twice) while still allowing it deeper in the path.
+</Callout>
+
+<ProbeNote>The defining insight: subsets record at *every* node, combinations only at leaves of a fixed size — both use a `start` index to dedupe orderings. Mention the bitmask alternative as the slick non-recursive version, and have the sorted `i > start` dedupe ready for the Subsets II follow-up.</ProbeNote>

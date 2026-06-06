@@ -1,0 +1,37 @@
+A BST's search, insert, and delete all follow a single root-to-leaf path, so each costs **O(h)** where *h* is the tree's height. The whole value proposition rests on one assumption: that *h* is O(log n). When the tree is **unbalanced**, that assumption breaks and every operation degrades to **O(n)**.
+
+## Why it degrades
+
+A plain BST has no mechanism to redistribute nodes after an insertion — it simply hangs the new key wherever the comparisons lead. Feed it keys in **sorted (or reverse-sorted) order** — `1, 2, 3, 4, 5, …` — and every key is larger than everything before it, so it attaches as the right child of the previous node. The result is a **degenerate tree**: a chain with no branching, structurally identical to a singly linked list.
+
+<Diagram caption="Sorted inserts collapse a BST into a chain">{`
+   insert 1,2,3,4,5:        balanced shape would be:
+
+      1                            3
+       \\                          / \\
+        2                        2   4
+         \\                      /     \\
+          3                    1       5
+           \\
+            4          h = n-1  (O(n))   vs   h ~ log n  (O(log n))
+             \\
+              5
+`}</Diagram>
+
+In the chain, finding `5` visits all five nodes — O(n). You have paid for a tree and received a linked list with worse constants.
+
+## When it happens in practice
+
+- **Sorted or nearly-sorted input.** The classic trap: bulk-loading already-ordered data (timestamps, monotonic IDs, sequential keys) into a naive BST.
+- **Adversarial input.** If an attacker controls insertion order, they can deliberately force the worst case — a denial-of-service vector against any structure whose performance depends on input distribution.
+- **Skewed deletion patterns** can also lengthen one side over time.
+
+## The fix
+
+This is precisely why **self-balancing trees** exist. AVL and red-black trees perform **rotations** on insert/delete to keep height within a constant factor of log n, *guaranteeing* O(log n) regardless of input order. Java's `TreeMap` and `TreeSet` are red-black trees for exactly this reason — you never get a degenerate `TreeMap`, no matter how you insert.
+
+<Callout kind="warn" title="The interview framing">
+The expected answer connects three dots: (1) BST ops are O(h), not inherently O(log n); (2) sorted input drives h to n, giving O(n); (3) balanced trees restore the guarantee via rotations. Saying "BST is O(log n)" without the height caveat is the mistake interviewers are probing for.
+</Callout>
+
+<ProbeNote>A sharp follow-up: "How do you *detect* an unbalanced tree?" — compare height to log₂(n); if h greatly exceeds it, you are degenerate. And "Why not just rebalance a plain BST occasionally?" — you can (e.g., the Day–Stout–Warren algorithm rebuilds in O(n)), but per-operation self-balancing avoids the periodic O(n) stall.</ProbeNote>

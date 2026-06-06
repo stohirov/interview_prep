@@ -1,0 +1,30 @@
+Red-black insertion always colors the new node **red** — red can't violate the equal-black-height rule (property 5), only the no-two-adjacent-reds rule (property 4). When the new red node's parent is also red, you have a violation to repair. The cheapest repair, and the one that propagates, is **recoloring** — and it hinges entirely on the color of the **uncle** (the parent's sibling).
+
+## The recoloring case: red uncle
+
+When the new node `N` is red, its parent `P` is red (violation), and the **uncle `U` is also red**, you fix it without any rotation:
+
+1. Recolor **parent `P` black**.
+2. Recolor **uncle `U` black**.
+3. Recolor **grandparent `G` red**.
+
+This is a pure recolor — no pointers move.
+
+<Diagram caption="Red uncle case. Inserting red N under red P, with red uncle U.">{`   before                       after recolor
+        G(B)                         G(R)   <- now may clash with G's parent
+       /    \\                       /    \\
+    P(R)    U(R)                  P(B)    U(B)
+    /                            /
+  N(R)  <- red-red with P      N(R)  <- now legal: parent P is black`}</Diagram>
+
+## Why it works and why it propagates
+
+Flipping `P` and `U` to black adds one black node to **every** path through `G` on both sides equally — so the black-height stays balanced (property 5 holds). Coloring `G` red compensates, keeping the count the same as before. Locally, the red-red violation at `N`/`P` is gone.
+
+But making `G` red can create a **new** red-red violation if `G`'s parent is also red. So you treat `G` as the new "inserted" node and **repeat the fix-up one level up**. This is why recoloring can cascade O(log n) times up the tree — yet each step is O(1) and does no rotation. If the cascade reaches the **root**, you simply color the root black (property 2), which harmlessly raises the global black-height by one.
+
+## When recoloring is not enough
+
+If the uncle is **black** (or NIL), recoloring alone can't fix it — the imbalance is structural, so you need **one or two rotations** plus a recolor (the LL/LR/RR/RL analogues). The decision is: *red uncle → recolor and climb; black uncle → rotate*.
+
+<ProbeNote>The whole insertion fix-up pivots on the uncle's color: red uncle is the recolor-and-propagate case (no rotation), black uncle forces rotations. Be able to state why recoloring preserves black-height — flipping both children of G to black adds one black to every path symmetrically — and why the violation can bubble up to the root, where you just paint the root black. Then contrast with the black-uncle case to show you know recoloring isn't always sufficient.</ProbeNote>

@@ -1,0 +1,51 @@
+A **connected component** of an undirected graph is a maximal set of vertices all reachable from one another. "How many components?" and "are these two vertices connected?" are everyday graph questions with two standard approaches.
+
+## DFS / BFS sweep
+
+Iterate over all vertices; each time you hit an **unvisited** one, launch a traversal that marks its whole component, and increment a counter. Every launch discovers exactly one component.
+
+```java
+int countComponents(int n, List<List<Integer>> g) {
+    boolean[] seen = new boolean[n];
+    int count = 0;
+    for (int i = 0; i < n; i++)
+        if (!seen[i]) { dfs(i, g, seen); count++; }   // one launch = one component
+    return count;
+}
+void dfs(int u, List<List<Integer>> g, boolean[] seen) {
+    seen[u] = true;
+    for (int v : g.get(u)) if (!seen[v]) dfs(v, g, seen);
+}
+```
+
+**O(V + E)** time, one pass. This is the simplest answer and the right default when the graph is **static** — given once, queried once.
+
+## Union-find (Disjoint Set Union)
+
+Process each edge with `union(u, v)`; the number of distinct roots at the end is the component count. With path compression and union by rank, each operation is effectively **O(α(n)) ≈ O(1)**.
+
+```java
+int countComponentsUF(int n, int[][] edges) {
+    int[] parent = new int[n];
+    for (int i = 0; i < n; i++) parent[i] = i;
+    int components = n;
+    for (int[] e : edges)
+        if (union(parent, e[0], e[1])) components--;   // merge drops the count by 1
+    return components;
+}
+```
+
+## DFS vs union-find — when each wins
+
+<ComplexityTable rows={[
+  {op: "DFS/BFS sweep", best: "O(V+E)", average: "O(V+E)", worst: "O(V+E)", note: "static graph; simplest; also enumerates each component's members"},
+  {op: "Union-find", best: "≈O(E·α)", average: "≈O(E·α)", worst: "≈O(E·α)", note: "incremental edges; streaming connectivity queries"},
+]} />
+
+Use a **DFS/BFS sweep** for a static graph, or when you need to *list* the members of each component. Use **union-find** when edges arrive **incrementally** and you must answer "connected?" queries on the fly (it merges in near-constant time and never re-traverses), or for problems like Redundant Connection and Accounts Merge where the union semantics fit naturally.
+
+<Callout kind="info" title="Directed graphs need more">
+"Connected components" is an undirected notion. The directed analogue is **strongly connected components** (every vertex reachable from every other within the component), which needs Tarjan's or Kosaraju's algorithm — not a plain sweep.
+</Callout>
+
+<ProbeNote>Lead with the DFS sweep: "each launch from an unvisited vertex marks one component, count the launches, O(V+E)." Then contrast: union-find shines for *incremental* edges and live connectivity queries at near-O(1). If they say "directed," pivot to strongly connected components and name Tarjan/Kosaraju.</ProbeNote>

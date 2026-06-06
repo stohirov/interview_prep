@@ -1,0 +1,19 @@
+**Google Docs** is the canonical *real-time collaborative editing* problem: many people typing into the same document at the same time, each seeing everyone else's keystrokes within milliseconds, with no edit ever lost and every replica eventually showing identical text. It is a favourite senior-level interview because it forces you to confront **concurrent conflicting writes to shared mutable state** — the one thing most CRUD experience never prepares you for.
+
+## The shape of the problem
+
+The core difficulty is **convergence under concurrency**. Two users edit the same paragraph offline-ish; both edits are relative to a document state that has since moved. Naive last-write-wins corrupts the text. You need an algorithm that takes concurrent operations expressed against *different* document versions and produces the *same* final document on every client and the server, regardless of arrival order. The two industrial answers are **Operational Transformation (OT)** and **Conflict-free Replicated Data Types (CRDTs)** — comparing them is usually the heart of the interview. Around that core sit real-time transport (WebSockets), presence/cursor sharing, version history, and offline editing with reconciliation on reconnect.
+
+## What the interviewer is probing, by style
+
+- **FAANG** — OT vs CRDT in depth: the transform function and server ordering for OT, or the unique-position-identifier / tombstone model for CRDTs; convergence proofs intuition; fanning out edits to 1M concurrent editors; how a relay/session server shards documents.
+- **EU / remote contracting** — pragmatism: "Most products don't need full Docs — use a library (Yjs/Automerge/ShareDB) and a WebSocket relay." Justify build-vs-buy and how you'd ship it operably.
+- **Regional (EPAM / Uzum)** — a clean WebSocket-based collaboration service, a document/version schema, presence, and a defensible diagram. Show you understand *why* simple locking doesn't scale to per-keystroke collaboration.
+
+## The key decisions
+
+1. **OT vs CRDT** — central server transforming ops against a single authoritative order (OT, what Google Docs actually uses) versus commutative ops with unique element IDs that converge without a coordinator (CRDT, friendlier to P2P/offline).
+2. **Transport & fan-out** — WebSockets to stateful session servers, with documents sharded so all editors of one doc land on the same server (or a pub/sub layer relaying ops between servers).
+3. **Offline & history** — how edits made while disconnected reconcile on reconnect, and how you store version history (op log / snapshots) for undo and time-travel.
+
+The worked solution applies the full 11-section structure and shows all three style angles where they diverge.

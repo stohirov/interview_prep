@@ -1,0 +1,48 @@
+**Problem.** Given two sorted arrays of sizes `m` and `n`, find the median of their combined sorted order in **O(log(m + n))** time.
+
+## Brute force — merge, O(m + n)
+
+Merge the two arrays and pick the middle element(s). Simple and correct, but linear — the logarithmic target rules it out and signals the intended binary-search-on-partition approach.
+
+## Optimal — binary-search the partition, O(log(min(m, n)))
+
+The median splits the merged array into a left half and right half of equal size, where **every element on the left ≤ every element on the right**. We don't merge — we search for the correct *partition* of the smaller array; the partition of the larger array is then forced (so the two halves sum to `(m + n + 1) / 2`). Binary-search the cut in the smaller array until the cross-boundary inequality holds.
+
+```java
+double findMedianSortedArrays(int[] a, int[] b) {
+    if (a.length > b.length) return findMedianSortedArrays(b, a);  // search the smaller
+    int m = a.length, n = b.length, half = (m + n + 1) / 2;
+    int lo = 0, hi = m;
+    while (lo <= hi) {
+        int i = lo + (hi - lo) / 2;     // cut in a: i elements of a on the left
+        int j = half - i;               // cut in b: forced so left half has `half` elements
+
+        int aLeft  = (i == 0) ? Integer.MIN_VALUE : a[i - 1];
+        int aRight = (i == m) ? Integer.MAX_VALUE : a[i];
+        int bLeft  = (j == 0) ? Integer.MIN_VALUE : b[j - 1];
+        int bRight = (j == n) ? Integer.MAX_VALUE : b[j];
+
+        if (aLeft <= bRight && bLeft <= aRight) {       // correct partition found
+            if (((m + n) & 1) == 1) return Math.max(aLeft, bLeft);            // odd total
+            return (Math.max(aLeft, bLeft) + Math.min(aRight, bRight)) / 2.0; // even total
+        } else if (aLeft > bRight) {
+            hi = i - 1;                 // took too many from a -> move cut left
+        } else {
+            lo = i + 1;                 // took too few from a -> move cut right
+        }
+    }
+    throw new IllegalArgumentException("inputs not sorted");
+}
+```
+
+**O(log(min(m, n)))** time, **O(1)** space.
+
+## The mechanics
+
+We binary-search index `i` (how many of `a` go left); `j` is derived so the combined left half has exactly `half` elements. A partition is correct when `aLeft <= bRight` **and** `bLeft <= aRight` — both halves are internally and cross-consistent. The `±∞` sentinels handle empty sides when a cut sits at an array's edge, eliminating special cases.
+
+<Callout kind="warn" title="The two details that trip people">
+Always recurse to search the **smaller** array (bounds `i` to `[0, m]` and keeps it log of the smaller). And use `Integer.MIN_VALUE` / `MAX_VALUE` sentinels for out-of-range cuts so `i == 0`, `i == m`, `j == 0`, `j == n` don't need bespoke branches — that's where most attempts get an `ArrayIndexOutOfBounds` or a wrong median.
+</Callout>
+
+<ProbeNote>This is the hardest standard binary-search problem; the leap is reframing "find the median" as "find the partition where left ≤ right." Drive `i`, derive `j`, use ±∞ sentinels, and split odd/even at the end. Searching the smaller array is what guarantees `O(log(min(m, n)))`. If you blank on the partition math, state the O(m + n) merge as a fallback rather than freezing.</ProbeNote>

@@ -1,0 +1,36 @@
+**Problem.** Every element in `nums` appears **twice except one**, which appears once. Find that single element in O(n) time and O(1) space.
+
+## Hash-set approach — O(n) time, O(n) space
+
+Add/remove from a set, or count occurrences in a map, then find the count-1 entry. Works, but uses linear extra space — and the interviewer specifically wants O(1).
+
+## Optimal — XOR everything, O(n) time, O(1) space
+
+XOR has two properties that make this trivial: `a ^ a = 0` (a value cancels itself) and `a ^ 0 = a`. XOR-ing the whole array makes every *pair* cancel to `0`, leaving only the lone element:
+
+```java
+int singleNumber(int[] nums) {
+    int x = 0;
+    for (int n : nums) x ^= n;   // duplicates cancel; the unique value remains
+    return x;
+}
+```
+
+## Why it works
+
+XOR is commutative and associative, so order doesn't matter — conceptually you can group the array as `(a ^ a) ^ (b ^ b) ^ ... ^ unique`. Each duplicate pair collapses to `0`, and `0 ^ unique = unique`. No comparison, no extra memory, single pass.
+
+```
+nums = [4, 1, 2, 1, 2]
+4 ^ 1 ^ 2 ^ 1 ^ 2
+= 4 ^ (1 ^ 1) ^ (2 ^ 2)
+= 4 ^ 0 ^ 0
+= 4
+```
+
+<ComplexityTable rows={[
+  {op: "Hash set / map", best: "O(n)", average: "O(n)", worst: "O(n)", note: "O(n) extra space"},
+  {op: "XOR accumulate", best: "O(n)", average: "O(n)", worst: "O(n)", note: "O(1) space"},
+]} />
+
+<ProbeNote>This is the canonical XOR-cancellation problem — the answer is three lines. The key follow-ups: Single Number II (each element appears three times → XOR fails, count bits per position) and Single Number III (two unique elements → XOR all, then split by an isolated differing bit). Knowing the XOR trick alone is junior; knowing where it breaks is senior.</ProbeNote>

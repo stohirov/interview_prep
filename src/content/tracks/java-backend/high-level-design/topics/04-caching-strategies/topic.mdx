@@ -1,0 +1,25 @@
+Caching is the single highest-leverage tool in system design: most large systems are **read-dominated**, and a cache turns an expensive, contended resource (a database, a downstream service, a render) into a cheap memory lookup. Almost every design you sketch in an interview will have a cache somewhere, and "where, what pattern, and how do I invalidate it" is one of the most reliably probed building-block topics.
+
+## Why this matters
+
+A cache trades **freshness for speed and cost**. A Redis `GET` is sub-millisecond; the Postgres query behind it might be 5–50 ms and consume a connection from a scarce pool. At a 90% hit rate you have cut backend load by 10×. But every cache introduces a second copy of the truth, and the hard part — Phil Karlton's "there are only two hard things in computer science" — is keeping that copy from lying. The whole topic is really about managing that tension.
+
+## The mental model
+
+- **Layers.** Caching happens at many tiers: the **browser/client**, a **CDN/edge**, an **application-level distributed cache** (Redis/Memcached), an **in-process local cache** (Caffeine), and the database's own buffer pool. Each layer closer to the user is faster and cheaper but harder to invalidate.
+- **The four patterns** describe *who* reads and writes the cache: **cache-aside** (app manages it), **read-through** and **write-through** (the cache library does it synchronously), and **write-behind** (writes are buffered and flushed async). Pattern choice decides your consistency and failure behavior.
+- **Eviction** handles a *full* cache: **LRU** (default, evict least-recently-used), **LFU** (by frequency), **FIFO**, and **TTL**-based expiry. Redis combines a `maxmemory` limit with an eviction policy like `allkeys-lru`.
+- **Invalidation** handles *stale* entries: **TTL** (let it expire), **event-based** (purge on write), and **manual** purge. This is where most caching bugs live.
+- **Stampede protection.** When a hot key expires, thousands of requests can hit the backend at once (thundering herd). Jittered TTLs, request coalescing, and probabilistic early expiration prevent the cliff.
+
+## Two-tier (L1/L2) caching
+
+A common production pattern pairs a tiny **L1** in-process cache (Caffeine, nanosecond access, no network hop) with a larger **L2** distributed cache (Redis, shared across all instances). L1 absorbs the hottest keys with zero network cost; L2 provides a shared, larger, coherent layer behind it. The cost is **coherence** — an L1 entry on one node can go stale when another node updates L2, so L1 needs short TTLs or a pub/sub invalidation channel.
+
+## Redis vs Memcached
+
+Both are in-memory key-value stores. **Memcached** is a pure, multi-threaded LRU cache — simple and fast. **Redis** is single-threaded per shard but offers rich data structures, persistence, replication, pub/sub, and Lua scripting, which is why it dominates as the default distributed cache today.
+
+## What the questions cover
+
+The questions walk through *where* to cache and the trade-offs of each layer, the four patterns with their consistency implications, cache-stampede detection and the three mitigations, the invalidation strategies, and the Redis-vs-Memcached and local-vs-distributed decisions.

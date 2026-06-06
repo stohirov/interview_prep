@@ -1,0 +1,46 @@
+**Problem.** Sort an array of integers in ascending order. A built-in sort is acceptable — but be ready to explain the Big-O of what you call.
+
+## The pragmatic answer — O(n log n)
+
+In real code, call the library. For primitives, `Arrays.sort` is a tuned **dual-pivot Quicksort**.
+
+```java
+int[] sortArray(int[] nums) {
+    Arrays.sort(nums);   // dual-pivot Quicksort: O(n log n) average, in-place
+    return nums;
+}
+```
+
+That's O(n log n) average time and O(log n) stack space. The catch worth naming: a pathological input can drive plain quicksort to O(n²), and `Arrays.sort` on primitives is *not* stable.
+
+## The "implement it" answer — guaranteed O(n log n)
+
+Interviewers often want you to write a sort. MergeSort gives a clean, **guaranteed O(n log n)** worst case and is stable:
+
+```java
+int[] sortArray(int[] nums) {
+    if (nums.length < 2) return nums;
+    int mid = nums.length / 2;
+    int[] left  = sortArray(Arrays.copyOfRange(nums, 0, mid));
+    int[] right = sortArray(Arrays.copyOfRange(nums, mid, nums.length));
+    return merge(left, right);
+}
+
+private int[] merge(int[] a, int[] b) {
+    int[] out = new int[a.length + b.length];
+    int i = 0, j = 0, k = 0;
+    while (i < a.length && j < b.length)
+        out[k++] = (a[i] <= b[j]) ? a[i++] : b[j++];   // <= keeps it stable
+    while (i < a.length) out[k++] = a[i++];
+    while (j < b.length) out[k++] = b[j++];
+    return out;
+}
+```
+
+**O(n log n)** time (log n levels × O(n) merge each), **O(n)** auxiliary space.
+
+<Callout kind="tip" title="Why not write quicksort?">
+MergeSort's worst case is bulletproof and its merge is easy to get right under pressure. Quicksort is faster in practice but the partition logic and pivot choice are where people introduce O(n²) or off-by-one bugs on a whiteboard. If asked for in-place, write quicksort; otherwise MergeSort is the safer demonstration.
+</Callout>
+
+<ProbeNote>Default to `Arrays.sort` and *state the Big-O and stability* unprompted — that's what's actually being tested. If they want an implementation, MergeSort is the safest correct-on-the-first-try choice; mention that `<=` in the merge is what makes it stable.</ProbeNote>

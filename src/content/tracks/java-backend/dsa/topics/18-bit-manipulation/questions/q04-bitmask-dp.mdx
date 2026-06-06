@@ -1,0 +1,54 @@
+**Bitmask DP** is dynamic programming where the state is a **subset of a small set**, encoded as the bits of an integer. Bit `i` of the mask means "element `i` is in the subset." It's the standard way to do DP over which items have been used/visited when the set is small (n ≤ ~20–22).
+
+## When you reach for it
+
+The signal: the problem is exponential in a *small* set — "visit all cities," "assign all tasks," "cover all elements" — and a polynomial DP doesn't exist, but `2^n` states are tractable. Typical limits: `n ≤ 20` gives ~1M masks, comfortably fast; `n ≤ 22` is the rough ceiling.
+
+## The state
+
+`dp[mask]` (sometimes `dp[mask][i]`) holds the best answer for the situation where exactly the elements in `mask` have been used, optionally with `i` as the last one chosen. Transitions add one more element by setting a bit.
+
+## Canonical example — Traveling Salesman (Held–Karp)
+
+`dp[mask][i]` = shortest path that visits exactly the cities in `mask`, ending at city `i`.
+
+```java
+int tsp(int[][] dist) {
+    int n = dist.length;
+    int FULL = (1 << n) - 1;
+    int[][] dp = new int[1 << n][n];
+    for (int[] row : dp) Arrays.fill(row, Integer.MAX_VALUE / 2);
+    dp[1][0] = 0;                                   // start at city 0, only it visited
+
+    for (int mask = 1; mask <= FULL; mask++) {
+        for (int last = 0; last < n; last++) {
+            if ((mask & (1 << last)) == 0) continue;     // last must be in mask
+            if (dp[mask][last] == Integer.MAX_VALUE / 2) continue;
+            for (int next = 0; next < n; next++) {
+                if ((mask & (1 << next)) != 0) continue; // next not yet visited
+                int nm = mask | (1 << next);
+                dp[nm][next] = Math.min(dp[nm][next],
+                                        dp[mask][last] + dist[last][next]);
+            }
+        }
+    }
+    int best = Integer.MAX_VALUE / 2;
+    for (int last = 0; last < n; last++)
+        best = Math.min(best, dp[FULL][last] + dist[last][0]);   // return to start
+    return best;
+}
+```
+
+This is **O(2^n · n²)** time and **O(2^n · n)** space — vastly better than the `O(n!)` brute force, and exact.
+
+## Common mask operations
+
+- Is element `i` in the set: `(mask >> i) & 1`.
+- Add element `i`: `mask | (1 << i)`. Full set: `(1 << n) - 1`.
+- Iterate over all **submasks** of `mask`: `for (int s = mask; s > 0; s = (s - 1) & mask)` — runs in O(3^n) total across all masks, used in set-cover/partition DP.
+
+## Other classic uses
+
+Assignment problems (minimum cost to assign `n` tasks to `n` workers), counting Hamiltonian paths, "shortest path visiting all nodes," and partition-into-groups DP.
+
+<ProbeNote>Lead with the recognition cue: "small set, exponential, no polynomial DP → bitmask DP." Be ready to state TSP's `O(2^n · n²)` complexity and explain why `n` must stay small. The submask-enumeration loop `s = (s - 1) & mask` is the advanced flourish interviewers probe for in set-cover variants.</ProbeNote>

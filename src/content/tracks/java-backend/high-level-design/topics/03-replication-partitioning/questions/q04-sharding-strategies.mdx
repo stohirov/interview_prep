@@ -1,0 +1,55 @@
+## Range vs hash sharding — pros and cons
+
+When a dataset or write volume exceeds one machine, you **partition (shard)**: each node holds a disjoint subset of the data, keyed by a **partition key**. The central decision is *how* you map a key to a shard. The two base strategies are **range** and **hash**, and the choice is dominated by one trade-off: **range queries vs. even load distribution.**
+
+### Range partitioning
+
+Assign contiguous key ranges to shards: A–F on shard 1, G–M on shard 2, and so on (keys can be IDs, timestamps, usernames).
+
+- **Pro — efficient range scans.** "All orders from last Tuesday" or "users H through K" touch one or a few adjacent shards. Sorted-order queries are natural.
+- **Con — hot spots from skew.** If the key is monotonically increasing (a timestamp, an auto-increment ID), *all new writes hit the last shard* while the rest sit idle. Uneven natural distribution (lots of users named "S") also concentrates load.
+- Used by: HBase, Bigtable, MongoDB (ranged), many time-series stores.
+
+### Hash partitioning
+
+Apply a hash function to the key and assign by the hash (e.g., `hash(key) mod N`, or a position on a hash ring). The hash spreads even sequential keys uniformly.
+
+- **Pro — even load.** A good hash scatters writes and storage across all shards, eliminating monotonic-key hot spots.
+- **Con — range queries are gone.** Adjacent keys land on random shards, so a range scan must hit *every* shard (scatter-gather) — expensive. Sorted iteration is impossible without secondary structures.
+- Used by: Cassandra, DynamoDB, most distributed caches.
+
+<Diagram caption="Same keys, two strategies: range keeps order (and hot spots); hash spreads load (and scatters ranges)">{`
+  Keys:  k1 k2 k3 k4 k5 k6 (k7=newest, monotonic)
+
+  RANGE:   [ k1 k2 ] [ k3 k4 ] [ k5 k6 k7 ]   <- new writes pile on last shard
+            shard A    shard B    shard C  (HOT)
+
+  HASH:    [ k2 k5 ] [ k1 k7 ] [ k3 k4 k6 ]   <- even, but "k3..k5" spans all shards
+            shard A    shard B    shard C
+`}</Diagram>
+
+### Side by side
+
+| | Range | Hash |
+|---|---|---|
+| Range / sorted queries | Efficient (few shards) | Scatter-gather (all shards) |
+| Load distribution | Risky (hot spots on skew/monotonic keys) | Even |
+| Point lookups | Efficient | Efficient |
+| Rebalancing | Split/merge ranges | Easier with consistent hashing |
+| Best for | Time-series, sorted scans, range filters | Uniform point-access at scale |
+
+### Choosing the partition key
+
+The strategy is only half the decision — the **partition key** matters as much:
+
+- **High cardinality** so load spreads (don't shard on "country" with 3 dominant values).
+- **Matches the access pattern** — shard chat messages by `chat_id` so a conversation lives on one shard; shard by `user_id` if reads are per-user.
+- **Avoid monotonic keys with range sharding** — or prefix the timestamp with a hashed bucket to break the hot spot ("salting").
+
+<Callout kind="tip" title="Hybrid: hash a prefix, range within">
+A common production pattern is a **compound key**: hash on a high-cardinality prefix (spreads load across shards) and keep a sortable suffix within each shard (enables local range scans). Cassandra's partition-key + clustering-key model is exactly this. It buys you even distribution *and* in-shard ordering.
+</Callout>
+
+<ProbeNote>
+The interviewer wants the core trade-off crisp: range = good for scans but prone to hot spots on monotonic/skewed keys; hash = even load but kills range queries. The senior depth is (1) choosing a good *partition key* — high cardinality, aligned to access pattern — and (2) knowing the hybrid (hash prefix + range suffix) that gets both. Watch for the "monotonic key + range shard" hot-spot trap, which is the classic Amazon follow-up.
+</ProbeNote>

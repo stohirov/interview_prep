@@ -1,0 +1,41 @@
+## The canonical 4-step framework
+
+Almost every successful HLD answer follows the same arc. Internalize it so you never face a blank page.
+
+<Mermaid caption="The four steps and the time you should spend on each in a 60-minute round">{`graph LR
+    R[1. Requirements<br/>~8 min] --> E[2. Capacity Estimation<br/>~7 min]
+    E --> D[3. High-Level Design<br/>~15 min]
+    D --> DD[4. Deep Dive<br/>~20 min]
+    DD --> W[Wrap-up / trade-offs<br/>~5 min]`}</Mermaid>
+
+### 1. Requirements (clarify the problem)
+
+Pin down what you are building before you build it. Three buckets:
+
+- **Functional** — the core operations. For a URL shortener: shorten and redirect. Explicitly cut scope ("analytics is out of scope for now") so the interviewer knows you're managing time, not forgetting.
+- **Non-functional** — latency targets, availability (99.9% vs 99.99%), consistency needs, durability. These constrain the design more than the features do.
+- **Scale assumptions** — DAU, read/write ratio, data size. Get rough numbers here; you'll compute precisely in step 2.
+
+### 2. Capacity estimation
+
+Turn the scale assumptions into the numbers that drive architecture: **DAU → QPS → storage → bandwidth**. This is the step weak candidates skip — and it's the one that tells you whether you need sharding, how big the cache is, and whether reads dominate. (See the dedicated capacity-estimation question for a worked example.)
+
+### 3. High-level design
+
+Draw the system: clients → load balancer → stateless services → data stores, with caches and queues where the numbers justify them. Then specify the **API contract** (a few endpoints with request/response shapes) and the **data model** (key tables/collections and the access patterns). Keep it high-level; resist diving into one component yet.
+
+### 4. Deep dive
+
+The interviewer steers (or you offer) one or two hard parts: a bottleneck from your estimation, a consistency trade-off, an ID-generation scheme, a hot-partition mitigation. This is where senior signal lives — you show you can reason about failure modes, not just happy paths.
+
+<Callout kind="warn" title="The classic failure mode">
+Jumping to boxes-and-arrows before clarifying requirements and estimating scale. You end up designing the wrong system, or a system whose scale you can't justify. Always do steps 1 and 2 first, out loud.
+</Callout>
+
+### Why it works across styles
+
+The framework is style-agnostic — what changes is where you spend the deep-dive minutes. **FAANG** interviewers push step 4 hardest (scale, bottlenecks). **EU/contracting** interviewers care that steps 1–2 lead to a cost-justified, simple design. **Regional (EPAM/Uzum)** interviewers want steps 3 to be clean and buildable — a defensible diagram and a real schema. Same four steps, different emphasis.
+
+<ProbeNote>
+The interviewer is checking whether you have a *repeatable method* or are improvising. Announce the framework up front, then walk it. Treat it as a checklist you visibly follow, not a script you recite.
+</ProbeNote>

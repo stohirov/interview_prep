@@ -1,0 +1,45 @@
+Three closely related families — **enumeration**, **optimization with overlap**, and **optimization with a safe local choice** — map to **backtracking**, **DP**, and **greedy** respectively. Telling them apart is among the most common senior screening questions.
+
+## The decision table
+
+<ComplexityTable rows={[
+  {op: "When you see…", best: "…use", average: "Complexity", worst: "Tell"},
+  {op: "Generate all combinations / permutations / subsets", best: "backtracking", average: "O(output)", worst: "exponential by nature"},
+  {op: "Find one valid configuration (N-Queens, Sudoku)", best: "backtracking + pruning", average: "exponential, pruned", worst: "prune aggressively"},
+  {op: "Optimize, subproblems repeat", best: "dynamic programming", average: "states × transition", worst: "must have overlap"},
+  {op: "Optimize, one local choice provably safe", best: "greedy", average: "O(n) or O(n log n)", worst: "prove with exchange argument"},
+  {op: "Count number of ways", best: "DP (usually)", average: "states × transition", worst: "greedy can't count"},
+]} />
+
+## Backtracking — "all of them" or "find one"
+
+The cue is **enumeration**: "list all permutations," "every subset summing to T," "find a valid board." You build a partial solution incrementally, recurse, and **undo** the choice on the way back (the defining move). Prune branches that can't lead to a solution to tame the exponential blowup. If the problem wants *every* solution or a *feasible* configuration rather than an optimum, it's backtracking.
+
+```java
+void backtrack(State s, List<Solution> out) {
+    if (complete(s)) { out.add(snapshot(s)); return; }
+    for (Choice c : choices(s)) {
+        if (!promising(c, s)) continue;   // prune
+        apply(c, s);
+        backtrack(s, out);
+        undo(c, s);                       // the backtracking move
+    }
+}
+```
+
+## DP — "optimize" with overlapping subproblems
+
+The cue is **optimal substructure + overlapping subproblems**: the answer to the whole is built from answers to smaller instances, and those instances recur. "Minimum coins," "longest common subsequence," "number of ways to climb stairs." If a naive recursion recomputes the same subproblem, memoize it (top-down) or tabulate it (bottom-up). Counting problems ("how many ways") are almost always DP — greedy can't enumerate.
+
+## Greedy — "optimize" with a provably safe local choice
+
+The cue is a **single local decision you can prove is always safe** (exchange argument): "fewest arrows to burst balloons," "activity selection," "fractional knapsack." Sort, then sweep, committing to the best-looking option at each step with no revisiting. Faster and simpler than DP — *when it's valid*.
+
+## How to discriminate
+
+1. Want **all** solutions or a **feasible** one? → backtracking.
+2. Want the **optimum / a count**, and subproblems **repeat**? → DP.
+3. Want the optimum, and one **local choice is provably optimal**? → greedy.
+4. Unsure between DP and greedy? Try greedy, then hunt for a counterexample (`coins {1,3,4}`, target 6 breaks greedy). If you find one, fall back to DP.
+
+<ProbeNote>The crisp discriminator: enumeration → backtracking; optimization with overlapping subproblems → DP; optimization with a provably safe local choice → greedy. The classic confusion is greedy vs DP — coin change *looks* greedy but is DP (`{1,3,4}` counterexample), and 0/1 knapsack is DP while fractional knapsack is greedy. Naming the exchange argument as your greedy-validity test is the senior tell.</ProbeNote>

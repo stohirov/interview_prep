@@ -1,0 +1,36 @@
+## Cache invalidation strategies — TTL, event-based, manual
+
+"There are only two hard things in computer science: cache invalidation and naming things." The reason invalidation is hard is that a cache is a **second copy of the truth**, and keeping it from lying when the source changes is a distributed-consistency problem in miniature. There are three core strategies, and real systems combine them.
+
+### The three strategies
+
+| Strategy | How a stale entry is removed | Staleness window | Cost / complexity |
+| --- | --- | --- | --- |
+| **TTL (expiry)** | Entry auto-expires after a fixed time | Up to the full TTL | Trivial — set and forget |
+| **Event-based** | A write to the source triggers a purge/update | Near-zero (≈ propagation delay) | Needs a reliable change signal |
+| **Manual** | An operator or job explicitly purges keys | Until someone acts | Operational; error-prone |
+
+### TTL — the workhorse
+
+Every cached entry gets an expiry; staleness is **bounded by the TTL** regardless of what else happens. It is simple, self-healing (a bad entry can't live forever), and needs no coordination. The trade-off is that you accept staleness up to the TTL, and you must **jitter** TTLs to avoid synchronized stampedes. TTL is the safety net under every other strategy — even with event-based purges, a TTL guarantees eventual convergence if a purge event is ever lost.
+
+### Event-based — fresh but coupled
+
+On a write to the database, emit an event that invalidates (or refreshes) the affected cache key. Common mechanisms:
+- **Write-path invalidation** — the service that owns the write deletes the cache key in the same code path (cache-aside). Simple, but only covers writes that go through that path.
+- **CDC / change-data-capture** — tail the database's replication log (Debezium, Postgres logical decoding) and publish change events, so *any* write — including ones outside the app — triggers invalidation. This decouples invalidation from application code and is the robust choice at scale.
+- **Pub/sub fan-out** — for multi-tier caches, publish the invalidation to all nodes so each can drop its **L1** copy.
+
+Event-based gives near-real-time freshness but adds a delivery dependency: a dropped event leaves a stale entry, which is exactly why you keep a TTL backstop.
+
+### Manual — the escape hatch
+
+Explicit purge by an operator, deploy step, or batch job. Used for one-off corrections (a bad value got cached), bulk content changes, or CDN purges after a publish. It is essential but should not be your primary mechanism — it is reactive and relies on someone knowing to act.
+
+### Delete vs update
+
+Prefer **deleting** the key over writing the new value into the cache on invalidation. Deletion is idempotent and avoids a race where a concurrent reader repopulates the entry with stale data between your DB commit and your cache write; the next read simply re-fetches the fresh value.
+
+<ProbeNote>
+The interviewer wants the three strategies named and, crucially, the insight that they **layer**: event-based for freshness, TTL underneath as the self-healing backstop, manual purge as the escape hatch. Strong signals: CDC for write-source-agnostic invalidation, pub/sub for multi-tier L1 coherence, and preferring delete over update to dodge the repopulation race.
+</ProbeNote>

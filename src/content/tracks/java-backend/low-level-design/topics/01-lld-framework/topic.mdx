@@ -1,0 +1,24 @@
+A **low-level design (LLD)** round — often called the machine-coding or object-oriented design round — gives you a 45-minute problem like "design a parking lot" or "design a rate limiter" and asks you to produce a clean class-level model, frequently with compilable code. It sits between the algorithm round (data structures, single function) and the system-design round (services, databases, scale). The unit of work here is the **class**: responsibilities, relationships, interfaces, and the design patterns that connect them.
+
+## What this round actually measures
+
+It is not about knowing exotic patterns. Interviewers are watching whether you can take an intentionally vague prompt, **clarify it into concrete requirements**, carve the domain into entities with single responsibilities, and let abstractions absorb future change. The recurring senior signal is restraint: the right amount of design, named patterns that *earn their place*, and a frank discussion of trade-offs.
+
+## The shape of a good 45 minutes
+
+The whole module is built around one repeatable framework so you never freeze on a blank whiteboard:
+
+1. **Clarify** scope and requirements (≈5 min).
+2. Identify **entities** (the nouns).
+3. Map **relationships** (has-a, is-a, uses).
+4. Design the **classes** — fields, methods, interfaces.
+5. Apply **patterns** where a real axis of change demands one.
+6. Discuss **trade-offs**, concurrency, and extensions.
+
+<Callout kind="tip" title="Pace, don't sprint">
+Most candidates fail by jumping straight to code. The first five minutes spent clarifying scope is the highest-leverage time in the interview — it prevents you from building the wrong thing beautifully.
+</Callout>
+
+## How to use this topic
+
+The questions below decompose the framework into the skills you can drill independently: the six-step method, the clarifying questions to always ask, how to scope a vague prompt fast, the time budget for code versus diagrams, the anti-patterns that sink candidates, and the rubric interviewers grade against. Master these first; every concrete design problem in this module (parking lot, elevator, rate limiter…) is just this framework applied to a new domain.

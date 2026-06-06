@@ -1,0 +1,18 @@
+An **in-memory publish/subscribe system** is the LLD warm-up for the messaging questions that follow. Publishers send messages to named **topics**; subscribers register interest in topics and receive every message published after they subscribe. A central **broker** decouples the two sides — publishers never hold a reference to subscribers, and the subscriber count can change at runtime without any publisher noticing.
+
+This is, at its heart, the **Observer pattern** at industrial scale, so interviewers use it to see whether you can take a textbook pattern and harden it for concurrency, failure, and ordering.
+
+## What the interviewer is testing
+
+- Can you decouple producers from consumers through a broker rather than wiring them directly?
+- How do you deliver to many subscribers **concurrently** without one slow subscriber blocking everyone else?
+- Do you understand **delivery semantics** — at-most-once, at-least-once, exactly-once — and that they are a deliberate trade-off, not a default?
+- Can you reason about **backpressure**: what happens when a subscriber consumes slower than the publisher produces?
+
+## How to frame it
+
+Start by **clarifying scope**: in-memory single-process (state it — distributed Kafka-style design lives in the HLD module), push vs pull delivery, whether order must be preserved per topic, and what happens to messages for a subscriber that is down.
+
+Then drive the canonical flow: **publisher → broker.publish(topic, message) → SubscriptionManager looks up subscribers → each subscriber is handed the message on a delivery thread → failures are retried or routed to a dead-letter queue.** Make the broker a **Singleton**, push delivery onto a **thread pool / per-subscriber queue** so producers never block, and put the delivery guarantee behind a **Strategy** so at-most-once and at-least-once are swappable.
+
+The senior signal is naming the trade-offs out loud: a per-subscriber bounded queue gives you backpressure and isolates slow consumers, but forces a policy decision (block the publisher, drop oldest, or shed to a DLQ) when the queue fills. The worked solution below follows the full 9-section structure.

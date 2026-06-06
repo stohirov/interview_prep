@@ -1,0 +1,54 @@
+**Union-Find** (Disjoint Set Union, DSU) maintains a partition of `n` elements into disjoint sets and answers one question blazingly fast: **are these two elements in the same set?** It supports two operations — `find(x)` (which set does `x` belong to?) and `union(x, y)` (merge their two sets) — and with the right optimizations both run in **near-constant amortized time**.
+
+## The forest representation
+
+Each set is a tree; every element points to a `parent`, and a set is identified by its **root** (an element that points to itself). `find` walks parent pointers to the root; `union` links one root under the other.
+
+<Diagram caption="Three sets as parent-pointer trees. find(d) walks d -> b -> a (root).">{`   a        e        f          parent[a]=a (root)
+  / \\       |                    parent[b]=a, parent[c]=a
+ b   c      g                    parent[d]=b
+ |                               find(d): d -> b -> a
+ d`}</Diagram>
+
+Naively, trees can grow into linked lists and `find` degrades to O(n). Two optimizations fix that.
+
+## Optimization 1 — union by rank/size
+
+When merging, always attach the **shorter** tree under the **taller** one (by *rank*, an upper bound on height) or the **smaller** under the **larger** (by *size*). This keeps trees shallow — height stays **O(log n)** on its own.
+
+## Optimization 2 — path compression
+
+During `find`, repoint every node visited directly to the root, flattening the path so future `find`s are O(1). The recursive one-liner is the cleanest form.
+
+```java
+class DSU {
+    int[] parent, rank;
+    DSU(int n) {
+        parent = new int[n];
+        rank = new int[n];
+        for (int i = 0; i < n; i++) parent[i] = i;   // each its own set
+    }
+    int find(int x) {                                 // path compression
+        if (parent[x] != x) parent[x] = find(parent[x]);
+        return parent[x];
+    }
+    boolean union(int a, int b) {                     // union by rank
+        int ra = find(a), rb = find(b);
+        if (ra == rb) return false;                   // already joined
+        if (rank[ra] < rank[rb]) { int t = ra; ra = rb; rb = t; }
+        parent[rb] = ra;
+        if (rank[ra] == rank[rb]) rank[ra]++;
+        return true;
+    }
+}
+```
+
+## Amortized cost — inverse Ackermann
+
+With **both** optimizations, a sequence of `m` operations costs **O(m · α(n))**, where `α` is the inverse Ackermann function — below 5 for any conceivable `n`. So each operation is **effectively O(1)**.
+
+## Applications
+
+Kruskal's MST cycle check, **connected components**, **cycle detection** in undirected graphs, equivalence classes (account merging, friend circles), and percolation. Reach for DSU whenever you incrementally **merge** groups and query connectivity — DFS recomputes from scratch, DSU answers online.
+
+The coding questions below — Number of Provinces, Redundant Connection, Accounts Merge, Connected Components, Most Stones Removed — are all this one structure applied to a different notion of "connected."

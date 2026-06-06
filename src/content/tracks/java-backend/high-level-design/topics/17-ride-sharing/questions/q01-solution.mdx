@@ -1,0 +1,121 @@
+## 1. Functional requirements
+
+- Drivers stream live location; go online/offline.
+- Rider requests a ride from A → B.
+- **Match** rider to a nearby available driver; driver accepts/declines.
+- Real-time trip tracking (both parties see live location).
+- **Surge pricing** by area.
+- Trip lifecycle to completion + **payment**.
+
+## 2. Non-functional requirements
+
+- **Scale:** 100M riders, **5M drivers** (~1–2M concurrently online).
+- **Latency:** nearby-driver query + match offer p99 < 1–2 s; location ingest must keep up in real time.
+- **Consistency:** a driver is **never** assigned to two trips (strong consistency on assignment).
+- **Availability:** 99.99%; degraded matching is better than no matching.
+- **Durability:** trips and payments are financial records — never lost.
+
+## 3. Capacity estimation
+
+- Location updates: ~1.5M online drivers × 1 update / 4 s ≈ **~375K writes/s** (the dominant write load).
+- Ride requests: assume ~15M rides/day ≈ **~175 requests/s** (×~5 peak ≈ 900/s) — tiny vs location writes.
+- Each match fans out a proximity query over a few cells → ~tens of candidate drivers read per request.
+- Location store: 1.5M drivers × ~100 B ≈ **~150 MB** live state — easily fits in Redis; it's the *write rate*, not size, that matters.
+- Trip history: 15M/day × 365 × 3 yr ≈ **~16B trips** × ~1 KB ≈ **~16 TB** in a durable, sharded store.
+
+## 4. High-level architecture
+
+<Mermaid caption="Ride-sharing — high-rate location ingest into a geo-indexed store, matching service runs proximity queries, trips drive a state machine and payments">{`graph LR
+    D[Driver app] -->|location stream| LOC[Location Ingest]
+    LOC --> GEO[(Geo Index - Redis cells)]
+    LOC --> LOG[(Location Log - Kafka)]
+    R[Rider app] --> LB[Load Balancer]
+    LB --> MATCH[Matching Service]
+    MATCH --> GEO
+    MATCH --> SURGE[Surge Service]
+    MATCH --> TRIP[Trip Service]
+    TRIP --> TDB[(Trip Store - sharded)]
+    TRIP --> PAY[Payment Service]
+    PAY --> PSP[(Payment Provider)]
+    TRIP --> NOTIF[Notification / Push]`}</Mermaid>
+
+## 5. API design
+
+```
+POST /api/v1/drivers/location
+  Body: { "driverId": "d_7", "lat": 41.31, "lng": 69.24, "ts": 1733000000 }
+  202   (fire-and-forget, high rate)
+
+POST /api/v1/rides
+  Body: { "riderId": "r_9", "pickup": {...}, "dropoff": {...} }
+  201:  { "rideId": "ride_55", "status": "MATCHING", "etaSec": 240, "fare": {...} }
+
+POST /api/v1/rides/{id}/accept   { "driverId": "d_7" }    -- atomic claim
+GET  /api/v1/rides/{id}                                    -- poll/stream status
+POST /api/v1/rides/{id}/complete                           -- triggers payment
+```
+
+`POST /rides` is made idempotent with a client request key so a retried request doesn't create two trips.
+
+## 6. Data model
+
+```sql
+CREATE TABLE trip (
+  trip_id     BIGINT PRIMARY KEY,
+  rider_id    BIGINT NOT NULL,
+  driver_id   BIGINT,
+  status      TEXT NOT NULL,           -- MATCHING|ACCEPTED|ENROUTE|IN_PROGRESS|COMPLETED|CANCELLED
+  pickup_geo  TEXT, dropoff_geo TEXT,
+  surge_mult  NUMERIC(4,2),
+  fare_cents  BIGINT,
+  created_at  TIMESTAMPTZ NOT NULL
+);                                      -- sharded by trip_id (time-ordered snowflake)
+
+CREATE TABLE payment (
+  payment_id  BIGINT PRIMARY KEY,
+  trip_id     BIGINT NOT NULL,
+  amount_cents BIGINT, currency TEXT,
+  status      TEXT,                     -- AUTHORIZED|CAPTURED|FAILED|REFUNDED
+  idem_key    TEXT UNIQUE               -- exactly-once charge
+);
+-- Live driver location is NOT in SQL: it lives in the Redis geo index,
+-- keyed by cell id (geohash/H3), value = set of driverId -> (lat,lng,updatedAt).
+```
+
+## 7. Detailed component design — geospatial matching
+
+The crux of the problem.
+
+- **Indexing.** Partition the surface of the earth into cells. **Geohash** (prefix-based rectangles) is simplest; Google **S2** (quadtree on a sphere) and Uber **H3** (hexagons) give more uniform neighbors and cleaner ring queries. Each online driver's location is written into the cell it falls in.
+- **Nearby query.** For a rider in cell `X`, query `X` plus its neighbor cells (a k-ring) and collect candidate drivers — this is why you index by cell instead of scanning all 5M drivers. Choose cell resolution so a typical cell holds a useful handful of drivers; query more rings if a cell is sparse. Boundary effects are handled by always including neighbors.
+- **Match + atomic claim.** Rank candidates by ETA (road-network ETA, not straight-line), offer to the best driver, and on accept perform an **atomic compare-and-set** on the driver's status (Redis `SETNX` / a conditional DB update) so two concurrent requests can never both claim the same driver. If declined/timed out, offer the next candidate.
+- **Trip state machine.** The Trip Service drives `MATCHING → ACCEPTED → ENROUTE → IN_PROGRESS → COMPLETED`, persisting each transition; on `COMPLETED` it invokes the Payment Service with an **idempotency key** to authorize/capture exactly once.
+
+## 8. Scaling considerations
+
+- **Location ingest** is the heaviest write path: fire-and-forget into Redis (overwrite latest per driver) and tee a durable copy to Kafka for history/analytics — never write each GPS ping to SQL.
+- **Geo index sharding** by cell/region keeps a city's drivers co-located; matching queries stay local.
+- **Surge** is computed per cell on a short interval from demand (requests) vs supply (available drivers) and cached; reads are cheap.
+- **Hot cities** (dense cells) get finer resolution and more shards; quiet regions coarser.
+- **Real-time tracking** to rider/driver via WebSocket/push, fed from the same location stream.
+
+## 9. Trade-offs and alternatives
+
+- **Geohash vs S2 vs H3.** Geohash is trivial but rectangular cells have uneven neighbor distances and prefix boundary quirks; S2/H3 give uniform, ring-friendly neighborhoods at more complexity. Pick by how much you need uniform proximity — for an interview, name the trade-off.
+- **Redis Geo vs PostGIS.** Redis Geo (or a custom cell index) is fast and fits the in-memory hot path; PostGIS is richer and durable but too slow for 375K writes/s on the matching path. Use Redis hot, PostGIS/log for analytics.
+- **Strong vs eventual consistency on assignment.** Driver assignment must be strongly consistent (atomic claim); location data can be eventually consistent and lossy. Don't apply one model to both.
+- **Nearest vs global-optimal matching** — greedy nearest is simple and low-latency; batched optimization improves global efficiency but adds delay. Greedy is the interview default.
+
+## 10. Common follow-up questions
+
+- "Two riders match the same driver" → atomic compare-and-set on driver status; loser re-matches.
+- "Driver moves between cells" → location update re-buckets them; index is overwrite-latest.
+- "Surge spikes" → per-cell demand/supply ratio, recomputed every few seconds, applied at quote time.
+- "Payment fails after the trip" → idempotent retry on the auth/capture; trip stays COMPLETED, payment retried out of band.
+- "ETA accuracy" → road-network routing service, not haversine distance.
+
+## 11. What interviewers are really probing
+
+<ProbeNote>
+**All styles:** that you recognized this as a real-time geospatial problem and reached for a cell-based index instead of scanning all drivers, and that you separated the lossy high-rate location stream from the strongly-consistent assignment. **FAANG:** depth on geohash/S2/H3 trade-offs, neighbor/ring queries and boundary handling, location write throughput, and race-free matching. **EU/contracting:** a pragmatic Redis-Geo-plus-state-machine design with idempotent payments justified on cost. **Regional:** a clean Spring service, a sane trip/payment schema, and a defensible matching flow — and this is a strong topic to ground in real electric-taxi/dispatch experience: speak to how you actually streamed driver locations and dispatched rides. The classic failure is trying to run proximity queries against a relational table (or scanning all drivers) on the hot path, and ignoring the double-assignment race so a driver gets matched to two riders at once.
+</ProbeNote>

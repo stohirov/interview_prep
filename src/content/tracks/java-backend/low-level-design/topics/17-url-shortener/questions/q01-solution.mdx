@@ -1,0 +1,155 @@
+## 1. Functional requirements
+
+- `shorten(longUrl)` returns a short **code** (e.g. `aZ3x9`); the full short URL is `domain + "/" + code`.
+- `resolve(code)` returns the original long URL, or signals not-found/expired.
+- Codes are **unique**; the same long URL may map to a new code on each call (idempotent dedup is optional).
+- Pluggable **encoding strategy**: base62-over-counter, hash, or random.
+
+## 2. Non-functional requirements
+
+- **Read-heavy** — redirects vastly outnumber creations; resolution must be O(1).
+- **Collision-free** — no two long URLs share a code; the design must define how a collision is detected and resolved.
+- **Extensibility** — a new encoding scheme or custom-alias feature drops in via Strategy without editing the service (Open/Closed).
+- **Scaling** (distributed counter, caching, sharding) is **out of scope** — deferred to the HLD module; the repository seam is shown.
+
+## 3. Core entities
+
+| Entity | Responsibility |
+| --- | --- |
+| `URLShortener` | Service / facade (Singleton); orchestrates shorten & resolve. |
+| `URLRepository` | Persists and looks up `code ↔ longUrl` mappings. |
+| `IDGenerator` | Produces a unique numeric id (monotonic counter). |
+| `EncoderStrategy` | Turns an id (or URL) into a short code — base62 / hash / random. |
+| `URLMapping` | Record: code, longUrl, createdAt, optional expiry. |
+| `EncoderFactory` | Selects the encoder strategy by configuration. |
+
+## 4. Class diagram
+
+<Mermaid caption="URL shortener class model">{`classDiagram
+    class URLShortener {
+      -URLRepository repo
+      -IDGenerator ids
+      -EncoderStrategy encoder
+      +shorten(String) String
+      +resolve(String) String
+    }
+    class URLRepository {
+      <<interface>>
+      +save(URLMapping)
+      +findByCode(String) Optional~URLMapping~
+      +existsByCode(String) boolean
+    }
+    class IDGenerator {
+      <<interface>>
+      +nextId() long
+    }
+    class EncoderStrategy {
+      <<interface>>
+      +encode(long) String
+    }
+    class URLMapping {
+      -String code
+      -String longUrl
+      -Instant createdAt
+      -Instant expiresAt
+    }
+    URLShortener o-- URLRepository
+    URLShortener o-- IDGenerator
+    URLShortener o-- EncoderStrategy
+    URLRepository ..> URLMapping
+    Base62Encoder ..|> EncoderStrategy
+    HashEncoder ..|> EncoderStrategy`}</Mermaid>
+
+## 5. Key interfaces and classes
+
+```java
+interface EncoderStrategy { String encode(long id); }
+
+final class Base62Encoder implements EncoderStrategy {     // unique by construction
+    private static final String A =
+        "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    public String encode(long id) {
+        StringBuilder sb = new StringBuilder();
+        do { sb.append(A.charAt((int) (id % 62))); id /= 62; } while (id > 0);
+        return sb.reverse().toString();
+    }
+}
+
+final class HashEncoder implements EncoderStrategy {       // NOT unique — needs collision check
+    private final int len;
+    HashEncoder(int len) { this.len = len; }
+    public String encode(long seed) {
+        String h = Hashing.md5(Long.toString(seed));       // or hash(longUrl + salt)
+        return Base62.of(h).substring(0, len);
+    }
+}
+
+interface IDGenerator { long nextId(); }
+final class CounterIdGenerator implements IDGenerator {
+    private final AtomicLong counter = new AtomicLong(1_000_000_000L); // start large for length
+    public long nextId() { return counter.getAndIncrement(); }
+}
+
+interface URLRepository {
+    void save(URLMapping m);
+    Optional<URLMapping> findByCode(String code);
+    boolean existsByCode(String code);
+}
+```
+
+```java
+public final class URLShortener {                          // Singleton facade
+    private static final URLShortener INSTANCE = new URLShortener();
+    public static URLShortener get() { return INSTANCE; }
+
+    private final URLRepository repo = new InMemoryRepository();
+    private final IDGenerator ids   = new CounterIdGenerator();
+    private final EncoderStrategy encoder = new Base62Encoder();
+    private URLShortener() {}
+
+    public String shorten(String longUrl) {
+        String code;
+        do {
+            code = encoder.encode(ids.nextId());           // base62: loop runs once
+        } while (repo.existsByCode(code));                 // guard protects hash/random encoders
+        repo.save(new URLMapping(code, longUrl, Instant.now(), null));
+        return code;
+    }
+
+    public String resolve(String code) {
+        URLMapping m = repo.findByCode(code)
+            .orElseThrow(() -> new NoSuchElementException("Unknown code: " + code));
+        if (m.expiresAt() != null && Instant.now().isAfter(m.expiresAt()))
+            throw new IllegalStateException("Expired: " + code);
+        return m.longUrl();
+    }
+}
+```
+
+## 6. Design patterns used
+
+- **Strategy** — `EncoderStrategy` makes base62/hash/random interchangeable; the service neither knows nor cares which is wired in.
+- **Singleton** — one `URLShortener` service (or a single Spring-managed bean) holding the counter and repository.
+- **Factory** — `EncoderFactory.create(config)` picks the strategy at startup, keeping selection logic in one place.
+- **Repository** — `URLRepository` abstracts storage so in-memory swaps to a database without touching the service.
+
+## 7. Trade-offs and alternatives
+
+- **Counter + base62 vs hash.** A monotonic counter encoded in base62 is **collision-free by construction** (each id is unique) and yields short, dense codes — but it is sequential, so codes are guessable/enumerable. Hashing the URL hides ordering but **can collide**, requiring a uniqueness check and retry-with-salt.
+- **Predictability.** If enumeration is a concern, salt or shuffle the counter, or use a random encoder with a collision check — trading guaranteed uniqueness for unguessability.
+- **Code length.** Base62 over a 7-char code addresses ~3.5 trillion URLs; start the counter high so early codes aren't 1-char.
+- **Dedup.** Returning a fresh code per call is simplest; deduping (same URL → same code) needs a `longUrl → code` index and a decision about expiry semantics.
+
+## 8. Common follow-up questions
+
+- **Custom URLs / vanity aliases** — accept a user-supplied code; check `existsByCode` and reject on collision rather than auto-retry.
+- **Expiration** — store `expiresAt`; lazily reject on resolve and sweep with a background job (or TTL in the store).
+- **Analytics** — increment a click counter / emit an event on each `resolve`; keep it off the hot path (async).
+- **Collision handling on hash-based encoders** — detect via `existsByCode`, then rehash with an incremented salt; bound the retries.
+- **Distributed unique ids** — counter ranges per node, or a Snowflake-style id (the HLD bridge).
+
+## 9. What interviewers are really probing
+
+<ProbeNote>
+That you (1) split encoding, storage, and orchestration into separate, swappable pieces instead of one God service, (2) chose the encoding strategy deliberately and could state the **collision difference** between counter-base62 (unique by construction) and hashing (needs a check), (3) handled the collision with an explicit `existsByCode` guard and retry rather than hashing-and-hoping, and (4) knew which concerns are LLD here versus deferred to the HLD round. The collision reasoning is the discriminator between junior and senior answers.
+</ProbeNote>

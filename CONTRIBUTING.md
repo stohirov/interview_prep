@@ -13,8 +13,8 @@ src/content/tracks/<track-id>/<module-id>/topics/<NN-slug>/
 ```
 
 - **Track id**: `java-backend`, `kotlin-backend`, etc.
-- **Module id**: `collections`, `oop`, `postgresql`, `spring`, and (planned) `concurrency`,
-  `jvm`, `system-design`, `dsa`.
+- **Module id**: `collections`, `oop`, `postgresql`, `spring`, `dsa`, `low-level-design`,
+  `high-level-design`, and (planned) `concurrency`, `jvm`.
 - **Topic folder name**: `NN-slug` where `NN` is a two-digit ordinal that controls display order
   on the module page (e.g. `04-hashmap`).
 - **Question file name**: `qNN-slug.mdx` where `NN` is two digits.
@@ -79,6 +79,16 @@ All available globally inside any `.mdx` under `src/content/` — no imports nee
 | `<ProbeNote>`     | Required at the end of every question; explains what's really being tested |
 | `<ComplexityTable>` | Renders a Big-O table from `rows={[{op, best, average, worst, note}]}` |
 | `<Diagram>`       | Wraps ASCII diagrams with optional caption                           |
+| `<Mermaid>`       | Client-side-rendered diagrams (LLD class diagrams, HLD architecture graphs) |
+
+`<Mermaid>` and `<Diagram>` take their body as a template literal inside braces:
+`` <Mermaid caption="…">{`graph LR\n  A --> B`}</Mermaid> ``. The Mermaid source must be
+valid (use `graph LR`/`graph TD`/`classDiagram`/`sequenceDiagram`, node ids with no spaces,
+labels in `[...]` or `[(...)]` for datastores). Avoid unquoted parentheses inside node labels.
+Mermaid renders in the browser (the `mermaid@11` bundle is code-split and lazy-loaded), so it
+does **not** break the build on a malformed graph — sanity-check diagrams in the dev server.
+Use `<Mermaid>` for LLD class diagrams and HLD architecture graphs; keep `<Diagram>` for
+small ASCII sketches.
 
 Example question MDX:
 
@@ -100,6 +110,56 @@ public final class Cache<K, V> {
 The interviewer is testing whether you understand X and Y. They are not testing whether you can recite Z.
 </ProbeNote>
 ```
+
+## Module-specific answer structures
+
+The theory modules (Collections, OOP, PostgreSQL, Spring) follow the free-form
+"answer → why → ProbeNote" shape above. The three interview-design modules each follow a
+fixed section structure so every solution is comparable and complete. Match the reference
+exemplars when authoring:
+
+### DSA — coding-question structure
+
+`dsa/topics/<NN-slug>/questions/qNN-*.mdx`. Exemplar: `dsa/topics/05-hash-tables/questions/q06-two-sum.mdx`.
+Each coding answer flows:
+
+1. **Problem restatement** — the problem in one or two sentences, plus constraints.
+2. **Brute force + Big-O** — the naive approach and its time/space complexity (use a
+   `<ComplexityTable>` where it helps).
+3. **Optimal approach + reasoning** — the key insight, *why* it works, and its complexity.
+4. **Full Java solution** — a complete, runnable `java` code block (Java 21+ idioms).
+5. **`<ProbeNote>`** — what the interviewer is really testing (the pattern, not the puzzle).
+
+### LLD — 9-section design solution
+
+`low-level-design/topics/<NN-slug>/questions/q01-solution.mdx`. Exemplar:
+`low-level-design/topics/04-parking-lot/{topic.mdx,questions/q01-solution.mdx}`. The nine
+sections: **1** Requirements (functional + non-functional) · **2** Core entities / class
+model · **3** Class diagram (`<Mermaid>` `classDiagram`) · **4** Design patterns applied ·
+**5** Key interfaces / API · **6** Walkthrough of the main flow · **7** Concurrency /
+edge cases · **8** Trade-offs and alternatives · **9** What interviewers are really probing
+(`<ProbeNote>`).
+
+### HLD — 11-section design solution
+
+`high-level-design/topics/<NN-slug>/questions/q01-solution.mdx`. Exemplar:
+`high-level-design/topics/14-url-shortener/{topic.mdx,questions/q01-solution.mdx}`. The
+eleven numbered sections (`## 1. …` … `## 11. …`): **1** Functional requirements ·
+**2** Non-functional requirements (scale numbers) · **3** Capacity estimation (worked
+QPS / storage / bandwidth math) · **4** High-level architecture (`<Mermaid>` graph) ·
+**5** API design · **6** Data model · **7** Detailed component design · **8** Scaling
+considerations · **9** Trade-offs and alternatives · **10** Common follow-up questions ·
+**11** What interviewers are really probing (`<ProbeNote>` covering the FAANG /
+EU-contracting / regional-EPAM angles and the classic failure mode).
+
+For LLD and HLD, the sibling `topic.mdx` (300–500 words) frames the problem and contrasts
+the FAANG / EU-contracting / regional-EPAM interview styles before the worked solution.
+
+### The `<ComplexityTable>` is not a generic table
+
+`<ComplexityTable>` is fixed to Operation / Best / Average / Worst / Note columns. Do **not**
+repurpose it for generic comparison tables (e.g. "SQL vs NoSQL") — use a plain markdown table
+for those.
 
 ## Sources policy
 
@@ -151,6 +211,9 @@ Each module owns its sources file, exporting a named `Record<topicId, Source[]>`
 - `tracks/java-backend/oop/sources.ts` → `OOP_SOURCES`
 - `tracks/java-backend/postgresql/sources.ts` → `PG_SOURCES`
 - `tracks/java-backend/spring/sources.ts` → `SPRING_SOURCES`
+- `tracks/java-backend/dsa/sources.ts` → `DSA_SOURCES`
+- `tracks/java-backend/low-level-design/sources.ts` → `LLD_SOURCES`
+- `tracks/java-backend/high-level-design/sources.ts` → `HLD_SOURCES`
 
 The module's `index.ts` pulls them in per topic (e.g. `PG_SOURCES['indexing']`). Keep sources out
 of the topic MDX so they're easy to audit and share between topics. When you add a new module,

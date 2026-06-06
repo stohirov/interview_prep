@@ -1,0 +1,226 @@
+## 1. Functional requirements
+
+- A building with `N` floors and `M` elevator cars.
+- **Internal buttons** inside each car (one per floor) and **external (hall) buttons** on each floor with **Up/Down** direction.
+- A press creates a **request**; the system assigns it to a car and the car services it.
+- Cars move floor by floor, **stop** to open/close doors, and serve stops in a sensible order (not naive FCFS thrashing).
+- **Displays** on each floor and inside each car show current position and direction.
+- Pluggable **scheduling**: choose which car serves a hall call and the order of stops.
+
+## 2. Non-functional requirements
+
+- **Concurrency** — hall calls arrive from many floors simultaneously; assignment must be thread-safe.
+- **No starvation** — a request must eventually be served regardless of arrival pattern.
+- **Extensibility** — adding a scheduling algorithm (FCFS, SCAN, LOOK, nearest-car) must not touch the car or controller (Open/Closed).
+- **Responsiveness** — minimize average wait time; this is the metric the strategy optimizes.
+
+## 3. Core entities
+
+| Entity | Responsibility |
+| --- | --- |
+| `ElevatorController` | Singleton dispatcher; receives hall calls and assigns a car via a strategy. |
+| `ElevatorCar` | One physical car; owns its pending stops and its state machine. |
+| `ElevatorState` | State of a car: `IDLE`, `MOVING_UP`, `MOVING_DOWN`, `STOPPED`. |
+| `Direction` | `UP`, `DOWN`, `IDLE` — drives both scheduling and the state machine. |
+| `Button` | Abstract press source; `InternalButton` (car→floor) and `ExternalButton` (hall→direction). |
+| `Request` | A command capturing target floor (+ direction for hall calls). |
+| `SchedulingStrategy` | Picks the best car for a hall call (nearest, FCFS…). |
+| `ElevatorObserver` | Display / dashboard notified on position and state changes. |
+
+## 4. Class diagram
+
+<Mermaid caption="Elevator system class model">{`classDiagram
+    class ElevatorController {
+      -List~ElevatorCar~ cars
+      -SchedulingStrategy strategy
+      +submitExternal(ExternalButton)
+      +step()
+    }
+    class ElevatorCar {
+      -int id
+      -int currentFloor
+      -Direction direction
+      -ElevatorState state
+      -NavigableSet~Integer~ stops
+      +addStop(int)
+      +step()
+    }
+    class SchedulingStrategy {
+      <<interface>>
+      +chooseCar(List~ElevatorCar~, Request) ElevatorCar
+    }
+    class Request {
+      -int targetFloor
+      -Direction direction
+    }
+    class Button {
+      <<abstract>>
+      +press() Request
+    }
+    class ElevatorObserver {
+      <<interface>>
+      +onUpdate(ElevatorCar)
+    }
+    class Direction {
+      <<enumeration>>
+      UP
+      DOWN
+      IDLE
+    }
+    class ElevatorState {
+      <<enumeration>>
+      IDLE
+      MOVING_UP
+      MOVING_DOWN
+      STOPPED
+    }
+    ElevatorController "1" o-- "*" ElevatorCar
+    ElevatorController ..> SchedulingStrategy
+    ElevatorController ..> Request
+    ElevatorCar ..> ElevatorObserver
+    ElevatorCar --> Direction
+    ElevatorCar --> ElevatorState
+    Button <|-- InternalButton
+    Button <|-- ExternalButton
+    Button ..> Request`}</Mermaid>
+
+## 5. Key interfaces and classes
+
+```java
+enum Direction { UP, DOWN, IDLE }
+enum ElevatorState { IDLE, MOVING_UP, MOVING_DOWN, STOPPED }
+
+final class Request {                       // Command: a captured intent to stop
+    final int targetFloor;
+    final Direction direction;              // null/IDLE for internal requests
+    Request(int targetFloor, Direction direction) {
+        this.targetFloor = targetFloor;
+        this.direction = direction;
+    }
+}
+
+abstract class Button {                     // Command source
+    abstract Request press();
+}
+
+final class InternalButton extends Button { // pressed inside a car
+    private final int floor;
+    InternalButton(int floor) { this.floor = floor; }
+    Request press() { return new Request(floor, Direction.IDLE); }
+}
+
+final class ExternalButton extends Button { // hall call with a direction
+    private final int floor;
+    private final Direction dir;
+    ExternalButton(int floor, Direction dir) { this.floor = floor; this.dir = dir; }
+    Request press() { return new Request(floor, dir); }
+}
+
+interface SchedulingStrategy {
+    ElevatorCar chooseCar(List<ElevatorCar> cars, Request r);
+}
+
+interface ElevatorObserver {                // displays / dashboards
+    void onUpdate(ElevatorCar car);
+}
+```
+
+```java
+final class ElevatorCar {
+    final int id;
+    private int currentFloor = 0;
+    private Direction direction = Direction.IDLE;
+    private ElevatorState state = ElevatorState.IDLE;
+    private final NavigableSet<Integer> stops = new TreeSet<>();   // pending stops
+    private final List<ElevatorObserver> observers = new ArrayList<>();
+
+    ElevatorCar(int id) { this.id = id; }
+
+    synchronized void addStop(int floor) {
+        stops.add(floor);
+        if (direction == Direction.IDLE) {
+            direction = floor > currentFloor ? Direction.UP : Direction.DOWN;
+        }
+    }
+
+    // One tick of the LOOK algorithm: drain stops in the current direction,
+    // reverse only when none remain ahead.
+    synchronized void step() {
+        if (stops.isEmpty()) { direction = Direction.IDLE; state = ElevatorState.IDLE; return; }
+        Integer next = direction == Direction.DOWN ? stops.floor(currentFloor) : stops.ceiling(currentFloor);
+        if (next == null) {                       // nothing ahead -> reverse (LOOK)
+            direction = direction == Direction.UP ? Direction.DOWN : Direction.UP;
+            next = direction == Direction.UP ? stops.ceiling(currentFloor) : stops.floor(currentFloor);
+        }
+        if (next == currentFloor) { stops.remove(currentFloor); state = ElevatorState.STOPPED; /* open doors */ }
+        else { currentFloor += direction == Direction.UP ? 1 : -1;
+               state = direction == Direction.UP ? ElevatorState.MOVING_UP : ElevatorState.MOVING_DOWN; }
+        observers.forEach(o -> o.onUpdate(this));
+    }
+
+    int currentFloor() { return currentFloor; }
+    Direction direction() { return direction; }
+    int load() { return stops.size(); }
+    void addObserver(ElevatorObserver o) { observers.add(o); }
+}
+```
+
+```java
+public final class ElevatorController {                 // Singleton dispatcher
+    private static final ElevatorController INSTANCE = new ElevatorController();
+    public static ElevatorController get() { return INSTANCE; }
+
+    private final List<ElevatorCar> cars = new CopyOnWriteArrayList<>();
+    private volatile SchedulingStrategy strategy = new NearestCarStrategy();
+    private ElevatorController() {}
+
+    public void register(ElevatorCar car) { cars.add(car); }
+    public void setStrategy(SchedulingStrategy s) { this.strategy = s; }
+
+    public void submitExternal(ExternalButton button) {     // hall call
+        Request r = button.press();
+        ElevatorCar car = strategy.chooseCar(cars, r);
+        car.addStop(r.targetFloor);
+    }
+
+    public void step() { cars.forEach(ElevatorCar::step); } // driven by a clock
+}
+
+// Nearest-car: pick the closest car already moving toward the call (or idle).
+final class NearestCarStrategy implements SchedulingStrategy {
+    public ElevatorCar chooseCar(List<ElevatorCar> cars, Request r) {
+        return cars.stream()
+            .min(Comparator.comparingInt(c -> Math.abs(c.currentFloor() - r.targetFloor)))
+            .orElseThrow();
+    }
+}
+```
+
+## 6. Design patterns used
+
+- **Strategy** — `SchedulingStrategy` lets FCFS, SCAN, LOOK, and nearest-car interchange without editing the controller or car. This is the highest-value pattern here.
+- **State** — `ElevatorState` (idle/moving/stopped) governs legal transitions; encoding it as an enum (or full State classes) keeps movement logic from degenerating into boolean spaghetti.
+- **Command** — a `Button` press produces a `Request` object, decoupling the source of an intent from its handling and making queuing/replay natural.
+- **Observer** — floor and in-car displays subscribe to a car's position/state updates.
+- **Singleton** — one `ElevatorController` coordinates the fleet.
+
+## 7. Trade-offs and alternatives
+
+- **FCFS vs SCAN/LOOK.** FCFS is trivial but causes "yo-yo" thrashing and high average wait. SCAN sweeps to the building end before reversing; **LOOK** (shown) reverses as soon as no stops remain ahead, which is strictly better — it is what real elevators approximate.
+- **Per-car set vs global queue.** A `TreeSet` of stops per car gives O(log n) insert and clean directional draining. A single global queue is simpler but loses per-car locality and complicates multi-car dispatch.
+- **State enum vs State classes.** An enum is concise for an interview; full State classes (each implementing `step()`) shine when transition logic grows (door faults, maintenance, fire mode).
+- **Starvation.** Pure nearest-car can starve a far floor under load; production systems add aging/priority. Mention this even if you do not code it.
+
+## 8. Common follow-up questions
+
+- **Multiple cars** — the controller already dispatches via strategy; nearest-car or "least-loaded" balances the fleet.
+- **Priority / express elevators** — tag a `Request` with priority, or restrict a car's serviceable floor set (skip-stop express).
+- **Energy optimization** — park idle cars at high-demand floors (lobby in the morning); a strategy can bias dispatch toward minimizing total travel.
+- **Max capacity / weight** — track passenger count or weight on the car; skip hall calls when full and re-dispatch them.
+- **Fire / maintenance mode** — a special state that drops pending stops and overrides scheduling.
+
+## 9. What interviewers are really probing
+
+<ProbeNote>
+That you (1) split **mechanism (State machine on the car)** from **policy (SchedulingStrategy)** instead of hard-coding one algorithm, (2) named SCAN/LOOK and explained why FCFS thrashes, (3) distinguished internal requests from directional hall calls, and (4) flagged **starvation** and **concurrent hall-call assignment** unprompted. Reaching for LOOK and naming the starvation risk is the senior signal.
+</ProbeNote>

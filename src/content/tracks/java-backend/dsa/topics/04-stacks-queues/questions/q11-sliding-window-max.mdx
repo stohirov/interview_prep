@@ -1,0 +1,45 @@
+**Problem.** Given an array `nums` and a window size `k`, return the **maximum of every contiguous window** of size `k` as the window slides left to right. Example: `nums = [1,3,-1,-3,5,3,6,7]`, `k = 3` → `[3,3,5,5,6,7]`.
+
+## Brute force — O(n·k) time
+
+Scan each of the *n − k + 1* windows and take its max in O(k). Simple, but quadratic when *k* is large.
+
+## Heap — O(n log n)
+
+A max-heap of `(value, index)` gives the window max in O(1), but you must lazily evict entries that have slid out of the window, and each push/pop is O(log n). Better, but not optimal.
+
+## Optimal — O(n) with a monotonic deque
+
+Maintain a **deque of indices** whose values are **decreasing** front-to-back. The front always holds the index of the current window's maximum. Two maintenance rules per step:
+
+1. **Expire the front** if it has slid out of the window (`index <= i - k`).
+2. **Pop from the back** every index whose value is `<=` the incoming value — those can never be the max again, because the newer element is at least as large and stays in the window longer.
+
+```java
+int[] maxSlidingWindow(int[] nums, int k) {
+    int n = nums.length;
+    int[] res = new int[n - k + 1];
+    Deque<Integer> dq = new ArrayDeque<>();   // indices, values decreasing
+    for (int i = 0; i < n; i++) {
+        if (!dq.isEmpty() && dq.peekFirst() <= i - k)
+            dq.pollFirst();                   // front fell out of the window
+        while (!dq.isEmpty() && nums[dq.peekLast()] <= nums[i])
+            dq.pollLast();                    // drop dominated smaller values
+        dq.offerLast(i);
+        if (i >= k - 1)
+            res[i - k + 1] = nums[dq.peekFirst()];   // front = window max
+    }
+    return res;
+}
+```
+
+Each index is added and removed from the deque exactly once, so despite the inner `while` the total work is **O(n)**, with O(k) deque space.
+
+<ComplexityTable rows={[
+  {op: "maxSlidingWindow", best: "O(n)", average: "O(n)", worst: "O(n)", note: "each index enters and leaves the deque once"},
+  {op: "space", best: "O(k)", average: "O(k)", worst: "O(k)", note: "deque never exceeds the window size"},
+]} />
+
+<ProbeNote>
+This is the canonical reason a **deque** beats a plain stack or queue: you need to evict from *both* ends — the front when it ages out of the window, the back when a larger element dominates it. Storing **indices** (not values) is what lets you test the front for expiry. Use `<=` on the back-pop so duplicate maxima are handled cleanly, and confirm `ArrayDeque` for O(1) at both ends. The amortized O(n) argument is the headline result.
+</ProbeNote>

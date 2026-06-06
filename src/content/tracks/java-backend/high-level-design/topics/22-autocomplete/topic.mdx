@@ -1,0 +1,20 @@
+**Search autocomplete** (typeahead) is the suggestion dropdown that appears as you type into Google, Amazon, or a code editor. It is a favorite HLD question because it sits at the intersection of a *data-structures* problem (the **trie** — see the DSA tries topic) and a *systems* problem (serving top-K suggestions to 100K users/second under a hard 100 ms latency budget). The trick is that the read path and the write path are almost completely separate systems.
+
+## The shape of the problem
+
+Every keystroke is a query: given a **prefix**, return the **top-K most likely completions**, ranked by popularity (and maybe personalization). This is overwhelmingly **read-heavy and latency-critical** — it fires on *every character*. The data structure of choice is a **trie** whose nodes cache their own top-K completions so a lookup is "walk to the prefix node, read the precomputed list." The suggestions themselves come from an **offline pipeline** that aggregates query logs and rebuilds the trie periodically — the serving layer never computes rankings on the hot path.
+
+## What the interviewer is probing, by style
+
+- **FAANG** — go deep on the trie (and *why* you cache top-K at each node), the offline aggregation pipeline that rebuilds it from query logs, sharding the trie by prefix, and how you hit p99 < 100 ms at 100K QPS. Expect "how do new trends appear in suggestions?"
+- **EU / remote contracting** — pragmatism: "how fresh do suggestions need to be?" Often a daily/hourly trie rebuild plus aggressive caching is the right, cheap answer. Justify the read/write split.
+- **Regional (EPAM / Uzum)** — a clean service with a trie (or even a prefix-indexed table for smaller scale), a sensible ranking scheme, and a defensible diagram. Show you understand precomputation.
+
+## The key decisions
+
+1. **Data structure** — a **trie** with **top-K cached per node** (see the DSA tries topic for the structure and its space cost). This makes the query O(prefix length), not O(matches).
+2. **Ranking** — sort candidates by **popularity** (query frequency), with optional **personalization** and recency/trend boosting. Where is this computed — offline or online?
+3. **The offline update pipeline** — aggregate query logs → compute frequencies → rebuild the trie with fresh top-K lists → swap it into the serving layer. Freshness vs cost lives here.
+4. **Serving & caching** — shard the trie by prefix, cache hot prefixes, and keep the whole hot path in memory to meet the latency SLA.
+
+The worked solution applies the full 11-section structure and shows all three style angles where they diverge.

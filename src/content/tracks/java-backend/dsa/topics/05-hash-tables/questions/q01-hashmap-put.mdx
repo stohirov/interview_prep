@@ -1,0 +1,43 @@
+`HashMap.put(key, value)` is the question interviewers use to see whether you actually understand the data structure or just call it. Here is the full path through the JDK 8+ implementation.
+
+## Step 1 — spread the hash
+
+```java
+static final int hash(Object key) {
+    int h;
+    return (key == null) ? 0 : (h = key.hashCode()) ^ (h >>> 16);
+}
+```
+
+`key.hashCode()` can be a weak distribution that varies only in its high bits. Because the bucket index uses a low-bit mask, those high bits would otherwise never influence which bucket you land in. XOR-ing the top 16 bits down (`h ^ (h >>> 16)`) mixes high entropy into the low positions cheaply — a one-instruction defense against bad `hashCode()`s. A `null` key always hashes to `0` and lives in bucket 0.
+
+## Step 2 — lazy table allocation
+
+The backing `Node[] table` is **not** allocated in the constructor. The first `put` triggers `resize()`, which allocates the initial table (default capacity 16). This keeps empty maps cheap.
+
+## Step 3 — pick the bucket
+
+```java
+int i = (n - 1) & hash;   // n is the table length, always a power of two
+```
+
+Because capacity is a power of two, `(n - 1) & hash` is equivalent to `hash % n` but far faster — pure bitmasking, no division.
+
+## Step 4 — place or chain
+
+- Empty bucket → drop a new `Node` there.
+- Occupied → walk the bucket. If a node's hash matches **and** `equals()` is true, overwrite its value and return the old one. Otherwise append a new node to the chain.
+
+## Step 5 — treeify
+
+If appending pushes a bucket to **8 nodes** (`TREEIFY_THRESHOLD`) *and* the table capacity is **≥ 64** (`MIN_TREEIFY_CAPACITY`), that bucket converts from a linked list to a **red-black tree**, making its worst case O(log k) instead of O(k). If capacity is below 64, the map resizes instead of treeifying — short tables are better fixed by spreading entries.
+
+## Step 6 — resize check
+
+After insertion, if `++size > capacity * loadFactor` (default `0.75`), the table **doubles** and every entry is rehashed into the larger table.
+
+<Callout kind="tip" title="Why 0.75 and power-of-two capacity">
+0.75 is the empirical sweet spot between space waste and collision rate. Power-of-two capacity is what makes the `(n-1) & hash` masking valid — it is also why a custom initial capacity is silently rounded up to the next power of two.
+</Callout>
+
+<ProbeNote>They want the four numbers — load factor 0.75, treeify at 8, min-treeify capacity 64, capacity doubles — and the *reason* for the high-bit spread. A common follow-up: "what if `hashCode` is constant?" Answer: every key chains into bucket 0, which treeifies once capacity ≥ 64, so lookups are O(log n) rather than O(n).</ProbeNote>

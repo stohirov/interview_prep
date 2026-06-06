@@ -1,0 +1,28 @@
+**Problem.** InsertionSort is O(n²) — so when is it actually the *optimal* choice?
+
+## What InsertionSort does
+
+It grows a sorted prefix one element at a time, shifting each new element left into place. The number of shifts equals the number of **inversions** (out-of-order pairs) in the input — which is the key to when it shines.
+
+```java
+void insertionSort(int[] a) {
+    for (int i = 1; i < a.length; i++) {
+        int key = a[i], j = i - 1;
+        while (j >= 0 && a[j] > key) { a[j + 1] = a[j]; j--; }
+        a[j + 1] = key;
+    }
+}
+```
+
+## When it wins
+
+- **Small arrays.** For n below ~16–64, its tiny constant factor and zero setup beat the recursion/allocation overhead of MergeSort or Quicksort. This is exactly why production sorts (dual-pivot Quicksort, Timsort) **cut over to insertion sort** for small subarrays.
+- **Nearly-sorted data.** If the array has `d` inversions, InsertionSort runs in **O(n + d)** — effectively O(n) when `d` is small. On already-sorted input it's a single O(n) pass that does no shifts. This adaptivity is why Timsort uses **binary insertion sort** to extend short runs.
+- **Online / streaming.** It can sort as elements arrive — insert each new item into the already-sorted prefix — without seeing the whole input first. MergeSort and Quicksort can't.
+- **Stable and in-place.** It preserves equal elements' order and uses O(1) extra space, so it never breaks a multi-key sort.
+
+<Callout kind="tip" title="The mental model">
+InsertionSort cost ≈ number of inversions. Few inversions (small or nearly-sorted) ⇒ near-linear and unbeatable. Many inversions on large n ⇒ the O(n²) penalty dominates and you switch to an O(n log n) sort.
+</Callout>
+
+<ProbeNote>Don't say "never use it." Say: optimal for small n (which is why every library sort falls back to it), for nearly-sorted data where it's adaptive O(n + inversions), and for online insertion. The senior insight is that it's a *component* of Quicksort and Timsort, not a standalone competitor.</ProbeNote>

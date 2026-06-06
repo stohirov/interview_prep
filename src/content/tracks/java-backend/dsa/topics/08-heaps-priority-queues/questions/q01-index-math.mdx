@@ -1,0 +1,29 @@
+A binary heap is a **complete** tree, so it lives in a flat array and the parent/child links are pure arithmetic — no node objects, no pointers. For a node at index `i` (zero-based):
+
+```java
+int parent(int i) { return (i - 1) / 2; }
+int left(int i)   { return 2 * i + 1; }
+int right(int i)  { return 2 * i + 2; }
+```
+
+## Why these formulas
+
+Level `d` of a complete tree holds `2^d` nodes laid out contiguously. Walking left-to-right, top-to-bottom, the children of node `i` always land at `2i + 1` and `2i + 2`, and the inverse of *either* maps back through `(i - 1) / 2` thanks to integer truncation: `(2i+1 - 1)/2 = i` and `(2i+2 - 1)/2 = i`.
+
+<Diagram caption="Indices for a 6-element heap.">{`         0
+        / \\
+       1   2
+      / \\  / \\
+     3  4 5
+     
+ parent(4) = (4-1)/2 = 1
+ left(1)   = 2*1+1   = 3
+ right(1)  = 2*1+2   = 4`}</Diagram>
+
+## Practical details
+
+- **Bounds:** index `i` is internal (has at least one child) iff `2i + 1 < n`. The last internal node is `(n / 2) - 1` — useful for build-heap and for the heapify loop.
+- **One-based variant:** some textbooks store from index 1, giving the cleaner `parent = i/2`, `left = 2i`, `right = 2i + 1`. Java's `PriorityQueue` uses the zero-based form above.
+- **No gaps:** completeness is what guarantees the array is dense. The moment you allow holes, the index math breaks — which is why insert appends at the end and delete fills from the end.
+
+<ProbeNote>Interviewers want the formulas instantly and the *reason* — completeness means a dense array, so links become arithmetic. Bonus points for naming the last-internal-node index `n/2 - 1` (you'll need it for build-heap) and for noting the off-by-one difference between zero- and one-based layouts.</ProbeNote>

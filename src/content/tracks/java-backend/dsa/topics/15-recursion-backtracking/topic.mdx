@@ -1,0 +1,34 @@
+**Recursion** is a function defined in terms of itself: it solves a problem by reducing it to smaller instances of the same problem until it hits a case small enough to answer directly. **Backtracking** is recursion that builds a candidate solution incrementally and abandons a partial candidate ("backtracks") the moment it cannot possibly lead to a valid one. Together they power most combinatorial search problems in interviews.
+
+## Base case and recursive case
+
+Every correct recursion has two parts: a **base case** that returns without recursing (the stopping condition), and a **recursive case** that calls itself on a strictly smaller input and makes progress toward the base case. Omit the base case, or fail to shrink the input, and you recurse forever — in Java that surfaces as a `StackOverflowError`, not a hang.
+
+## The call stack
+
+Each recursive call pushes a **stack frame** holding that invocation's parameters, locals, and return address. The frames unwind in LIFO order as calls return. This is why recursion depth — not total call count — bounds memory: depth `d` costs O(d) stack space. A recursion `n` levels deep on a large `n` will blow the default ~512 KB–1 MB thread stack long before it runs out of heap.
+
+<Callout kind="warn" title="Java does not optimize tail recursion">
+A **tail call** is a recursive call that is the last action in a method, so its frame could be reused instead of stacked. Many languages (Scheme, Scala via `@tailrec`) eliminate it into a loop. The JVM does **not**: it keeps full frames for accurate stack traces and security checks. So in Java even tail-recursive code costs O(depth) stack and can overflow — convert deep recursion to an explicit loop or an explicit stack.
+</Callout>
+
+## The backtracking template: choose, explore, unchoose
+
+Backtracking is a depth-first walk of a decision tree. At each node you **choose** an option, **explore** by recursing, then **unchoose** to restore state before trying the next option:
+
+<Diagram caption="The choose / explore / unchoose loop mutates one shared path and undoes each choice on the way back up.">{`void backtrack(State path, Choices remaining):
+    if isComplete(path):          # base case
+        record(path); return
+    for choice in remaining:
+        if !isValid(choice): continue   # pruning
+        path.add(choice)          # choose
+        backtrack(path, next)     # explore
+        path.remove(choice)       # unchoose (undo!)`}</Diagram>
+
+The **unchoose** step is what makes one mutable `path` buffer serve the whole tree instead of allocating a fresh copy per node — but forgetting it is the single most common backtracking bug.
+
+## Pruning
+
+Naive backtracking explores the full tree; **pruning** cuts branches that cannot yield a valid or optimal answer (the `isValid` check above, or a bound test). Good pruning is the difference between a solution that passes and one that times out — N-Queens with diagonal pruning explores a tiny fraction of `n!` placements.
+
+The questions below — generate parentheses, permutations, subsets, N-Queens, Sudoku — are all the same template with different choices, completion tests, and prune conditions.

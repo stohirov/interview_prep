@@ -1,0 +1,47 @@
+**Problem.** Every element in `nums` appears **exactly three times except one**, which appears once. Find that single element in O(n) time and O(1) space.
+
+## Why plain XOR fails here
+
+XOR cancels values that appear an *even* number of times. With each value appearing three times (odd), XOR-ing the array leaves a meaningless mix — the Single Number I trick doesn't transfer.
+
+## Approach 1 — count bits per position, O(32n) ≈ O(n)
+
+For each of the 32 bit positions, sum that bit across all numbers. Every triple contributes a multiple of 3 to its set positions; the lone number adds an extra 1. So `sum % 3` at each position reconstructs the answer's bits:
+
+```java
+int singleNumber(int[] nums) {
+    int result = 0;
+    for (int i = 0; i < 32; i++) {
+        int bitSum = 0;
+        for (int n : nums) bitSum += (n >> i) & 1;
+        if (bitSum % 3 != 0) result |= (1 << i);   // this bit belongs to the unique number
+    }
+    return result;
+}
+```
+
+This generalizes: for "every element appears `k` times except one," use `sum % k`. Clear and easy to defend.
+
+## Approach 2 — two-bit state machine, O(n) time, O(1) space
+
+Track each bit's count *modulo 3* using two accumulator integers, `ones` and `twos`, that together encode the per-bit state (00 → 01 → 10 → 00). A bit settles into `ones` only after appearing a number of times ≡ 1 (mod 3):
+
+```java
+int singleNumber(int[] nums) {
+    int ones = 0, twos = 0;
+    for (int n : nums) {
+        ones = (ones ^ n) & ~twos;   // add n to "seen once" set, unless already seen twice
+        twos = (twos ^ n) & ~ones;   // add n to "seen twice" set, unless now seen once
+    }
+    return ones;                     // bits that appeared exactly once (mod 3)
+}
+```
+
+After processing, `ones` holds the unique number. This is the slick O(1)-pass solution, but it's tricky to derive live — most candidates present the bit-counting version and *mention* the state machine.
+
+<ComplexityTable rows={[
+  {op: "Bit-count mod 3", best: "O(n)", average: "O(n)", worst: "O(n)", note: "32 passes; O(1) space, generalizes to any k"},
+  {op: "ones/twos state machine", best: "O(n)", average: "O(n)", worst: "O(n)", note: "single pass, O(1) space"},
+]} />
+
+<ProbeNote>Lead with the bit-counting `sum % 3` solution — it's intuitive, defensible, and generalizes to "appears k times." Then mention the `ones/twos` finite-state-machine trick as the elegant single-pass version. The key insight to verbalize: XOR fails because three is odd, so you count contributions per bit modulo 3 instead.</ProbeNote>

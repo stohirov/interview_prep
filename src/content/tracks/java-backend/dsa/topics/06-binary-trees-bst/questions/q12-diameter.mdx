@@ -1,0 +1,56 @@
+**Problem.** Given a binary tree, return its **diameter** — the length (in edges) of the longest path between *any* two nodes. The path need not pass through the root.
+
+## The key observation
+
+The longest path that *bends* at some node `x` is `height(x.left) + height(x.right)` edges — go down the deepest on each side and meet at `x`. The diameter is the **maximum of that quantity over every node**. So if we know each node's left and right subtree heights, the answer falls out.
+
+<Diagram caption="The diameter bends at the node maximizing left-height + right-height">{`
+          1
+         / \\
+        2   3
+       / \\
+      4   5
+
+longest path: 4 - 2 - 5  (2 edges)  OR  4 - 2 - 1 - 3 (3 edges)
+diameter = 3, bending at node 1: height(left=2)=2 + height(right=3)=1
+`}</Diagram>
+
+## Brute force — O(n²)
+
+For each node compute left and right heights and track the max sum. But computing height at every node re-walks subtrees repeatedly — O(n) nodes × O(n) height = **O(n²)**, the same redundancy seen in the balanced-tree check.
+
+## Optimal — single post-order pass, O(n) time, O(h) space
+
+Fuse the two jobs: have one recursion **return the height** while, as a side effect, **updating a running max** with the through-this-node path length. Each node is touched once.
+
+```java
+private int best = 0;
+
+int diameterOfBinaryTree(TreeNode root) {
+    best = 0;
+    height(root);
+    return best;
+}
+
+// returns height (in edges) of the subtree, updating `best` along the way
+private int height(TreeNode n) {
+    if (n == null) return -1;                 // empty subtree: -1 edges
+
+    int left  = height(n.left);
+    int right = height(n.right);
+
+    // longest path bending at n = edges down-left + edges down-right
+    best = Math.max(best, (left + 1) + (right + 1));
+
+    return 1 + Math.max(left, right);         // height of this subtree
+}
+```
+
+Using `-1` for the empty-subtree height makes the edge arithmetic clean: a leaf returns `1 + max(-1, -1) = 0` edges, and a path through it contributes `(left+1)+(right+1) = 0`. Visiting each node once gives **O(n) time**, **O(h)** stack.
+
+<ComplexityTable rows={[
+  {op: "Brute (height per node)", best: "O(n)", average: "O(n log n)", worst: "O(n²)", note: "recomputes heights"},
+  {op: "Post-order single pass", best: "O(n)", average: "O(n)", worst: "O(n)", note: "height returned, max as side effect"},
+]} />
+
+<ProbeNote>This is the same "return one value up while updating a global max" pattern as Maximum Path Sum and the balanced-tree check — recognizing the family is the senior signal. Be precise about the unit: diameter is counted in **edges** here (a single node has diameter 0); if the interviewer counts *nodes*, every figure shifts by one. The optimal path may skip the root entirely, which is why the running max, not a root-only computation, is required.</ProbeNote>

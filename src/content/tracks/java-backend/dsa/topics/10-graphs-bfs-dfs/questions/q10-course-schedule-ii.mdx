@@ -1,0 +1,42 @@
+**Problem.** Same setup as Course Schedule — `numCourses` and `prerequisites[i] = [a, b]` meaning `b` before `a` — but now return **a valid ordering** of all courses, or an **empty array** if none exists (a cycle). This is the **topological sort** version: produce the order, not just a yes/no.
+
+## Approach — Kahn's algorithm, recording the dequeue order, O(V + E)
+
+Identical machinery to Course Schedule, but each dequeued course is appended to the output. If the output ends up shorter than `numCourses`, a cycle blocked some courses, so return empty.
+
+```java
+int[] findOrder(int numCourses, int[][] prerequisites) {
+    List<List<Integer>> g = new ArrayList<>();
+    for (int i = 0; i < numCourses; i++) g.add(new ArrayList<>());
+    int[] indeg = new int[numCourses];
+    for (int[] p : prerequisites) {        // p = [course, prereq]
+        g.get(p[1]).add(p[0]);             // prereq -> course
+        indeg[p[0]]++;
+    }
+
+    Queue<Integer> q = new ArrayDeque<>();
+    for (int i = 0; i < numCourses; i++) if (indeg[i] == 0) q.add(i);
+
+    int[] order = new int[numCourses];
+    int idx = 0;
+    while (!q.isEmpty()) {
+        int u = q.poll();
+        order[idx++] = u;                  // emit in topological order
+        for (int v : g.get(u))
+            if (--indeg[v] == 0) q.add(v);
+    }
+    return idx == numCourses ? order : new int[0];   // short => cycle => no order
+}
+```
+
+Every vertex is enqueued and dequeued once; every edge decrements an indegree once — **O(V + E)** time, **O(V + E)** space.
+
+## DFS alternative — reverse postorder
+
+Run DFS and push each course onto a stack as it **finishes**; the reversed finish order is a valid topological sort. Use white/gray/black coloring so a back edge (cycle) makes you bail with an empty result. The DFS output is one valid order; Kahn's is another — both are correct since topological orders aren't unique.
+
+<Callout kind="tip" title="Lexicographically smallest order">
+If asked for the smallest-in-lexicographic-order valid sequence, swap the plain `ArrayDeque` queue for a `PriorityQueue<Integer>`. Among all currently-ready (indegree-0) courses, you then always pick the smallest label. The complexity becomes O(E + V log V).
+</Callout>
+
+<ProbeNote>This is Course Schedule plus "record the order." Note that valid topological orders are not unique, so any correct one passes — don't over-index on matching a specific expected array. Remember the empty-array contract on a cycle: detect it via `idx &lt; numCourses`. The PriorityQueue tweak for the lexicographically smallest order is a frequent senior follow-up.</ProbeNote>

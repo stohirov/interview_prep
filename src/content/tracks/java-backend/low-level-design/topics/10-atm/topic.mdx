@@ -1,0 +1,14 @@
+The **ATM** is a favorite senior LLD problem because it is, at heart, a **state machine wearing a banking domain**. A physical kiosk moves through a strict sequence — idle, card inserted, PIN authenticated, transaction selected, dispensing — and illegal transitions (dispensing cash before authentication) must be impossible by construction. On top of that sits real money, so interviewers expect you to talk about atomicity, audit trails, and what happens when the network to the bank drops mid-withdrawal.
+
+## What the interviewer is testing
+
+- Do you reach for the **State pattern** to encode the kiosk lifecycle, instead of a tangle of boolean flags and `if (authenticated && hasCard && ...)` checks?
+- Do you separate the **ATM hardware** (card reader, cash dispenser, keypad) from the **BankService** (accounts, balances, authorization)? The ATM should never own the ledger.
+- Can you model each operation — withdraw, deposit, transfer, balance inquiry — as a **Command** so it can be logged, replayed, and reversed for the audit trail?
+- Do you handle the **denomination problem**: dispensing $285 from bins of $100/$50/$20/$10, choosing bills greedily but failing cleanly when a bin is empty?
+
+## How to frame it
+
+Clarify scope first: single ATM talking to one BankService (multi-bank is a follow-up), card + PIN auth, the four transaction types, cash dispensing with multiple denomination bins, and a transaction log. State non-functional goals out loud — the kiosk is single-user at a time (no spot-style concurrency), but **money operations must be atomic** and **every action must be auditable**.
+
+Then drive the canonical flow: **insert card → enter PIN → BankService authenticates → select transaction → State transitions to a transaction state → Command executes against BankService → CashDispenser fulfills via a Chain of Responsibility over denomination bins → log the Command → eject card → back to idle.** Highlight where things can fail — a withdrawal that debits the account but cannot dispense exact change must roll back. The worked solution below follows the full 9-section structure; treat the State + Command + Chain combination as the reusable pattern here.

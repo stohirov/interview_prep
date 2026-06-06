@@ -1,0 +1,41 @@
+**Problem.** Given an array of `k` sorted linked lists, merge them into one sorted list and return its head. Let `N` be the total number of nodes.
+
+## Brute force — collect and sort, O(N log N)
+
+Dump every value into an array, sort it, rebuild a list. Correct, but it throws away the fact that each input is *already sorted* and ignores the linked structure.
+
+## Optimal (min-heap) — O(N log k) time, O(k) space
+
+At any moment the global minimum among all lists is one of the `k` list heads. A **min-heap of the current heads** surfaces it in O(log k): poll the smallest head, append it to the result, then push that node's successor. The heap never exceeds `k` entries.
+
+```java
+ListNode mergeKLists(ListNode[] lists) {
+    PriorityQueue<ListNode> heap =
+        new PriorityQueue<>(Comparator.comparingInt(n -> n.val));
+    for (ListNode head : lists)
+        if (head != null) heap.offer(head);   // seed with each non-null head
+
+    ListNode dummy = new ListNode(0), tail = dummy;
+    while (!heap.isEmpty()) {
+        ListNode min = heap.poll();            // smallest head across all lists
+        tail.next = min;
+        tail = min;
+        if (min.next != null) heap.offer(min.next);  // pull the next from that list
+    }
+    return dummy.next;
+}
+```
+
+Each of the `N` nodes is offered and polled exactly once at O(log k), giving **O(N log k)**. The dummy head removes the special case for the first node.
+
+## Alternative — divide & conquer, same O(N log k)
+
+Pairwise-merge the lists in a tournament: merge `k/2` pairs, then `k/4`, and so on through `log k` rounds, each touching all `N` nodes. Same asymptotic cost, O(1) extra space beyond recursion, and no comparator — useful to mention as the heap-free option.
+
+<ComplexityTable rows={[
+  {op: "Collect + sort", best: "O(N log N)", average: "O(N log N)", worst: "O(N log N)", note: "ignores existing sortedness; O(N) space"},
+  {op: "Min-heap of heads", best: "O(N log k)", average: "O(N log k)", worst: "O(N log k)", note: "O(k) heap"},
+  {op: "Divide & conquer", best: "O(N log k)", average: "O(N log k)", worst: "O(N log k)", note: "no comparator; O(log k) stack"},
+]} />
+
+<ProbeNote>The key realization: the next output is always one of the `k` current heads, so a size-`k` heap beats the O(N log N) collect-and-sort. Seed only non-null heads and guard `min.next != null` before re-offering — skipping that check NPEs at the end of a list. Mention divide-and-conquer as the equal-complexity, heap-free alternative.</ProbeNote>

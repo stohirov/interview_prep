@@ -1,0 +1,46 @@
+**Problem.** Given a sorted array and a target, return `[first, last]` — the first and last indices of the target — or `[-1, -1]` if absent. Must be O(log n).
+
+## Brute force — O(n)
+
+Binary search to any match, then walk left and right to the run's ends. But with all-equal input (`[7,7,7,…]`) the linear walk is O(n), defeating the requirement. Two boundary binary searches keep it O(log n) regardless.
+
+## Optimal — two boundary searches, O(log n)
+
+Run binary search twice with a tweak: when `nums[mid] == target`, **record the index and keep searching** the appropriate half instead of returning. Searching left finds the first occurrence; searching right finds the last.
+
+```java
+int[] searchRange(int[] nums, int target) {
+    int first = findBound(nums, target, true);
+    int last  = findBound(nums, target, false);
+    return new int[]{first, last};
+}
+
+private int findBound(int[] nums, int target, boolean findFirst) {
+    int lo = 0, hi = nums.length - 1, result = -1;
+    while (lo <= hi) {
+        int mid = lo + (hi - lo) / 2;
+        if (nums[mid] == target) {
+            result = mid;                      // candidate -> remember it
+            if (findFirst) hi = mid - 1;       // keep looking LEFT for an earlier match
+            else           lo = mid + 1;       // keep looking RIGHT for a later match
+        } else if (nums[mid] < target) {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    return result;
+}
+```
+
+**O(log n)** time (two halving searches), **O(1)** space.
+
+## Why "don't return early" is the whole trick
+
+On a match, a naive search stops — but the first/last occurrence could be further left/right. Storing `result` and continuing toward that side converges on the boundary. If the target is absent, `result` stays `-1` for both calls, naturally yielding `[-1, -1]`.
+
+<Callout kind="tip" title="Equivalent framing">
+This is exactly `lowerBound(target)` and `upperBound(target) - 1` from the boundary-handling theory. Whether you parameterize one helper with a `findFirst` flag or write two bound functions is taste — both are O(log n) and both hinge on not stopping at the first equal element.
+</Callout>
+
+<ProbeNote>The interviewer is testing whether you avoid the O(n) linear-walk trap on all-equal input. Emphasize "record and keep narrowing" and that the only difference between the two searches is which half you continue into on a match. The absent-target case falling out as `[-1, -1]` for free is a clean detail to point out.</ProbeNote>

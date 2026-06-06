@@ -1,0 +1,142 @@
+## 1. Functional requirements
+
+- Multiple users **edit the same document concurrently**; each sees others' changes in near-real-time.
+- **Convergence:** all clients and the server end on identical text regardless of op arrival order.
+- **Presence & cursors:** see who is in the doc and where their caret/selection is.
+- **Version history:** view, diff, and restore previous versions; undo/redo.
+- **Offline editing:** keep editing while disconnected; reconcile on reconnect with no lost edits.
+- Sharing/permissions (view/comment/edit) and rich-text formatting (out of core scope but acknowledged).
+
+## 2. Non-functional requirements
+
+- **Scale:** 100M docs; **1M concurrent editors**; a hot doc may have ~50–100 simultaneous editors.
+- **Latency:** local echo is instant; a remote keystroke appears for collaborators in **p99 < 200 ms**.
+- **Consistency:** **strong eventual consistency** — replicas may differ transiently but always converge.
+- **Durability:** no acknowledged edit is ever lost, even across server crashes.
+- **Availability:** 99.9%+; reconnection must be seamless and lossless.
+
+## 3. Capacity estimation
+
+- Edit rate: assume an active editor emits **~5 ops/s** (debounced keystrokes). 1M concurrent × a fraction actively typing (~10%) = 100K editors × 5 = **~500K ops/s** ingested.
+- Fan-out: each op is relayed to the other editors of its doc. Avg co-editors per active doc ~3 → **~1.5M outbound op-messages/s**; hot docs (100 editors) dominate fan-out and need careful relay.
+- Connections: 1M WebSockets; at ~10K–50K sockets per session server → **~20–100 session servers**.
+- Storage: op log at ~500K ops/s × 100 B ≈ **50 MB/s ≈ ~4 TB/day** raw → compact into periodic snapshots + recent op tail; cold ops to object storage. 100M docs × ~50 KB snapshot ≈ **~5 TB** of current state.
+
+## 4. High-level architecture
+
+<Mermaid caption="Collaborative editor — clients hold a WebSocket to a doc-sharded session server that orders and relays ops, persisting an op log plus periodic snapshots">{`graph LR
+    C1[Client A - editor] -->|WebSocket ops| GW[Realtime Gateway]
+    C2[Client B - editor] -->|WebSocket ops| GW
+    GW --> SS[Session server - owns doc shard]
+    SS -->|transform and order| SS
+    SS -->|append| OL[(Op log - Kafka / WAL)]
+    SS -->|snapshot| DOC[(Doc store - snapshots)]
+    OL --> HIST[Version history service]
+    SS -->|pub/sub fan-out| PS[(Redis / pub-sub)]
+    PS --> GW
+    GW -->|presence and cursors| PRES[Presence service - Redis]`}</Mermaid>
+
+All editors of a given document are routed to the **same session server** (consistent-hash on docId) so a single authority orders that doc's ops.
+
+## 5. API design
+
+```
+# Open a doc: REST handshake then upgrade to WebSocket
+GET  /api/v1/docs/{docId}            -> latest snapshot + baseVersion + access token
+WS   /ws/docs/{docId}
+
+# WebSocket message envelopes (JSON):
+-> { "type":"op",       "rev": 42, "op": { "insert":"hello", "at": 17 } }
+<- { "type":"ack",      "rev": 43 }                         # server-assigned revision
+<- { "type":"op",       "rev": 43, "op": {...}, "by":"userB" }  # remote op (already transformed)
+<-> { "type":"cursor",  "userId":"B", "selection": [12, 12] }
+<- { "type":"presence", "users": [ {"id":"B","name":"Bekzod","color":"#e11"} ] }
+
+GET  /api/v1/docs/{docId}/history     -> list of versions / named snapshots
+POST /api/v1/docs/{docId}/restore     -> { "version": 1011 }
+```
+
+The client sends ops tagged with the **base revision** it was applied to; the server transforms against any ops it didn't yet know about, assigns the next revision, acks the sender, and broadcasts the transformed op.
+
+## 6. Data model
+
+```sql
+CREATE TABLE document (
+  doc_id        UUID PRIMARY KEY,
+  title         TEXT,
+  current_rev   BIGINT NOT NULL,       -- monotonic revision counter
+  snapshot      BYTEA,                 -- latest compacted state
+  snapshot_rev  BIGINT NOT NULL,
+  updated_at    TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE doc_op (                  -- the durable op log (source of truth)
+  doc_id     UUID NOT NULL,
+  rev        BIGINT NOT NULL,          -- server-assigned global order for this doc
+  user_id    UUID NOT NULL,
+  op         JSONB NOT NULL,           -- insert/delete/format with position
+  created_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (doc_id, rev)
+);
+-- doc_op is partitioned by doc_id; compacted into `document.snapshot` periodically
+-- and ops older than the snapshot are archived to object storage.
+
+CREATE TABLE doc_permission (
+  doc_id  UUID, user_id UUID, role TEXT,   -- viewer | commenter | editor
+  PRIMARY KEY (doc_id, user_id)
+);
+```
+
+## 7. Detailed component design — OT vs CRDT
+
+This comparison is the crux.
+
+**Operational Transformation (OT)** — what Google Docs uses. The document has a single authoritative op order on the server. When a client op arrives based on an older revision, the server **transforms** it against the concurrent ops it missed so its intent is preserved: e.g. `transform(insert@5, insert@3)` shifts the position to `insert@6`. Properties: a correct transform guarantees convergence (TP1/TP2 transform properties). Strengths: compact ops, no per-character metadata, excellent for a central server. Weaknesses: the transform functions are notoriously hard to get right for rich text, and OT effectively *requires* a central ordering authority.
+
+**CRDTs (e.g. RGA / Logoot / Yjs/Automerge)** — every inserted character gets a **globally unique, densely-orderable position identifier** (and deletes leave **tombstones**). Because operations commute, replicas converge with **no central transform and no required server**; great for peer-to-peer and offline-first. Weaknesses: per-character metadata bloats memory and the op log, tombstones accumulate (need GC), and naive CRDTs can produce interleaving anomalies under heavy concurrent editing of the same spot.
+
+| Axis | OT | CRDT |
+| --- | --- | --- |
+| Coordination | Needs central order authority | Converges without coordination |
+| Op size / overhead | Small ops | Per-char IDs + tombstones |
+| Offline / P2P | Awkward | Natural |
+| Implementation risk | Transform functions hard | Position-ID model hard, GC needed |
+| Used by | Google Docs, ShareDB | Yjs, Automerge, Figma-style tools |
+
+**Pragmatic answer:** a central session server with **OT** (or a mature CRDT lib like Yjs) — pick OT if you already have a single doc-owning server (we do), CRDT if offline/P2P is a first-class requirement.
+
+**Real-time sync & presence.** Each doc is owned by one session server; clients hold a WebSocket through a gateway. The server appends each accepted op to the durable op log (the source of truth), updates the in-memory doc, and fans out the transformed op via pub/sub to the other connected clients. **Presence and cursors** are ephemeral, high-churn, and lossy-tolerant → kept in Redis with short TTLs, broadcast on a separate channel, never written to the op log.
+
+**Offline editing & reconciliation.** The client buffers ops locally against its last-known revision. On reconnect it sends the buffered ops; the server transforms each against everything that landed while the client was away, applies them in order, and streams back the ops the client missed. With CRDTs this is even simpler — the client just merges the two op sets, which commute.
+
+**Version history.** The op log *is* the history: any revision is reconstructable from the nearest snapshot + replaying ops. Named versions/restore points are snapshots; undo is the inverse op transformed against subsequent ops.
+
+## 8. Scaling considerations
+
+- **Shard by document.** Consistent-hash docId → session server so one authority orders each doc; this also caps the blast radius of a hot doc.
+- **Connection tier separation.** Stateless WebSocket gateways terminate the 1M sockets; stateful session servers hold doc state. Gateways relay via pub/sub so a client can connect to *any* gateway.
+- **Fan-out.** For a 100-editor doc, the session server is the fan-out point; offload presence/cursor chatter to Redis pub/sub so the op path stays lean.
+- **Snapshot + compaction** bounds memory and recovery time; replay only the op tail after the latest snapshot on failover.
+- **Backpressure / debounce** keystrokes client-side (~50–100 ms) to cut op volume by an order of magnitude.
+
+## 9. Trade-offs and alternatives
+
+- **OT vs CRDT** — central-authority simplicity and compact ops (OT) vs coordination-free offline/P2P convergence at the cost of metadata and tombstone GC (CRDT). State the choice and *why* for the given requirements.
+- **Build vs buy.** Yjs/Automerge (CRDT) or ShareDB (OT) are battle-tested; most products should integrate one, not reinvent the transform layer. A strong EU/contracting answer says exactly this.
+- **WebSocket vs SSE/long-poll.** Editing is bidirectional and chatty → WebSocket; SSE only fits one-way fan-out.
+- **Locking / single-writer** — trivially correct but unusable for per-keystroke collaboration; only acceptable for coarse, section-level editing.
+
+## 10. Common follow-up questions
+
+- "Walk me through two concurrent inserts at the same position." → show the transform (OT) or the deterministic position-ID tiebreak (CRDT).
+- "How does undo work with other people editing?" → invert the op, transform it past intervening ops; per-user undo stacks.
+- "A client was offline for an hour, then reconnects." → buffered ops transformed against the server tail; server streams missed ops back; converge.
+- "How do you store history cheaply?" → op log + periodic snapshots; archive cold ops to object storage; reconstruct on demand.
+- "What breaks at 1M connections?" → connection-tier scaling, doc sharding, hot-doc fan-out; presence offloaded to Redis.
+- "Rich text / formatting?" → ops carry attributes (bold/insert ranges); transform must handle attribute ops too.
+
+## 11. What interviewers are really probing
+
+<ProbeNote>
+**All styles:** that you identified **concurrent conflicting writes** as the core problem and reached for OT or CRDT — not last-write-wins or locking — and can articulate convergence. **FAANG:** depth on the transform function / position-ID model, the OT vs CRDT trade-off, doc sharding, and fan-out to many editors. **EU/contracting:** pragmatism — integrate Yjs/ShareDB, WebSocket relay, and ship it; know when not to build the algorithm yourself. **Regional:** a clean WebSocket service, doc/op/version schema, presence, and a defensible diagram. The classic failure mode is proposing a per-document lock or last-write-wins and only realising mid-interview that it loses keystrokes under real concurrency.
+</ProbeNote>

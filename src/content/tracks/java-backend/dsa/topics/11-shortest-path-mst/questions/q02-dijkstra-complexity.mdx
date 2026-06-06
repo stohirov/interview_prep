@@ -1,0 +1,49 @@
+Dijkstra's cost is dominated by two priority-queue operations: **extract-min** (run V times, once per settled vertex) and **decrease-key** (run up to E times, once per relaxed edge). The data structure backing the queue decides the asymptotics.
+
+## Binary heap — O((V + E) log V) ≈ O(E log V)
+
+A binary heap does both `extractMin` and `decreaseKey` in **O(log V)**:
+
+- V extract-mins → **O(V log V)**
+- E decrease-keys → **O(E log V)**
+
+Total **O((V + E) log V)**. On a connected graph E ≥ V − 1, so this simplifies to the figure you quote in interviews: **O(E log V)**.
+
+## Fibonacci heap — O(E + V log V)
+
+A Fibonacci heap supports **decrease-key in amortized O(1)** while keeping extract-min at amortized **O(log V)**:
+
+- V extract-mins → **O(V log V)**
+- E decrease-keys → **O(E)**
+
+Total **O(E + V log V)** — asymptotically optimal for comparison-based Dijkstra, and a clear win on **dense** graphs where E ≈ V², turning an `E log V` term into a cheaper `E`.
+
+<ComplexityTable rows={[
+  {op: "Array / linear scan", best: "O(V²)", average: "O(V²)", worst: "O(V²)", note: "best for dense graphs, no heap"},
+  {op: "Binary heap", best: "O(E log V)", average: "O(E log V)", worst: "O(E log V)", note: "the practical default"},
+  {op: "Fibonacci heap", best: "O(E + V log V)", average: "O(E + V log V)", worst: "O(E + V log V)", note: "optimal; high constants"}
+]} />
+
+## Why nobody uses the Fibonacci heap
+
+Its constant factors and pointer-chasing overhead are large, and it is fiddly to implement correctly. In practice the binary heap (or Java's `PriorityQueue`) wins on real inputs.
+
+Java's `PriorityQueue` has **no decrease-key**. The standard workaround is the **lazy deletion** pattern: push a fresh `(newDist, node)` entry on every relaxation and skip stale pops where `d > dist[node]`. This adds at most E entries, so the heap holds O(E) items and the bound becomes **O(E log E) = O(E log V)** — same class, since log E ≤ 2 log V.
+
+```java
+PriorityQueue<long[]> pq = new PriorityQueue<>((a, b) -> Long.compare(a[0], b[0]));
+pq.add(new long[]{0, src});
+while (!pq.isEmpty()) {
+    long[] top = pq.poll();
+    long d = top[0]; int u = (int) top[1];
+    if (d > dist[u]) continue;                 // stale entry — skip
+    for (int[] e : adj.get(u)) {               // e = {to, weight}
+        long nd = d + e[1];
+        if (nd < dist[e[0]]) { dist[e[0]] = nd; pq.add(new long[]{nd, e[0]}); }
+    }
+}
+```
+
+<ProbeNote>
+Be ready to derive the bound from operation counts (V extract-mins, E decrease-keys), not just recite it. Senior follow-up: "why is Java's PriorityQueue still O(E log V) without decrease-key?" — answer with the lazy-deletion / stale-skip pattern above.
+</ProbeNote>

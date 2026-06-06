@@ -1,0 +1,68 @@
+This is a concrete, repeatable plan for getting interview-ready at High-Level Design. Work it over 3–4 weeks; the goal is not to memorize solutions but to internalize a **method** you can apply to any prompt.
+
+## How many problems, and which ones
+
+Do **8–12 problems deeply**, not 40 shallowly. A balanced set that covers every primitive:
+
+- **Warm-ups (mechanics):** URL shortener, rate limiter, key-value store.
+- **Read-heavy / feed:** Twitter feed, Instagram, autocomplete.
+- **Real-time / stateful:** chat/messaging, ride-sharing, Google Docs.
+- **Throughput / pipelines:** notification service, web crawler, video streaming.
+- **Transactional / money:** payment system, exam-prep platform.
+
+Pick one from each cluster first (covers ~80% of primitives), then add the rest. **Re-do** your two weakest problems a week later from a blank page — repetition under recall is where the learning sticks.
+
+## The reusable "design X" skeleton
+
+Internalize one structure so you never freeze. The full **11-section** layout (used in the worked solutions) collapses into a **4-step** spine you say out loud:
+
+1. **Requirements** — functional + non-functional, and *name the scale numbers*.
+2. **Estimation** — QPS, storage, bandwidth, with visible arithmetic.
+3. **High-level design** — boxes and arrows: clients → LB → services → data stores → queues/CDN.
+4. **Deep-dive + trade-offs** — pick the hardest component, go deep, and state what you traded away.
+
+Memorize the spine, not the answers. Every problem is this skeleton with different organs.
+
+## 60-minute time-boxing
+
+A typical loop is ~50–60 minutes. Allocate deliberately and watch the clock:
+
+- **0–5 min — Requirements.** Clarify scope, lock functional + non-functional, agree on scale. Don't skip this; it frames everything.
+- **5–12 min — Estimation.** QPS, storage, bandwidth. This is where you earn "senior."
+- **12–25 min — High-level design.** Draw the whole system end to end before going deep.
+- **25–48 min — Deep-dive.** Let the interviewer steer; go deep on 1–2 components (the bottleneck).
+- **48–55 min — Wrap-up.** Trade-offs, failure modes, bottlenecks, "what I'd do with more time."
+
+<Callout kind="tip" title="Draw the whole thing first">
+Finish the full high-level diagram before any deep-dive. Candidates who rabbit-hole into one component at minute 10 run out of time and never show the complete system — the single most common way to fail the loop.
+</Callout>
+
+## Handling "I don't know" gracefully
+
+You will hit something you don't know. The senior move is not to bluff — it's to **reason out loud**: "I haven't used X, but the property I need here is Y, so I'd reach for something that gives me Y — perhaps a queue or a CAS operation — and verify the guarantee." Name the *property*, propose a *direction*, and state how you'd *de-risk* it. Bluffing a wrong certainty scores worse than honest, structured reasoning.
+
+## How to signal senior
+
+Three concrete tells separate a senior performance from a junior one:
+
+- **Capacity math, unprompted.** Volunteer the QPS/storage numbers; let them drive the design (e.g., "100:1 read skew, so this is a caching problem").
+- **Trade-offs, not verdicts.** Say "301 is cacheable but loses analytics; 302 is the opposite" instead of declaring a winner. Then choose, with a reason.
+- **Failure modes.** Bring up node death, retries/idempotency, thundering herds, and hot partitions before you're asked.
+
+## Mock practice and resources
+
+Practice *out loud, on a timer, with a human*. Reading is input; interviews are output.
+
+- **Pramp** — free peer mocks; good for reps and getting comfortable talking while drawing.
+- **interviewing.io** — anonymous mocks with real senior/FAANG engineers; the most realistic signal.
+- **hellointerview** — structured HLD walkthroughs and a delivery framework to model your structure on.
+
+Schedule at least 3–4 live mocks before the real loop; the gap between "I know this" and "I can perform this under time pressure" only closes by performing.
+
+## Build a diagram portfolio
+
+Keep a personal file of your **own** diagrams — one per problem, drawn from memory. For each: the box-and-arrow architecture, the capacity numbers, the one deep-dive, and the key trade-off in a sentence. Review it the morning of the interview. Re-drawing from memory (not copying) is the test of whether you actually own the design. This portfolio is also your fastest warm-up before any onsite.
+
+<ProbeNote>
+**What separates senior from mid-level HLD:** a mid-level candidate produces a *correct* design — the right boxes, a workable data flow. A senior candidate produces a *defensible* one: they volunteer the capacity math, they name the bottleneck before being pushed, they articulate trade-offs as trade-offs (and then decide), they design for failure (idempotency, node death, hot partitions, thundering herds), and they manage their own time so the whole system gets drawn. Mid-level answers *what*; senior answers *why this and not that, and what breaks at 100×*. Practice the second one.
+</ProbeNote>

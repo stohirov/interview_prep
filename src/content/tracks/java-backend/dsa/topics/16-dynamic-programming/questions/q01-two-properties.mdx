@@ -1,0 +1,29 @@
+A problem is a DP candidate only when it exhibits **both** of these properties. Miss either one and DP is the wrong tool.
+
+## 1. Overlapping subproblems
+
+The recursive decomposition revisits the **same** subproblem multiple times. The canonical example is Fibonacci: `fib(n) = fib(n-1) + fib(n-2)`. Drawing the recursion tree, `fib(3)` appears repeatedly, `fib(2)` even more — the tree has O(φⁿ) nodes but only O(n) *distinct* values. Caching each distinct result turns exponential into linear.
+
+```java
+// Without caching: O(2^n). The overlap is the whole point.
+int fib(int n) {
+    if (n < 2) return n;
+    return fib(n - 1) + fib(n - 2);   // fib(n-2) recomputed in both branches
+}
+```
+
+Contrast this with **merge sort**: `sort(left)` and `sort(right)` are disjoint halves — no subproblem is ever shared. That is divide-and-conquer, and a cache would only waste memory. Overlapping subproblems are what make memoization pay off.
+
+## 2. Optimal substructure
+
+An optimal solution to the whole problem is composed of optimal solutions to its subproblems. This is what justifies writing a recurrence: you can solve a state by combining the best answers of strictly smaller states.
+
+Shortest path has it: the shortest route A→C through B uses the shortest A→B and B→C sub-routes. The **longest simple path** does *not* — gluing two longest sub-paths can reuse a vertex, so the recurrence is invalid. No optimal substructure, no DP.
+
+<Callout kind="warn" title="Both are required">
+Overlapping subproblems without optimal substructure (e.g. longest simple path) means the recurrence is wrong even if cached. Optimal substructure without overlap (e.g. binary search, merge sort) means caching is pointless — plain recursion already does linear work. You need both.
+</Callout>
+
+<ProbeNote>
+The interviewer wants you to name **both** properties explicitly and give a counterexample for each. Bonus points for connecting it to the choice of technique: overlap → memoize; optimal substructure → write the recurrence. Saying "I'd recognize this is DP because the recursion recomputes `dp[i][j]` and the answer is built from smaller subproblems" is exactly the signal they listen for.
+</ProbeNote>

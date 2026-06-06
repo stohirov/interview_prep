@@ -1,0 +1,55 @@
+**Problem.** Given a 2D grid of `'1'` (land) and `'0'` (water), count the number of **islands**. An island is a maximal group of land cells connected **4-directionally** (up/down/left/right). The grid edges are surrounded by water.
+
+This is connected-components counting in disguise: the grid is an **implicit graph** where each land cell is a vertex and adjacent land cells are edges. No explicit adjacency structure needed — neighbors are computed from coordinates.
+
+## Approach — DFS flood fill, O(m·n) time, O(m·n) space
+
+Scan every cell. When you find unvisited land, increment the counter and **flood-fill** the entire island so you never count it again. Sinking visited land to `'0'` doubles as the visited marker, using O(1) extra state beyond the recursion stack.
+
+```java
+int numIslands(char[][] grid) {
+    int count = 0;
+    for (int r = 0; r < grid.length; r++)
+        for (int c = 0; c < grid[0].length; c++)
+            if (grid[r][c] == '1') {   // unvisited land = a new island
+                count++;
+                sink(grid, r, c);
+            }
+    return count;
+}
+
+void sink(char[][] grid, int r, int c) {
+    if (r < 0 || c < 0 || r >= grid.length || c >= grid[0].length || grid[r][c] != '1')
+        return;                        // off-grid or water/visited
+    grid[r][c] = '0';                  // mark visited by sinking
+    sink(grid, r + 1, c);
+    sink(grid, r - 1, c);
+    sink(grid, r, c + 1);
+    sink(grid, r, c - 1);
+}
+```
+
+Each cell is visited once, so the work is **O(m·n)**. The recursion depth can reach `m·n` in the worst case (one giant snake-shaped island) — mention this stack-depth risk and offer an explicit-stack or BFS-queue variant if the grid is large.
+
+## BFS variant — same complexity, bounded stack
+
+```java
+void sinkBFS(char[][] grid, int sr, int sc) {
+    int[][] dirs = {{1,0},{-1,0},{0,1},{0,-1}};
+    Queue<int[]> q = new ArrayDeque<>();
+    grid[sr][sc] = '0'; q.add(new int[]{sr, sc});
+    while (!q.isEmpty()) {
+        int[] cell = q.poll();
+        for (int[] d : dirs) {
+            int nr = cell[0] + d[0], nc = cell[1] + d[1];
+            if (nr >= 0 && nc >= 0 && nr < grid.length && nc < grid[0].length
+                    && grid[nr][nc] == '1') {
+                grid[nr][nc] = '0';        // mark on enqueue
+                q.add(new int[]{nr, nc});
+            }
+        }
+    }
+}
+```
+
+<ProbeNote>Frame it as connected components on a grid graph; that framing also unlocks Surrounded Regions, Pacific-Atlantic, and Max Area of Island. Decide up front whether mutating the input is allowed — if not, use a separate `boolean[][] visited`. Flag the recursion-depth risk on huge grids and offer the BFS version. If they ask for 8-directional connectivity, you just add the four diagonals.</ProbeNote>

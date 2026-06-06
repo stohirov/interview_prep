@@ -1,0 +1,38 @@
+**Problem.** Given CPU `tasks` (letters) and an integer `n`, two runs of the *same* task must be separated by at least `n` cooldown intervals. Each interval runs one task or idles. Return the **minimum total intervals** to finish all tasks.
+
+## Greedy idea — schedule the most-frequent task first
+
+The most-frequent task is the bottleneck: it forces the most cooldown gaps. To minimize idle time, lay out copies of the busiest task with exactly `n` gaps between them, then fill those gaps with the next-most-frequent tasks. Idling happens only when there aren't enough distinct tasks to fill the gaps.
+
+## O(1)-math solution — O(T) time
+
+The schedule is fully determined by the maximum frequency (`maxCount`) and how many tasks tie for it (`ties`). Picture a skeleton of `maxCount - 1` frames, each of width `n + 1`, plus a final partial frame holding the `ties` tasks that share the top frequency.
+
+```java
+int leastInterval(char[] tasks, int n) {
+    int[] counts = new int[26];
+    for (char t : tasks) counts[t - 'A']++;
+
+    int maxCount = 0, ties = 0;
+    for (int c : counts) {
+        if (c > maxCount) { maxCount = c; ties = 1; }
+        else if (c == maxCount) ties++;
+    }
+
+    int frame = (maxCount - 1) * (n + 1) + ties;   // idle-padded skeleton
+    return Math.max(tasks.length, frame);          // dense input needs no idling
+}
+```
+
+`(maxCount - 1)` frames of width `n + 1` lay out all but the last copy of the busiest tasks; `+ ties` places the final copies. `max(..., tasks.length)` handles the case where there are so many distinct tasks that every gap fills naturally — then there's no idle and the answer is simply the number of tasks.
+
+## Heap alternative — the explicit simulation
+
+If asked to simulate, a max-heap keyed by remaining count hands you the best task each round; process `n + 1` slots at a time, decrement, and re-push survivors. Same O(T) (the heap is ≤ 26 entries), but more code. The math version is the slick close.
+
+<ComplexityTable rows={[
+  {op: "Greedy math", best: "O(T)", average: "O(T)", worst: "O(T)", note: "O(1) after the count pass"},
+  {op: "Heap simulation", best: "O(T)", average: "O(T)", worst: "O(T)", note: "heap ≤ 26 → log factor constant"},
+]} />
+
+<ProbeNote>Be ready to derive `(maxCount - 1) * (n + 1) + ties` on a whiteboard with a small example (e.g. `AAABBB`, `n=2`), and to explain why `max(..., tasks.length)` is mandatory — when distinct tasks outnumber the gaps, no idling is needed. The off-by-one between `n` (gaps) and `n+1` (frame width) is the most common slip.</ProbeNote>

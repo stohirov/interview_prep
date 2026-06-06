@@ -1,0 +1,27 @@
+Recursion and iteration are equally powerful — anything one expresses, the other can — so the choice is about **clarity, safety, and cost**, not capability.
+
+## When recursion is clearer
+
+Recursion shines when the problem is **self-similar** and the recursive structure mirrors the data:
+
+- **Tree and graph traversal** — `traverse(left); visit(node); traverse(right)` reads exactly like the definition of inorder. The iterative version needs an explicit stack and is far noisier.
+- **Divide and conquer** — merge sort, quicksort, binary search on a recursive structure.
+- **Backtracking** — the choose/explore/unchoose pattern is awkward to flatten by hand.
+
+When the call tree branches (two or more recursive calls), recursion is almost always the readable choice; simulating it iteratively means rebuilding the call stack yourself.
+
+## When recursion is worse
+
+- **Stack overflow** — each call costs a frame. Deep linear recursion (a 100k-node linked list, a chain-shaped tree) overflows the ~1 MB thread stack. Java will **not** save you with tail-call elimination.
+- **Constant-factor overhead** — call/return, frame setup, and argument passing cost more than incrementing a loop variable.
+- **Hidden recomputation** — naive recursion (Fibonacci) recomputes subproblems exponentially; you must add memoization, at which point you are doing DP.
+
+## The middle ground
+
+Single (linear) recursion is usually trivial to rewrite as a loop — `factorial`, list sum, even list reversal. Reserve recursion for genuinely branching or tree-shaped problems, and convert to an **explicit stack** when depth could be large but you still want DFS semantics.
+
+<Callout kind="info" title="Rule of thumb">
+Branching structure or self-similar data → recursion for readability. Linear repetition, or unbounded depth on large input → iteration (or an explicit stack) for safety and speed.
+</Callout>
+
+<ProbeNote>The senior signal is naming the concrete failure mode: "this is O(n) deep and would `StackOverflowError` on a 200k-element input, so I'd use an explicit `Deque` stack." Also mention that the JVM's lack of TCO means even tail recursion isn't a safe substitute for a loop on deep input.</ProbeNote>

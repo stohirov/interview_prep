@@ -1,0 +1,57 @@
+**Problem.** Given a reference to a node in a **connected undirected graph**, return a **deep copy**. Each `Node` has a value and a list of neighbors. You must create brand-new node objects whose neighbor lists point only at copies — never at originals.
+
+The crux is that the graph has **cycles**, so a naive recursion clones a node, recurses into a neighbor, which recurses back, which clones the node again… infinite loop and duplicated nodes. The fix is a **`Map<original, clone>`** that doubles as the visited set: before cloning a node, check whether you've already made its copy.
+
+## Approach — DFS with an original→clone map, O(V + E) time, O(V) space
+
+```java
+class Node {
+    int val;
+    List<Node> neighbors = new ArrayList<>();
+    Node(int val) { this.val = val; }
+}
+
+public Node cloneGraph(Node start) {
+    if (start == null) return null;
+    return dfs(start, new HashMap<>());
+}
+
+private Node dfs(Node node, Map<Node, Node> clones) {
+    Node existing = clones.get(node);
+    if (existing != null) return existing;        // already cloned: break the cycle
+
+    Node copy = new Node(node.val);
+    clones.put(node, copy);                       // register BEFORE recursing
+    for (Node nbr : node.neighbors)
+        copy.neighbors.add(dfs(nbr, clones));     // clone neighbors, wire to copies
+    return copy;
+}
+```
+
+The single most important line is `clones.put(node, copy)` **before** the neighbor loop. Registering the copy first is what lets the recursion return the in-progress clone when a cycle leads back to `node`, instead of cloning it a second time.
+
+Every node and edge is processed once: **O(V + E)** time, **O(V)** space for the map plus recursion stack.
+
+## BFS variant — clone all nodes first, then wire edges
+
+```java
+public Node cloneGraphBFS(Node start) {
+    if (start == null) return null;
+    Map<Node, Node> clones = new HashMap<>();
+    clones.put(start, new Node(start.val));
+    Queue<Node> q = new ArrayDeque<>(); q.add(start);
+    while (!q.isEmpty()) {
+        Node u = q.poll();
+        for (Node nbr : u.neighbors) {
+            if (!clones.containsKey(nbr)) {       // first sighting: make the copy
+                clones.put(nbr, new Node(nbr.val));
+                q.add(nbr);
+            }
+            clones.get(u).neighbors.add(clones.get(nbr));   // wire copy->copy
+        }
+    }
+    return clones.get(start);
+}
+```
+
+<ProbeNote>The interviewer is testing whether you see the cycle problem. The map serves double duty — visited set *and* original→clone lookup — and you must insert the clone before recursing or you reintroduce the infinite loop. Handle `null` input and a single node with no neighbors. The same map-as-memo trick reappears in "Copy List with Random Pointer."</ProbeNote>

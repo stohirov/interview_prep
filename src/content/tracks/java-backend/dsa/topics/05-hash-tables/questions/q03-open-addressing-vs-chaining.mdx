@@ -1,0 +1,33 @@
+Both resolve collisions; they make opposite bets about memory layout.
+
+## Separate chaining
+
+Each bucket holds a pointer to a secondary structure (linked list, or a red-black tree in Java's `HashMap`). On collision you append to that bucket's chain.
+
+- **Pros:** simple deletion (just unlink a node), tolerates load factors above 1.0, and degradation is graceful — a bad bucket only slows lookups *for that bucket*.
+- **Cons:** every entry carries node/pointer overhead (16+ bytes per node in the JVM), and chains live in scattered heap memory, so traversal is **cache-unfriendly** — each hop is a likely cache miss.
+
+## Open addressing
+
+All entries live in the array itself. On collision you **probe** for the next open slot — linear probing (`i+1, i+2…`), quadratic probing (`i+1, i+4, i+9…`), or double hashing (a second hash sets the step).
+
+- **Pros:** no per-entry pointers (compact), and entries sit in contiguous memory, so probing is **cache-friendly** — often the deciding factor on modern hardware.
+- **Cons:** acutely sensitive to load factor (performance falls off a cliff past ~0.7), and deletion is hard.
+
+### Clustering
+
+Linear probing suffers **primary clustering**: occupied slots coalesce into long runs, and any key hashing near a run must traverse the whole thing. Quadratic probing and double hashing scatter probes to break up clusters.
+
+### Tombstones
+
+You cannot simply blank a deleted slot — that would truncate any probe sequence that passed through it, hiding later keys. Instead you mark it with a **tombstone** (a deleted sentinel). Probes skip tombstones but inserts may reuse them. Tombstones accumulate and degrade lookups until you rehash, which is why open-addressed tables need periodic compaction.
+
+<Callout kind="info" title="Load-factor sensitivity">
+Chaining stays usable at load factors above 1.0 (multiple entries per bucket by design). Open addressing must keep the table well below full — typically resizing at ~0.6–0.7 — because the expected probe count explodes as the table approaches full.
+</Callout>
+
+## Who uses what
+
+Java's `HashMap`/`HashSet` use **chaining** (with treeification). Python's `dict`, Rust's `HashMap` (SwissTable), and most modern high-performance tables use **open addressing** precisely for the cache locality.
+
+<ProbeNote>Senior signal: don't just list pros/cons — explain *why* open addressing won on modern hardware (cache locality / memory bandwidth dominates pointer-chasing), and that the price is load-factor fragility, clustering, and tombstone management on delete. Mention that Java chose chaining for graceful degradation and simple deletes.</ProbeNote>

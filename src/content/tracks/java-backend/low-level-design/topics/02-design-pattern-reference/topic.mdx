@@ -1,0 +1,28 @@
+The OOP module covers each Gang of Four pattern in depth — intent, structure, participants, full Java implementations. This topic is the **applied** companion: not *what* each pattern is, but **the trigger phrase in an LLD prompt that should make you reach for it**. In an interview you don't have time to recall a UML diagram; you need a fast mapping from a symptom in the requirements to the pattern that resolves it.
+
+## Pattern as a response to an axis of change
+
+Every pattern exists to absorb one kind of variation without forcing edits to existing code (Open/Closed). The skill is recognizing that axis in the prompt:
+
+- "Pricing can be hourly, flat, or weekend, and we'll add more." → **Strategy**
+- "Different displays should update when a spot frees up." → **Observer**
+- "An order moves through Placed → Paid → Shipped, with different rules per stage." → **State**
+- "We need to create cars, bikes, or trucks by type." → **Factory**
+
+If you can't name the axis of variation, you don't need the pattern — see the *anti-patterns* question in the framework topic.
+
+## The three families
+
+<Diagram caption="The pattern families and their core question">{`CREATIONAL   "How do I build this object?"     Factory, Abstract Factory,
+                                               Builder, Singleton
+STRUCTURAL   "How do I compose / wrap it?"     Decorator, Adapter, Proxy,
+                                               Facade, Composite
+BEHAVIORAL   "How do objects interact?"        Strategy, Observer, State,
+                                               Template Method, Command,
+                                               Chain of Responsibility`}</Diagram>
+
+## How to use this in the round
+
+When you hit step 5 of the framework (apply patterns), scan the requirements for these trigger phrases. Name the pattern **and** the phrase that justified it: *"because pricing varies along an axis we expect to grow, I'll put it behind a `PricingStrategy` interface."* That single sentence demonstrates you reach for patterns deliberately, not decoratively.
+
+The three questions below are organized by family, each giving the trigger, a one-line "reach for it when," and a tiny Java sketch you can reproduce under time pressure. For the deeper theory and trade-offs, cross-reference the OOP module's creational, structural, and behavioral pattern topics.

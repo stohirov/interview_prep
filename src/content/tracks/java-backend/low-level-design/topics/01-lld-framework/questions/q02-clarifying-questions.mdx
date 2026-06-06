@@ -1,0 +1,43 @@
+Every LLD prompt is deliberately under-specified. The interviewer wants to see whether you'll define the box before you fill it. Skipping this step is the single most common reason candidates build the wrong design and run out of time.
+
+## The four buckets to always cover
+
+Ask questions from each of these buckets; you rarely need more than five or six total.
+
+### 1. Scope and core use cases
+- What are the **must-have** operations versus nice-to-haves?
+- Who are the actors? (For a parking lot: drivers, attendants, admins.)
+- What's explicitly **out of scope**? (Payments? Persistence? Auth?)
+
+### 2. Entities and their dimensions
+- What **types/variants** exist? (Spot sizes, vehicle types, payment methods.)
+- What are the cardinalities? (One floor → many spots; one lot → many gates.)
+- Are there limits? (Max capacity, max items.)
+
+### 3. Non-functional requirements
+- **Concurrency** — will multiple actors hit shared state at once? (Two cars, one spot.)
+- **Scale** — in-memory single process, or distributed? (Usually in-memory for LLD.)
+- **Extensibility** — which dimensions are expected to grow? (New pricing schemes, new channels.)
+
+### 4. Constraints and conventions
+- Should the code **compile and run**, or is a class diagram enough?
+- Any specific patterns or APIs the interviewer wants to see?
+
+<Callout kind="tip" title="Make assumptions, then confirm">
+Don't ask open-ended questions endlessly — it reads as indecision. State a reasonable default and ask for a thumbs-up: *"I'll assume a single in-memory lot, no payment gateway, but a pluggable pricing strategy — does that match what you want?"* This is faster and signals seniority.
+</Callout>
+
+## A reusable checklist
+
+<Diagram caption="Clarifying checklist — run this in the first 5 minutes">{`SCOPE      core ops? actors? out of scope?
+TYPES      variants? cardinalities? limits?
+NFRs       concurrency? scale? extensibility?
+FORMAT     compilable code or diagram? required patterns?`}</Diagram>
+
+## The payoff
+
+Each answer prunes the design space. "No persistence" removes repositories and DTOs. "Concurrent gates" forces you to think about thread-safety from the start instead of bolting it on. "Pluggable pricing" tells you Strategy will earn its place.
+
+<ProbeNote>
+Interviewers grade *which* questions you ask. Asking about concurrency and extensibility — the non-functional axes — signals senior thinking. Asking only "what color are the cars" signals you're stalling. The best questions are the ones whose answers visibly change your design.
+</ProbeNote>

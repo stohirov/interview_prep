@@ -1,0 +1,33 @@
+Microservices are the default architecture for large engineering organizations — and one of the most overused. The interview goal is rarely "design microservices"; it is to show you understand **what they cost** as clearly as what they buy, and that you can place the supporting infrastructure (gateway, mesh, discovery, tracing) and the data patterns (Saga, outbox) where they belong. Getting the *trade-offs* right — and knowing when a **modular monolith** is the better answer — is the senior signal.
+
+## The architectural spectrum
+
+It is not monolith-vs-microservices as a binary. There is a spectrum:
+
+- **Monolith** — one deployable, one database, in-process calls. Simplest to build, test, and reason about; the default until scaling or team-coordination pain justifies otherwise.
+- **Modular monolith** (e.g., **Spring Modulith**) — one deployable, but with *enforced* module boundaries and explicit inter-module contracts. You get most of the organizational clarity of microservices without the distributed-systems tax. Often the right intermediate stop.
+- **Microservices** — independently deployable services, each owning its data, communicating over the network. Enables team and scaling autonomy at the price of distributed-systems complexity.
+
+## The supporting cast
+
+Once services are distributed, you need infrastructure to make them findable, reachable, and observable:
+
+- **Service discovery** — how a service finds another's current network location in a world of ephemeral, autoscaling instances (client-side via **Eureka**, or server-side via the platform's DNS/load balancer, as in Kubernetes).
+- **API gateway** — the single front door for *external* clients: routing, auth, TLS termination, rate limiting, aggregation.
+- **Service mesh** (**Istio**, **Linkerd**) — a sidecar-based layer handling *service-to-service* concerns: mTLS, retries, timeouts, circuit breaking, and traffic shaping, transparently to application code.
+- **Distributed tracing** (OpenTelemetry, Jaeger) — propagating a trace context across service hops so a single user request is reconstructable across the fleet.
+
+## The data patterns
+
+Distributing data breaks the one thing a monolith gave you for free — the ACID transaction. Two patterns recur:
+
+- **Saga** — a business transaction spanning services, implemented as a sequence of local transactions with **compensating actions** to undo on failure. Choreography vs. orchestration is the key choice.
+- **Outbox** — solving the dual-write problem (update the DB *and* publish an event atomically) by writing the event to an outbox table in the same transaction and relaying it afterward.
+
+## What the questions cover
+
+The questions weigh what microservices **solve and cause**, contrast the **modular monolith** with full microservices and say when each fits, separate the responsibilities of **gateway, mesh, and discovery**, and work through the **Saga** pattern — choreography vs. orchestration — for distributed transactions.
+
+<ProbeNote>
+Interviewers probe whether you treat microservices as a trade-off rather than a goal. The fastest senior signal is naming the modular monolith as a legitimate alternative and being specific about which problems (deployment coupling, scaling, team autonomy) actually justify the distributed-systems tax you take on in return.
+</ProbeNote>

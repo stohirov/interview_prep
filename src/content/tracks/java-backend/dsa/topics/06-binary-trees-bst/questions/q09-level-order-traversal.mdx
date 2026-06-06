@@ -1,0 +1,60 @@
+**Problem.** Given the root of a binary tree, return its level-order traversal as a **list of lists** — one inner list per level, top to bottom, each ordered left to right.
+
+## The idea
+
+This is BFS with the **level-size snapshot** technique. Drive a FIFO queue, but before processing each level, capture `q.size()` — the exact number of nodes currently queued is precisely one level's worth, because we only ever enqueue the *next* level's children. Drain exactly that many into a fresh list, then move on.
+
+## Optimal — O(n) time, O(n) space
+
+```java
+List<List<Integer>> levelOrder(TreeNode root) {
+    List<List<Integer>> result = new ArrayList<>();
+    if (root == null) return result;
+
+    Queue<TreeNode> q = new ArrayDeque<>();
+    q.offer(root);
+
+    while (!q.isEmpty()) {
+        int levelSize = q.size();                  // frozen before adding children
+        List<Integer> level = new ArrayList<>(levelSize);
+        for (int i = 0; i < levelSize; i++) {
+            TreeNode n = q.poll();
+            level.add(n.val);
+            if (n.left  != null) q.offer(n.left);  // next level, in L-to-R order
+            if (n.right != null) q.offer(n.right);
+        }
+        result.add(level);
+    }
+    return result;
+}
+```
+
+Each node is enqueued and dequeued exactly once — **O(n) time**. The queue holds at most one level at a time; for a complete tree the widest level is ~n/2 nodes, so worst-case **O(n) space**.
+
+## DFS alternative — pass the depth down
+
+You can also build the same structure depth-first by threading the current level index and appending to (or creating) the matching inner list:
+
+```java
+List<List<Integer>> levelOrderDFS(TreeNode root) {
+    List<List<Integer>> result = new ArrayList<>();
+    dfs(root, 0, result);
+    return result;
+}
+private void dfs(TreeNode n, int depth, List<List<Integer>> result) {
+    if (n == null) return;
+    if (depth == result.size()) result.add(new ArrayList<>()); // first node at this depth
+    result.get(depth).add(n.val);
+    dfs(n.left,  depth + 1, result);
+    dfs(n.right, depth + 1, result);
+}
+```
+
+Because we recurse left before right, each level fills left to right correctly.
+
+<ComplexityTable rows={[
+  {op: "BFS (queue + level size)", best: "O(n)", average: "O(n)", worst: "O(n)", note: "O(w) queue, w = max width"},
+  {op: "DFS (depth-indexed)", best: "O(n)", average: "O(n)", worst: "O(n)", note: "O(h) stack"},
+]} />
+
+<ProbeNote>The BFS-with-level-size version is the expected answer and the template for every "by level" variant — zigzag (reverse alternate levels), right-side view, average per level, bottom-up order. Mention that the DFS solution still produces correct left-to-right ordering only because we recurse into `left` before `right`.</ProbeNote>

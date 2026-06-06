@@ -1,0 +1,57 @@
+Cycle detection splits into two genuinely different algorithms depending on whether the graph is **directed** or **undirected**. Confusing them is a classic interview trap.
+
+## Directed graphs — white / gray / black (recursion-stack coloring)
+
+A directed cycle exists iff DFS encounters a **back edge** — an edge to a vertex currently *on the recursion stack*. Track three states:
+
+- **White** — unvisited.
+- **Gray** — visited, still on the recursion stack (an ancestor in the current DFS path).
+- **Black** — fully processed; all its descendants are done.
+
+If DFS reaches a **gray** vertex, that's a back edge → **cycle**. Reaching a **black** vertex is fine — it's a cross/forward edge, already finished.
+
+```java
+boolean hasCycleDirected(int n, List<List<Integer>> g) {
+    int[] color = new int[n];                  // 0=white, 1=gray, 2=black
+    for (int i = 0; i < n; i++)
+        if (color[i] == 0 && dfs(i, g, color)) return true;
+    return false;
+}
+boolean dfs(int u, List<List<Integer>> g, int[] color) {
+    color[u] = 1;                              // gray: on the stack
+    for (int v : g.get(u)) {
+        if (color[v] == 1) return true;        // back edge -> cycle
+        if (color[v] == 0 && dfs(v, g, color)) return true;
+    }
+    color[u] = 2;                              // black: done
+    return false;
+}
+```
+
+A two-state `visited` flag is **not enough** here: revisiting a black node is legal, so you must distinguish "on the current path" (gray) from "finished" (black).
+
+## Undirected graphs — parent tracking (or union-find)
+
+In an undirected graph, the edge `u–v` is also `v–u`, so naive DFS would always "see" where it just came from and falsely report a cycle. The fix: a cycle exists iff DFS reaches an **already-visited vertex that is not the parent** you arrived from.
+
+```java
+boolean hasCycleUndirected(int u, int parent, List<List<Integer>> g, boolean[] seen) {
+    seen[u] = true;
+    for (int v : g.get(u)) {
+        if (!seen[v]) {
+            if (hasCycleUndirected(v, u, g, seen)) return true;
+        } else if (v != parent) {              // visited & not where we came from
+            return true;
+        }
+    }
+    return false;
+}
+```
+
+The alternative for undirected graphs is **union-find**: process each edge, and if both endpoints already share a root, that edge closes a cycle. Often cleaner when you also need connected components.
+
+<Callout kind="danger" title="Don't cross the wires">
+Using parent-tracking on a *directed* graph misses cycles; using gray/black coloring on an *undirected* graph reports a false cycle for every single edge (the back-and-forth looks like a 2-cycle). Pick the algorithm that matches the graph type.
+</Callout>
+
+<ProbeNote>The crisp summary interviewers want: **directed → 3-color DFS, back edge to a gray (on-stack) node**; **undirected → DFS with parent tracking, or union-find**. Explain *why* two colors fail for directed graphs (you must tell "on the current path" apart from "already finished") and why parent tracking is needed for undirected (the reverse edge isn't a real cycle).</ProbeNote>

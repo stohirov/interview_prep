@@ -1,0 +1,75 @@
+**Problem.** Given daily prices, maximize profit from buying and selling one share. The whole family varies one knob: **how many transactions are allowed.** Treating them as one **state-machine DP** unifies all four.
+
+## The unifying model
+
+On each day you are in one of two states: **holding** a share, or **not holding**. Track the best cash balance in each state. Transitions per day with price `p`:
+
+- `hold = max(hold, notHold − p)` — keep, or buy today.
+- `notHold = max(notHold, hold + p)` — keep, or sell today.
+
+The transaction cap adds a dimension `k`; the cooldown/fee variants tweak the transitions.
+
+## I — single transaction (k = 1)
+
+Equivalent to "buy at the lowest price seen, sell later." O(n) time, O(1) space:
+
+```java
+int maxProfit(int[] prices) {
+    int hold = Integer.MIN_VALUE, notHold = 0;
+    for (int p : prices) {
+        hold = Math.max(hold, -p);            // bought once, no prior profit to carry
+        notHold = Math.max(notHold, hold + p);
+    }
+    return notHold;
+}
+```
+
+## II — unlimited transactions (k = ∞)
+
+Greedy works (sum every upward step), but the same state machine handles it — just carry prior profit into `hold`:
+
+```java
+int maxProfit(int[] prices) {
+    int hold = Integer.MIN_VALUE, notHold = 0;
+    for (int p : prices) {
+        hold = Math.max(hold, notHold - p);   // buy using profit so far
+        notHold = Math.max(notHold, hold + p);
+    }
+    return notHold;
+}
+```
+
+## III & IV — at most k transactions
+
+Generalize to `k` (III is `k = 2`). Track `hold[j]` / `notHold[j]` for `j` transactions used. When `k >= n/2` it is effectively unlimited — fall back to II to avoid wasted work:
+
+```java
+int maxProfit(int k, int[] prices) {
+    int n = prices.length;
+    if (k >= n / 2) return unlimited(prices);    // II's logic
+    int[] hold = new int[k + 1], notHold = new int[k + 1];
+    Arrays.fill(hold, Integer.MIN_VALUE);
+    for (int p : prices)
+        for (int j = 1; j <= k; j++) {
+            hold[j]    = Math.max(hold[j], notHold[j - 1] - p);  // buy opens transaction j
+            notHold[j] = Math.max(notHold[j], hold[j] + p);      // sell closes it
+        }
+    return notHold[k];
+}
+private int unlimited(int[] prices) {
+    int profit = 0;
+    for (int i = 1; i < prices.length; i++)
+        if (prices[i] > prices[i - 1]) profit += prices[i] - prices[i - 1];
+    return profit;
+}
+```
+
+All run in O(n·k) time, O(k) space.
+
+<Callout kind="tip" title="Counting a transaction once">
+A buy *opens* transaction `j` (`notHold[j-1] - p`); the matching sell *closes* it (`notHold[j]`). Charging the increment to the buy side is what keeps each transaction counted exactly once across the `k` dimension. With cooldown, sell transitions to a cooldown state; with a fee, subtract it on sell.
+</Callout>
+
+<ProbeNote>
+The win is presenting all four as **one** state machine (hold / not-hold) rather than four ad-hoc tricks — that is precisely the senior signal interviewers reward. Know the `k >= n/2` short-circuit for IV, and be ready to extend the machine to the cooldown and transaction-fee variants by adding a state or adjusting the sell transition.
+</ProbeNote>

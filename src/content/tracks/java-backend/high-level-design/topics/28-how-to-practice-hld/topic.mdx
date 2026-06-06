@@ -1,0 +1,21 @@
+Most candidates practice **High-Level Design** the wrong way: they collect a list of forty "must-do" problems and skim a video for each, mistaking *recognition* for *recall*. In a real interview you don't get to recognize — you get a blank whiteboard and 50 minutes. This topic is about practicing so that the structure and the trade-offs come out under pressure, not just when you're nodding along to someone else's solution.
+
+## How many problems — and why depth beats breadth
+
+You need fewer problems than you think: roughly **8–12 done deeply** beats 40 skimmed. The catalogue of HLD problems is small because they reuse the same primitives — caching, sharding, replication, queues, CDNs, consistency choices. Once you have genuinely *built* a URL shortener, a feed, a chat system, a rate limiter, and a payment system end-to-end, the sixth problem is mostly recombination. Depth means: you did the capacity arithmetic yourself, you drew the diagram from memory, you can defend every component, and you can name the trade-off you rejected. Breadth without that just means you've watched a lot of videos.
+
+<Callout kind="tip" title="The recognition trap">
+If you can follow a solution but can't reproduce it on a blank page in 45 minutes, you haven't learned it. Practice **output**, not input: close the tab and rebuild it cold.
+</Callout>
+
+## What each style rewards
+
+The same problem is graded differently depending on who's across the table.
+
+- **FAANG** rewards **depth and scale reasoning**. They will push on one component — "now 100× the traffic" — and watch whether you reach for sharding, replication, and consistency trade-offs fluently, with numbers. Hand-waving the bottleneck loses the loop.
+- **EU / remote contracting** rewards **pragmatism and judgment**. The signal is "would I trust this person to make sane build-vs-buy calls and not over-engineer?" Justify choices on cost and operational simplicity; "Postgres and Redis get us there" is a strong answer when it's true.
+- **Regional (EPAM / Uzum)** rewards **buildability**. A clean REST contract, a sensible schema, a diagram you can defend, and evidence you could ship the real Spring service. They care less about 100M QPS and more about whether the design is concrete and correct.
+
+## The throughline
+
+Across all three, the differentiator is the same: a repeatable **method** (requirements → estimation → high-level design → deep-dive → trade-offs) applied calmly, plus the willingness to say "here's the trade-off" instead of pretending one option is strictly best. The practice plan in the next file turns that into a concrete routine.

@@ -1,0 +1,21 @@
+Distributed systems force a set of trade-offs that single-node systems never have to make. The moment your data lives on more than one machine, you must reason about what happens when those machines **can't talk to each other**, and about how fresh a read is allowed to be. **CAP**, its successor **PACELC**, the **consistency spectrum**, **ACID vs BASE**, and **quorums** are the vocabulary for those trade-offs — and they are the most reliably asked fundamentals in any senior HLD round.
+
+## Why this matters
+
+Every database choice in a design ("Postgres or Cassandra?", "DynamoDB strong or eventual reads?") is really a consistency-vs-availability-vs-latency decision in disguise. If you can name the trade-off precisely — "this is a CP store, so under a partition the minority side rejects writes" — you signal that you understand *why* a system behaves the way it does, not just its product name.
+
+## The mental model
+
+- **CAP** says that under a network **partition (P)**, you must choose between **consistency (C)** and **availability (A)**. P is not optional — networks fail — so the real choice is C-vs-A *during* a partition.
+- **PACELC** completes the picture: *if* Partitioned, choose C or A; **E**lse (normal operation), choose between **L**atency and **C**onsistency. This is the more useful framing because partitions are rare but the latency-vs-consistency trade-off is constant.
+- The **consistency spectrum** runs from **linearizable** (strongest, single-copy illusion) down through **sequential**, **causal**, and **eventual** (weakest). Practical guarantees like **read-your-writes** and **monotonic reads** sit on this spectrum.
+- **ACID vs BASE** is the database-philosophy version of the same tension: strong transactional guarantees vs availability-first soft state.
+- **Quorums** (**W + R > N**) are the concrete mechanism leaderless stores use to *tune* where they sit on that spectrum.
+
+## The canonical reference
+
+Martin Kleppmann's *Designing Data-Intensive Applications* (DDIA), **Chapter 9 ("Consistency and Consensus")**, is the standard treatment and the one interviewers expect you to have internalized. It is precise about how CAP is widely *misstated*, why "linearizable" is the right word for "strong consistency", and how consensus underpins it all. Citing it — and getting the definitions right — is a strong senior signal.
+
+## What the questions cover
+
+The questions in this topic state CAP correctly (and debunk the common misreading), extend it to PACELC, walk the full consistency spectrum with the practical session guarantees, contrast ACID and BASE with concrete fits, and derive why quorum overlap (W + R > N) gives you consistency on a leaderless store. Get these right and the entire database-choice section of any design becomes easy to justify.

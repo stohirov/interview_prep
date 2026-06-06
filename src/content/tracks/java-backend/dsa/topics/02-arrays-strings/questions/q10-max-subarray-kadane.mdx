@@ -1,0 +1,47 @@
+**Problem.** Find the contiguous subarray with the **largest sum** and return that sum. For `[-2,1,-3,4,-1,2,1,-5,4]` the answer is `6` (the subarray `[4,-1,2,1]`). At least one element exists, and it may be negative.
+
+## Brute force — O(n²) time
+
+Try every start, extend to every end, track the max running sum:
+
+```java
+int maxSubBrute(int[] a) {
+    int best = Integer.MIN_VALUE;
+    for (int i = 0; i < a.length; i++) {
+        int sum = 0;
+        for (int j = i; j < a.length; j++) {
+            sum += a[j];
+            best = Math.max(best, sum);
+        }
+    }
+    return best;
+}
+```
+
+O(n²) — fine for small inputs, too slow at scale.
+
+## Optimal — Kadane's algorithm, O(n) time, O(1) space
+
+The insight is a one-line DP. Let `cur` be the **best subarray sum ending exactly at index i**. At each element you face a binary choice: **extend** the previous best subarray, or **start fresh** at the current element. You start fresh precisely when the running sum has gone negative — a negative prefix can only drag down whatever follows:
+
+```java
+public int maxSubArray(int[] a) {
+    int cur = a[0];      // best sum ending at current index
+    int best = a[0];     // best sum seen anywhere
+    for (int i = 1; i < a.length; i++) {
+        cur = Math.max(a[i], cur + a[i]);   // start fresh vs extend
+        best = Math.max(best, cur);
+    }
+    return best;
+}
+```
+
+`cur = max(a[i], cur + a[i])` is the whole algorithm: if `cur + a[i] < a[i]` then `cur` was negative and dragging us down, so drop it and restart at `a[i]`. We track `best` separately so a strong subarray isn't lost when a later negative tail shrinks `cur`. One pass → O(n) time, O(1) space.
+
+<Callout kind="warn" title="Initialize to a[0], not 0">
+Seeding `best = 0` breaks on **all-negative** inputs like `[-3,-1,-2]` (correct answer `-1`): you'd wrongly return 0, an empty subarray, which the problem disallows. Seed both `cur` and `best` to `a[0]` and start the loop at `i = 1`. This is the single most common Kadane bug.
+</Callout>
+
+To also **return the indices**, track a tentative start that resets whenever you "start fresh," and commit `[start, i]` whenever `cur` beats `best`.
+
+<ProbeNote>Kadane's is the textbook "local optimum → global optimum" DP. Must articulate the extend-vs-restart decision and *why* restarting on a negative running sum is correct. The all-negative initialization bug (`best = 0`) is what interviewers probe — handle it by seeding with `a[0]`. Bonus: O(1) space, index recovery, and that the divide-and-conquer solution is O(n log n) — strictly worse than Kadane.</ProbeNote>

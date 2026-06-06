@@ -1,0 +1,46 @@
+Not every LLD problem is a concurrency problem, and over-synchronizing a single-threaded design wastes time and adds noise. The skill is recognizing the signals — and confirming them in your clarifying questions.
+
+## Signals that thread-safety is expected
+
+Treat these phrases in the prompt (or domain) as a flag:
+
+- **Multiple actors hitting shared state** — "multiple entry gates," "many users," "concurrent requests."
+- **A finite contested resource** — parking spots, movie seats, inventory, connection pool slots.
+- **A shared mutable singleton** — one `ParkingLot`, `Cache`, `Logger`, `Broker` that everyone calls.
+- **Producer/consumer shape** — a queue between threads (task scheduler, pub/sub, logger async appender).
+- **Explicit mention** — "make it thread-safe," "handle concurrent bookings."
+
+<Callout kind="tip" title="Confirm scope early">
+In your clarifying questions, ask directly: *"Is this a single-threaded in-memory model, or should it be safe for concurrent access?"* The answer tells you whether to design locks in from the start or note them as a follow-up.
+</Callout>
+
+## Problems where it's usually the *point*
+
+| Problem | The concurrency crux |
+| --- | --- |
+| Movie ticket booking | Two users, one seat — optimistic vs pessimistic locking |
+| Parking lot (multi-gate) | Two cars, one spot — the find-then-occupy race |
+| Rate limiter | Concurrent token consumption — atomic counters |
+| LRU/LFU cache | Concurrent get/put — lock striping or `ConcurrentHashMap` |
+| Pub/Sub | Concurrent delivery, backpressure — `BlockingQueue` |
+| Task scheduler | Producer/consumer of tasks — `BlockingQueue` + workers |
+
+## Where it's usually *out of scope*
+
+Tic-tac-toe, snake & ladder, a URL shortener's encoding logic — single-player or stateless flows where adding locks signals you've misjudged the problem. Note thread-safety as a possible extension and move on.
+
+## The senior move
+
+Even when concurrency is in scope, don't lock everything reflexively. Identify the **specific shared mutable state** (the spot pool, the seat map, the counter) and guard *that*, leaving the rest lock-free. Then name the race you're preventing:
+
+```java
+// Guard only the contested operation, atomically
+synchronized boolean tryOccupy(Vehicle v) {
+    if (!free) return false;   // check
+    free = false; return true; // ...and act, indivisibly
+}
+```
+
+<ProbeNote>
+Interviewers grade two things: did you *notice* the shared state without being told, and did you guard it *precisely* rather than slapping `synchronized` on every method? Verbalizing "the contested resource here is the spot pool, so that's what I'll make atomic" is exactly the judgment they're probing for.
+</ProbeNote>

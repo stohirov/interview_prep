@@ -1,0 +1,39 @@
+**Problem.** There are `n` gas stations on a circular route. `gas[i]` is the fuel at station `i`, `cost[i]` is the fuel needed to drive from `i` to `i+1`. Start with an empty tank at some station. Return the starting index from which you can complete the full circuit, or `-1` if impossible. The answer is guaranteed unique if it exists.
+
+## Brute force — O(n²)
+
+Try every start, simulate the loop, bail when the tank goes negative. Correct but quadratic.
+
+## Greedy — O(n) time, O(1) space
+
+Two observations make it linear:
+
+1. **Feasibility:** the trip is possible if and only if `sum(gas) >= sum(cost)`. If total fuel is less than total cost, no start works.
+2. **The start:** drive from index `0`, accumulating `tank += gas[i] - cost[i]`. If `tank` ever drops below zero at station `i`, then **no station between the last candidate start and `i` can be the answer** — because each of those prefixes would have been even more negative. So reset the candidate start to `i + 1` and zero the running tank.
+
+```java
+int canCompleteCircuit(int[] gas, int[] cost) {
+    int total = 0, tank = 0, start = 0;
+    for (int i = 0; i < gas.length; i++) {
+        int diff = gas[i] - cost[i];
+        total += diff;        // tracks global feasibility
+        tank  += diff;        // running balance from current candidate start
+        if (tank < 0) {       // can't reach i+1 from current start
+            start = i + 1;    // skip every station up to and including i
+            tank = 0;
+        }
+    }
+    return total >= 0 ? start : -1;
+}
+```
+
+## Why the reset is safe (the key argument)
+
+Suppose starting at `s` you run out of fuel arriving at station `i` (the balance went negative). For any `s' ` with `s < s' <= i`, the balance from `s'` to `i` is a *suffix* of the balance from `s` to `i`, but the prefix from `s` to `s'` was non-negative (otherwise we'd have reset earlier). Removing a non-negative prefix only makes the remaining balance smaller, so `s'` also fails to reach `i`. Hence the first viable start must be at `i + 1` — exactly the greedy jump.
+
+<ComplexityTable rows={[
+  {op: "Brute force", best: "O(n)", average: "O(n²)", worst: "O(n²)", note: "simulate each start"},
+  {op: "Greedy one-pass", best: "O(n)", average: "O(n)", worst: "O(n)", note: "O(1) space"},
+]} />
+
+<ProbeNote>Two things win this problem: stating the global feasibility check (`sum(gas) >= sum(cost)`) and justifying why the reset skips *all* intermediate stations, not just the failing one. If you only reset to `i+1` without the argument, interviewers will press you on "why not `s+1`?" — the non-negative-prefix reasoning is the answer.</ProbeNote>

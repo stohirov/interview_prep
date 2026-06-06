@@ -1,0 +1,29 @@
+A trie trades memory for prefix power, and the trade can go badly. The space cost is driven by two things: **how many nodes** the trie needs, and **how fat each node is**.
+
+## Node count
+
+In the worst case — keys that share no prefixes — a trie needs one node per character across **all** keys: **O(total characters stored)**. The prefix-sharing that makes tries attractive only saves space when keys *actually* overlap. Store a million random 20-character strings with little common structure and you get close to 20 million nodes — far more overhead than a `HashSet` holding the same million strings.
+
+## Per-node fan-out is the real killer
+
+Each node carries a children container, and its size depends on the layout:
+
+- **Array `TrieNode[R]`** — every node reserves **R pointers** regardless of how many it uses. For lowercase English R = 26; on a 64-bit JVM that is 26 × 8 = **208 bytes of references per node**, most of them null. For case-sensitive ASCII (R = 128) or Unicode (R ≈ 1.1 million code points), the array layout is **completely impractical** — you cannot allocate a million-slot array per node.
+- **HashMap children** — pays only for present children, so it tolerates large/sparse alphabets, but adds per-entry object overhead (Node objects, boxed `Character` keys) and hashing cost on every step.
+
+## When it becomes prohibitive
+
+The trie's space blows up exactly when its premise fails:
+
+- **Large alphabet** (Unicode, byte tries with R = 256) combined with the array layout → enormous mostly-empty arrays.
+- **Low prefix sharing** (random or high-entropy keys) → node count approaches total characters, with no compression benefit.
+- **Long, sparse keys** — long single-child chains where each node has exactly one child waste a full node (and its container) per character.
+
+## Mitigations
+
+- **HashMap or small open-addressed children** instead of fixed arrays for large alphabets.
+- **Radix / Patricia tries** collapse single-child chains into one edge labeled with a substring, eliminating the long sparse chains.
+- **Ternary search tries** store children as a small BST per node — three pointers instead of R — trading a bit of lookup speed for far less memory.
+- If you only need exact membership, **don't use a trie at all** — a `HashSet<String>` is smaller.
+
+<ProbeNote>Two cost drivers: node count (≈ total characters when prefixes don't overlap) and per-node fan-out (R pointers per node with the array layout, mostly null). Call out that array-backed tries are infeasible for Unicode/large alphabets — use a map, or a radix/ternary trie. The honest summary: a trie pays off only when keys share prefixes; for random keys or plain membership a hash set is both smaller and simpler.</ProbeNote>

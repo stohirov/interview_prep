@@ -1,0 +1,35 @@
+**Problem.** A sorted array of distinct values was rotated at an unknown pivot (e.g. `[4,5,6,7,0,1,2]`). Find the minimum element in O(log n).
+
+## The insight
+
+The minimum is the single **pivot point** — the only element smaller than its predecessor — and it's the start of the second sorted run. Rather than search for a value, binary-search for *that* boundary by comparing `nums[mid]` to `nums[hi]`.
+
+## Optimal — compare mid to the right end, O(log n)
+
+Comparing to `nums[hi]` (not `nums[lo]`) cleanly tells you which side the pivot is on:
+
+```java
+int findMin(int[] nums) {
+    int lo = 0, hi = nums.length - 1;
+    while (lo < hi) {                          // stop when the window is one element
+        int mid = lo + (hi - lo) / 2;
+        if (nums[mid] > nums[hi])              // mid is in the LEFT (higher) run
+            lo = mid + 1;                      // min is strictly to the right of mid
+        else                                   // nums[mid] < nums[hi]: mid could be the min
+            hi = mid;                          // keep mid as a candidate
+    }
+    return nums[lo];                            // lo == hi -> the minimum
+}
+```
+
+**O(log n)** time, **O(1)** space.
+
+## Why compare against `nums[hi]`, not `nums[lo]`
+
+If `nums[mid] > nums[hi]`, the right end is "lower," so the pivot (the min) lies **strictly right** of `mid` — discard `mid` with `lo = mid + 1`. Otherwise `nums[mid] <= nums[hi]` means `mid` is in the run containing the minimum and *could be the minimum itself*, so keep it with `hi = mid`. Comparing against `nums[lo]` instead is ambiguous when the array isn't rotated, so `nums[hi]` is the robust choice.
+
+<Callout kind="warn" title="Two correctness details">
+Use `lo < hi` (not `<=`) and `hi = mid` (not `mid - 1`): because `mid` can *be* the answer, decrementing past it would skip the minimum, and `lo <= hi` with `hi = mid` would loop forever. If the array might be un-rotated, this still works — the `else` branch walks `hi` down to index 0. With **duplicates**, `nums[mid] == nums[hi]` is ambiguous; the fix is `hi--`, which makes the worst case O(n).
+</Callout>
+
+<ProbeNote>The clean version searches for the pivot by comparing `nums[mid]` to `nums[hi]` and uses the asymmetric `hi = mid` / `lo = mid + 1` updates because the midpoint can be the answer. State why `nums[hi]` is the right anchor and why `lo < hi` + `hi = mid` avoids both skipping the min and infinite looping. Note the duplicates variant degrades to O(n).</ProbeNote>

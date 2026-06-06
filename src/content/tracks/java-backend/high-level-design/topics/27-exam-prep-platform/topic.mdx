@@ -1,0 +1,21 @@
+The **exam-prep platform** (PrepHub, testbank, mock-test style) is a deceptively rich design problem. On the surface it is "serve questions and grade them," but underneath it stitches together five distinct systems: stateful **exam sessions**, **real-time scoring**, a **leaderboard**, **payments** for premium content, and heavy **content delivery** of questions and lecture videos — all while resisting cheating. It is a favourite because it forces you to mix an OLTP transactional core with read-heavy CDN delivery and a real-time ranking system in one coherent design.
+
+## The shape of the problem
+
+There are two very different traffic profiles in one product. The **content path** (questions, explanations, videos) is read-dominated, cacheable, and CDN-friendly. The **session path** (start exam → answer → submit → score → rank) is stateful, latency-sensitive, and must survive a browser crash without losing a student's progress. The defining tension is **bursty concurrency**: a scheduled mock test means 100K students hit *Start* in the same five-minute window, so the session and scoring tiers must absorb a thundering herd that the content tier never sees.
+
+## What the interviewer is probing, by style
+
+- **FAANG** — leaderboard at scale (sorted sets vs approximate ranking), exactly-once scoring under retries, session state that survives node failure, and the thundering-herd at exam start. Expect "what happens when 100K sessions submit in the same minute?"
+- **EU / remote contracting** — pragmatism and correctness: idempotent submit, a payments flow that never double-charges, and "Postgres + Redis + a CDN handles this." Justify choices on cost and operational simplicity.
+- **Regional (EPAM / Uzum)** — a clean Spring service, a sane schema, a defensible diagram, and a real payments integration. Show you can ship the actual product.
+
+## The key decisions
+
+1. **Session state** — where a half-finished exam lives (Redis with periodic DB snapshots) so a crash or refresh never loses answers, and a timer the server (not the client) enforces.
+2. **Scoring model** — synchronous instant scoring for objective questions vs async grading queues for the rest, with **idempotent** submit so retries do not double-score.
+3. **Leaderboard** — a Redis sorted set for live ranking vs a precomputed/approximate board at extreme scale.
+4. **Payments and entitlement** — gating premium content behind an idempotent, webhook-driven payment flow without coupling it to the hot read path.
+5. **Anti-cheat / proctoring** — server-authoritative timers, question-order shuffling, tab-focus and webcam signals, fired off-path so they never slow the exam.
+
+The worked solution applies the full 11-section structure and shows all three style angles where they diverge.

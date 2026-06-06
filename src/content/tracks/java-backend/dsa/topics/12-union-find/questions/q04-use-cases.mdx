@@ -1,0 +1,43 @@
+Union-Find's home is **Kruskal's MST**, where it answers "would adding this edge form a cycle?" in near-constant time. But its real value is any problem framed as **incrementally merging groups and querying connectivity**. The signal: you are dynamically *adding* relationships and repeatedly asking "are these two connected?"
+
+## Connected components
+
+Union every edge, then count distinct roots — each root is one component. DSU does this **online**: components stay correct as edges arrive, no rescan needed.
+
+```java
+int components(int n, int[][] edges) {
+    DSU dsu = new DSU(n);
+    int count = n;                       // start with n singletons
+    for (int[] e : edges)
+        if (dsu.union(e[0], e[1])) count--;   // a real merge drops the count
+    return count;
+}
+```
+
+## Cycle detection in an undirected graph
+
+Process edges one at a time; if both endpoints already share a root, the edge closes a **cycle**. (Redundant Connection is exactly this.)
+
+```java
+for (int[] e : edges)
+    if (!dsu.union(e[0], e[1])) return e;     // union failed -> cycle edge
+```
+
+## Equivalence classes
+
+"Friend circles," account merging by shared email, percolation grids, image-segment labeling — any **transitive grouping** (`a~b` and `b~c` ⇒ `a~c`) maps directly onto union.
+
+## DSU vs DFS/BFS
+
+Both find components, but they answer different *questions*:
+
+- **DSU** excels when the graph is **dynamic** — edges arrive incrementally and you query connectivity along the way (the **online** setting). It cannot easily enumerate the actual path between two nodes.
+- **DFS/BFS** excels on a **static** graph when you need the components *and* their structure (paths, distances, traversal order), but it must recompute from scratch after every edit.
+
+<Callout kind="tip" title="Pattern recognition">
+If the problem says "merge," "group," "connect," "same set," or "is X reachable from Y as edges are added" — reach for union-find. If it asks for the *path itself* or per-node distances, reach for BFS/DFS.
+</Callout>
+
+<ProbeNote>
+Have the three canonical uses ready — components, undirected cycle detection, equivalence classes — plus the Kruskal cycle check. The discriminating point interviewers want: DSU wins on **dynamic/online connectivity**, while BFS/DFS wins when you need paths or distances on a **static** graph.
+</ProbeNote>

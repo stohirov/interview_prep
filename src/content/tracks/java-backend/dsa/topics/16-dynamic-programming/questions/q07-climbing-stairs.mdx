@@ -1,0 +1,49 @@
+**Problem.** You climb a staircase of `n` steps, taking either 1 or 2 steps at a time. How many distinct ways can you reach the top?
+
+## Insight — it is Fibonacci in disguise
+
+To land on step `i`, your last move came either from step `i-1` (a 1-step) or step `i-2` (a 2-step). Those are the only two predecessors, and they are disjoint, so:
+
+```
+ways(i) = ways(i - 1) + ways(i - 2)
+```
+
+with `ways(0) = 1` (one way to stand at the bottom) and `ways(1) = 1`. That is the Fibonacci recurrence with shifted base cases.
+
+## Brute force — O(2ⁿ) time
+
+Recursing without a cache rebuilds the same subtree exponentially:
+
+```java
+int climb(int n) {
+    if (n <= 1) return 1;
+    return climb(n - 1) + climb(n - 2);
+}
+```
+
+Too slow — the classic overlapping-subproblems blowup.
+
+## Optimal — O(n) time, O(1) space
+
+Because each state reads only the previous two, roll two scalars:
+
+```java
+int climbStairs(int n) {
+    if (n <= 2) return n;          // n=1 -> 1, n=2 -> 2
+    int prev2 = 1, prev1 = 2;      // ways(1), ways(2)
+    for (int i = 3; i <= n; i++) {
+        int cur = prev1 + prev2;
+        prev2 = prev1;
+        prev1 = cur;
+    }
+    return prev1;
+}
+```
+
+<Callout kind="tip" title="The generalization">
+If you may take steps of sizes in a set `S` (e.g. 1, 2, 3), the recurrence becomes `ways(i) = Σ ways(i - s)` for each `s ∈ S` with `i - s >= 0`. The two-step case is just the Fibonacci specialization — recognizing the family is the real skill.
+</Callout>
+
+<ProbeNote>
+Say out loud that this *is* Fibonacci with base cases `ways(0)=ways(1)=1`; interviewers love hearing the reduction. Then jump straight to the O(1)-space rolling solution. The natural follow-up is the variable-step-set generalization above, or "what if some steps are broken (can't be landed on)?" — set `ways(broken) = 0` and the recurrence still holds.
+</ProbeNote>

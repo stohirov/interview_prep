@@ -1,0 +1,48 @@
+Both heuristics decide the **same thing**: when merging two sets, which root becomes the parent of the other. The goal is identical — keep trees **shallow** so `find` stays fast — they just measure "bigger" differently.
+
+## Union by size
+
+Track the **number of elements** in each tree; attach the **smaller** set under the **larger**. Intuition: fewer nodes get their depth increased.
+
+```java
+boolean union(int a, int b) {
+    int ra = find(a), rb = find(b);
+    if (ra == rb) return false;
+    if (size[ra] < size[rb]) { int t = ra; ra = rb; rb = t; }
+    parent[rb] = ra;
+    size[ra] += size[rb];          // maintain the count
+    return true;
+}
+```
+
+## Union by rank
+
+Track **rank** — an *upper bound on tree height*, not an exact count; attach the **lower-rank** tree under the **higher-rank** one. Rank increments by 1 only when two equal-rank trees merge.
+
+```java
+boolean union(int a, int b) {
+    int ra = find(a), rb = find(b);
+    if (ra == rb) return false;
+    if (rank[ra] < rank[rb]) { int t = ra; ra = rb; rb = t; }
+    parent[rb] = ra;
+    if (rank[ra] == rank[rb]) rank[ra]++;   // tie -> height grew by 1
+    return true;
+}
+```
+
+## How they differ
+
+- **Size** stays exact and is independently useful — you often need "how big is this component?" anyway, so it comes for free.
+- **Rank** is only an *upper bound* on height once path compression starts flattening trees: compression lowers actual height but never decreases stored rank. That is fine — rank only needs to bound the merge decision, not stay precise.
+
+Both deliver the same **O(log n)** standalone tree height, and both combine with path compression to reach the **O(α(n))** amortized bound. In interviews, either is fully acceptable.
+
+<ComplexityTable rows={[
+  {op: "Union (by rank or size)", best: "O(α(n))", average: "O(α(n))", worst: "O(α(n))", note: "amortized, with path compression"},
+  {op: "Find", best: "O(α(n))", average: "O(α(n))", worst: "O(α(n))", note: "amortized, with path compression"},
+  {op: "Tree height (heuristic alone)", best: "—", average: "—", worst: "O(log n)", note: "no compression"}
+]} />
+
+<ProbeNote>
+Crisp distinction: size counts **elements** (exact), rank bounds **height** (an upper bound after compression). Note that size is reusable if the problem also asks for component sizes. Both hit the same asymptotics; do not claim one is meaningfully faster than the other.
+</ProbeNote>

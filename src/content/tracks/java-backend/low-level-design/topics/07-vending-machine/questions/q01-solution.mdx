@@ -1,0 +1,200 @@
+## 1. Functional requirements
+
+- Accept money in **multiple denominations** (coins and notes); maintain a running balance.
+- Hold products in slots, each with a **price** and a **stock count**.
+- Let the user **select** a product; dispense it only if the slot has stock and the balance covers the price.
+- Return **change** after a successful dispense; reject the sale if exact change cannot be made.
+- Support **cancel** mid-transaction with a full **refund**.
+- **Restock** products and refill the change float; emit a **low-stock threshold alert**.
+
+## 2. Non-functional requirements
+
+- **Extensibility** — adding a state (e.g. `Maintenance`) or a payment method must not edit existing states (Open/Closed).
+- **Correctness of illegal transitions** — selecting a product while idle, or inserting money mid-dispense, must be rejected deterministically.
+- **Concurrency** — a single physical machine serializes one transaction at a time; the model must make that explicit rather than assume it.
+- **Money precision** — track value in minor units (cents) as `int`/`long`, never `double`.
+
+## 3. Core entities
+
+| Entity | Responsibility |
+| --- | --- |
+| `VendingMachine` | Context (Singleton). Holds current `State`, balance, inventory; delegates every action to the state. |
+| `State` | Interface; one implementation per machine state. Owns its legal transitions. |
+| `IdleState` / `HasMoneyState` / `DispensingState` / `OutOfStockState` | The four concrete states. |
+| `Product` | Immutable: code, name, price (cents). |
+| `Inventory` | Per-slot stock counts; `isAvailable`, `deduct`, `restock`, threshold check. |
+| `PaymentStrategy` | Pluggable payment: `CoinNotePayment`, `CardPayment`. |
+| `Denomination` | Enum of accepted coin/note values. |
+| `Transaction` | Record of a selection: product, paid amount, change, outcome. |
+
+## 4. Class diagram
+
+<Mermaid caption="Vending machine — State pattern centerpiece">{`classDiagram
+    class VendingMachine {
+      -State current
+      -int balanceCents
+      -Inventory inventory
+      -PaymentStrategy payment
+      +insert(Denomination)
+      +select(String code)
+      +dispense()
+      +cancel()
+      +setState(State)
+    }
+    class State {
+      <<interface>>
+      +insert(VendingMachine, Denomination)
+      +select(VendingMachine, String code)
+      +dispense(VendingMachine)
+      +cancel(VendingMachine)
+    }
+    class Inventory {
+      +isAvailable(String) boolean
+      +priceOf(String) int
+      +deduct(String)
+      +restock(String, int)
+    }
+    class PaymentStrategy {
+      <<interface>>
+      +collect(int cents) boolean
+      +refund(int cents)
+    }
+    class Product {
+      -String code
+      -int priceCents
+    }
+    VendingMachine o-- State
+    VendingMachine o-- Inventory
+    VendingMachine o-- PaymentStrategy
+    Inventory o-- Product
+    State <|.. IdleState
+    State <|.. HasMoneyState
+    State <|.. DispensingState
+    State <|.. OutOfStockState`}</Mermaid>
+
+## 5. Key interfaces and classes
+
+The **State interface** is the heart of the design — every action is a method, and each state decides what is legal:
+
+```java
+interface State {
+    void insert(VendingMachine m, Denomination d);
+    void select(VendingMachine m, String code);
+    void dispense(VendingMachine m);
+    void cancel(VendingMachine m);
+}
+```
+
+```java
+final class IdleState implements State {
+    public void insert(VendingMachine m, Denomination d) {
+        m.addBalance(d.cents());
+        m.setState(new HasMoneyState());          // Idle -> HasMoney
+    }
+    public void select(VendingMachine m, String code) {
+        throw new IllegalStateException("Insert money first");
+    }
+    public void dispense(VendingMachine m) {
+        throw new IllegalStateException("Nothing selected");
+    }
+    public void cancel(VendingMachine m) { /* no-op */ }
+}
+
+final class HasMoneyState implements State {
+    public void insert(VendingMachine m, Denomination d) { m.addBalance(d.cents()); }
+    public void select(VendingMachine m, String code) {
+        if (!m.inventory().isAvailable(code)) { m.setState(new OutOfStockState(code)); return; }
+        int price = m.inventory().priceOf(code);
+        if (m.balance() < price) return;          // stay in HasMoney; await more money
+        m.setSelected(code);
+        m.setState(new DispensingState());        // HasMoney -> Dispensing
+    }
+    public void dispense(VendingMachine m) {
+        throw new IllegalStateException("Select a product first");
+    }
+    public void cancel(VendingMachine m) {        // HasMoney -> Idle, with refund
+        m.refund(m.balance());
+        m.setState(new IdleState());
+    }
+}
+```
+
+```java
+final class DispensingState implements State {
+    public void insert(VendingMachine m, Denomination d) {
+        throw new IllegalStateException("Dispensing in progress");
+    }
+    public void select(VendingMachine m, String code) {
+        throw new IllegalStateException("Already dispensing");
+    }
+    public void dispense(VendingMachine m) {
+        String code = m.selected();
+        int price = m.inventory().priceOf(code);
+        m.inventory().deduct(code);
+        m.refund(m.balance() - price);            // return change
+        m.reset();
+        m.setState(m.inventory().isAvailable(code)
+            ? new IdleState() : new OutOfStockState(code));
+    }
+    public void cancel(VendingMachine m) {
+        throw new IllegalStateException("Cannot cancel mid-dispense");
+    }
+}
+```
+
+```java
+public final class VendingMachine {                // Context + Singleton
+    private static final VendingMachine INSTANCE = new VendingMachine();
+    public static VendingMachine get() { return INSTANCE; }
+
+    private State current = new IdleState();
+    private final Inventory inventory = new Inventory();
+    private PaymentStrategy payment = new CoinNotePayment();
+    private int balanceCents = 0;
+    private String selected;
+    private VendingMachine() {}
+
+    public synchronized void insert(Denomination d) { current.insert(this, d); }
+    public synchronized void select(String code)    { current.select(this, code); }
+    public synchronized void dispense()             { current.dispense(this); }
+    public synchronized void cancel()               { current.cancel(this); }
+
+    void setState(State s)   { this.current = s; }
+    void addBalance(int c)   { balanceCents += c; }
+    void refund(int c)       { if (c > 0) payment.refund(c); }
+    void setSelected(String c){ this.selected = c; }
+    String selected()        { return selected; }
+    int balance()            { return balanceCents; }
+    Inventory inventory()    { return inventory; }
+    void reset()             { balanceCents = 0; selected = null; }
+}
+```
+
+## 6. Design patterns used
+
+- **State** — the spine of the solution. Each `State` owns its legal transitions; `VendingMachine` is the context that delegates. Illegal actions throw *from the state*, so they can't be forgotten in a central `switch`.
+- **Strategy** — `PaymentStrategy` decouples *how money is taken/returned* (coins, notes, card) from the machine flow. A `CardPayment` slots in without touching any state.
+- **Singleton** — one `VendingMachine` instance per physical unit.
+- **Observer** (sketched) — the `Inventory` notifies subscribers when a slot drops below its threshold (restock alert).
+
+## 7. Trade-offs and alternatives
+
+- **State objects vs enum + switch.** A State class per state is more types, but localizes transition logic and makes illegal transitions impossible to forget. A single `enum State` with a `switch` in `VendingMachine` is terser for 3–4 states but violates Open/Closed as states grow — call this out and let the interviewer pick.
+- **Stateless vs stateful states.** Stateless states (no per-instance fields) can be cached as singletons instead of `new`-ing on each transition; `OutOfStockState` here carries the slot code, so it isn't shareable.
+- **Exact-change problem.** Returning change reduces to making a target amount from available denominations — a coin-change problem. Greedy works for canonical currency sets; flag that and reject the sale (back to refund) when change can't be made.
+- **Money type.** Cents as `int`/`long`, never `double`, to avoid rounding drift.
+
+## 8. Common follow-up questions
+
+- **Refunds / cancel mid-transaction** — handled by `cancel()` in `HasMoneyState`; forbidden in `DispensingState`.
+- **Multiple denominations** — `Denomination` enum + a change-making algorithm; track a coin float per denomination.
+- **Card payments** — a new `CardPayment implements PaymentStrategy`; the state machine is unchanged.
+- **Restocking** — `Inventory.restock`; a `MaintenanceState` can gate the machine while a technician refills.
+- **Concurrent transactions** — a single machine serializes via the `synchronized` context methods; a *fleet* of machines becomes a distributed problem (links to HLD).
+- **Threshold alerts** — Observer on `Inventory`; emit when a slot count crosses its low-water mark.
+
+## 9. What interviewers are really probing
+
+<ProbeNote>
+That you recognized this as a **finite-state machine** and reached for the State pattern *unprompted* — pushing each transition into its own state object instead of a central conditional. The senior signals: stating the transition table first, putting illegal-transition rejection inside the states, separating payment as a Strategy, and naming the exact-change (coin-change) problem and how you'd fail gracefully. Saying "I'd use a `switch`" isn't wrong, but you must then articulate why State scales better.
+</ProbeNote>

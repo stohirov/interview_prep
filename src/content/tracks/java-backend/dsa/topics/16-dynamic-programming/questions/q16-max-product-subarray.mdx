@@ -1,0 +1,44 @@
+**Problem.** Given an integer array, find the contiguous subarray with the largest **product** and return that product. `[2,3,-2,4] → 6` (`[2,3]`).
+
+## Why Kadane doesn't directly transfer
+
+For the max-*sum* subarray, you track one running max. Products are different: a large **negative** running product becomes the **maximum** the instant it meets another negative number. So the smallest (most negative) product so far is valuable — it can flip to the largest. You must track **both** the running max and the running min.
+
+## The recurrence
+
+At each index, the best product ending here is the best of three candidates: the element alone, the element times the previous max, or the element times the previous min:
+
+```
+curMax = max(x, x * prevMax, x * prevMin)
+curMin = min(x, x * prevMax, x * prevMin)
+```
+
+When `x` is negative, multiplying flips signs, so `prevMin * x` can produce the new maximum — that is exactly why min is tracked.
+
+## Optimal — O(n) time, O(1) space
+
+```java
+int maxProduct(int[] nums) {
+    int curMax = nums[0], curMin = nums[0], best = nums[0];
+    for (int i = 1; i < nums.length; i++) {
+        int x = nums[i];
+        if (x < 0) {                         // sign flip: swap roles of max/min
+            int t = curMax; curMax = curMin; curMin = t;
+        }
+        curMax = Math.max(x, curMax * x);
+        curMin = Math.min(x, curMin * x);
+        best = Math.max(best, curMax);
+    }
+    return best;
+}
+```
+
+The swap-on-negative trick lets us avoid recomputing all three products: when `x < 0`, the old max and min trade places before the multiply, so `curMax * x` uses what was the min.
+
+<Callout kind="tip" title="The role of zeros">
+A zero resets both running products to `x` (which is 0), naturally restarting the subarray after it — `max(0, ...)` and `min(0, ...)` handle this without special-casing. Each zero partitions the array into independent segments, exactly as intended.
+</Callout>
+
+<ProbeNote>
+The interviewer is checking whether you realize a single running value fails — the moment you say "I also track the minimum, because two negatives make a positive," you have shown the key insight. The swap-on-negative formulation is the cleanest; the alternative is computing all three of `x`, `curMax*x`, `curMin*x` explicitly. Watch overflow for large arrays — switch to `long` if values are big.
+</ProbeNote>

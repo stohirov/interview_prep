@@ -1,0 +1,31 @@
+**Big-O** describes how an algorithm's cost grows as the input `n` grows. It is the shared vocabulary of every interview: you write code, then say "this is O(n log n) time, O(n) space," and the interviewer instantly knows whether you understand the trade-offs. The point is not arithmetic precision — it is reasoning about *scaling*.
+
+## Asymptotic notation
+
+We care about behavior as `n → ∞`, so we drop constants and lower-order terms: `3n² + 100n + 7` is `O(n²)`. Three bounds matter:
+
+- **Big-O** — an *upper* bound: cost grows no faster than `f(n)`.
+- **Big-Omega (Ω)** — a *lower* bound: cost grows at least as fast as `f(n)`.
+- **Big-Theta (Θ)** — a *tight* bound: O and Ω coincide.
+
+In practice engineers say "Big-O" loosely to mean the tight bound, but a sharp interviewer will probe the distinction.
+
+## Best / average / worst case
+
+These are separate from the notation. **Worst case** bounds the slowest run (the one you can promise a user). **Average case** assumes a distribution of inputs. **Best case** is the luckiest run. QuickSort is the canonical example: Θ(n log n) average, but Θ(n²) worst case on an already-sorted array with a naive pivot.
+
+## Amortized analysis
+
+Some operations are occasionally expensive but cheap when *averaged over a sequence*. `ArrayList.add` is **amortized O(1)**: most adds are O(1), but a full backing array doubles and copies in O(n) — and because doubling spaces the expensive copies exponentially further apart, the total cost of `n` adds is O(n), giving O(1) per add.
+
+## The master theorem
+
+For divide-and-conquer recurrences `T(n) = a·T(n/b) + f(n)`, the master theorem reads off the answer by comparing `f(n)` against `n^(log_b a)` — three cases covering recursion-dominated, balanced, and work-dominated regimes. It instantly gives MergeSort's O(n log n) and binary search's O(log n).
+
+## Constants still matter at small n
+
+Asymptotics describe the *limit*. At small `n`, constants and cache behavior dominate — which is exactly why Timsort and `Arrays.sort` switch to insertion sort under a threshold (≈32–64 elements), and why an O(n²) routine can beat an O(n log n) one at `n = 100`.
+
+<Callout kind="tip" title="java.util complexity notes">
+The JDK documents complexities directly: `ArrayList` get is O(1) / add amortized O(1); `LinkedList` get is O(n); `HashMap` get/put expected O(1); `TreeMap` operations O(log n); `ArrayDeque` push/pop amortized O(1). Reading these contracts in the Javadoc is the fastest way to internalize real-world Big-O.
+</Callout>

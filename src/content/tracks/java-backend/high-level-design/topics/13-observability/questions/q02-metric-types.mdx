@@ -1,0 +1,61 @@
+## Metrics: counter, gauge, histogram, summary — when to use each
+
+Picking the wrong metric type silently produces meaningless data — a counter you can reset and average, a gauge you try to rate, a latency you store as an average. Knowing the four types (the Prometheus taxonomy, mirrored by OpenTelemetry) and matching each to what you're measuring is a concrete senior signal.
+
+### Counter — a value that only goes up
+
+A **counter** is a **monotonically increasing** cumulative value. It only ever goes up (or resets to zero on process restart). You almost never look at the raw counter value; you look at its **rate of change**.
+
+- **Use for:** total requests served, errors, bytes sent, tasks completed — anything you count.
+- **Query pattern:** `rate(http_requests_total[5m])` gives requests-per-second; dividing the error counter's rate by the total counter's rate gives the **error rate**.
+- **Why monotonic matters:** because it's cumulative, a missed scrape or restart doesn't corrupt the rate — the math handles resets. Storing requests as a non-monotonic number would lose counts between samples.
+
+### Gauge — a value that goes up and down
+
+A **gauge** is a snapshot of a value that can **increase or decrease**. You read the current value directly.
+
+- **Use for:** current memory usage, in-flight requests, queue depth, CPU utilization, active connections, temperature — any instantaneous level.
+- **Query pattern:** the value itself, or `avg`/`max` over instances. Taking `rate()` of a gauge is usually a mistake.
+- **Rule of thumb:** if "the number going down" is meaningful, it's a gauge; if it can only ever climb, it's a counter.
+
+### Histogram — the distribution of observations
+
+A **histogram** samples observations (typically durations or sizes) into **pre-defined buckets**, plus a running sum and count. It's how you measure **latency** and answer percentile questions.
+
+- **Use for:** request latency, response size — anything where the **distribution** matters, not just the average.
+- **Why not an average:** an average latency of 50 ms hides that 1% of users wait 5 seconds. **Percentiles (p50, p95, p99)** are what matter, and you can only compute them from a distribution.
+- **How it works:** the client counts observations falling into each bucket (≤10 ms, ≤50 ms, ≤100 ms, …). Percentiles are computed **server-side** from buckets, so histograms are **aggregatable across instances** — you can compute a fleet-wide p99. The cost: you must choose bucket boundaries up front, and percentiles are interpolated/approximate.
+
+### Summary — client-side quantiles
+
+A **summary** also tracks the distribution but computes **quantiles on the client** over a sliding window, exporting the φ-quantiles (e.g., 0.5, 0.9, 0.99) directly along with sum and count.
+
+- **Use for:** latency where you need precise quantiles and pre-chosen buckets won't do.
+- **The catch:** client-computed quantiles **cannot be aggregated** across instances — you can't average ten servers' p99 to get a fleet p99 (averaging percentiles is mathematically invalid). It also costs more CPU on the client.
+- **Practice:** prefer **histograms** in distributed systems precisely *because* they aggregate; reach for summaries only when you need exact quantiles on a single instance and won't aggregate.
+
+<Mermaid caption="Choosing the right metric type by what you're measuring">{`graph TB
+    Q{What are you measuring?}
+    Q -->|count of events| C[Counter<br/>monotonic, use rate]
+    Q -->|current level up/down| G[Gauge<br/>read directly]
+    Q -->|distribution, aggregatable| H[Histogram<br/>buckets, server-side percentiles]
+    Q -->|exact quantiles, single instance| S[Summary<br/>client-side, not aggregatable]`}</Mermaid>
+
+<ComplexityTable>
+
+| Type | Direction | Example | Read as | Aggregatable? |
+|---|---|---|---|---|
+| Counter | Up only | requests_total, errors_total | rate() | Yes |
+| Gauge | Up/down | memory_bytes, queue_depth | value | Yes (avg/max) |
+| Histogram | Distribution | request_duration buckets | server-side p50/p95/p99 | Yes |
+| Summary | Distribution | request_duration quantiles | client-side φ-quantiles | No |
+
+</ComplexityTable>
+
+<Callout kind="warn" title="Never average a percentile, and watch label cardinality">
+The two classic mistakes: (1) computing a fleet p99 by averaging per-instance p99s — that's why histograms (aggregatable) beat summaries in distributed systems; and (2) attaching high-cardinality labels (user id, request id) to metrics, which explodes the time-series count and the cost. High-cardinality detail belongs in logs/traces, not metric labels.
+</Callout>
+
+<ProbeNote>
+The interviewer wants the right type per measurement: **counter** for monotonic counts (read as a rate), **gauge** for up-and-down levels, **histogram** for latency distributions with server-side percentiles, **summary** for client-side quantiles. The strongest signals: percentiles beat averages for latency, histograms are preferred over summaries *because they aggregate*, and never put high-cardinality labels on metrics.
+</ProbeNote>

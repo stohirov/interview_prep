@@ -1,0 +1,45 @@
+**Problem.** Given a string of digits `2–9`, return all letter combinations the number could spell on a phone keypad (`2→abc`, `3→def`, …, `7→pqrs`, `9→wxyz`). For `"23"`: `["ad","ae","af","bd","be","bf","cd","ce","cf"]`. Empty input returns an empty list.
+
+## Brute force
+
+This is a Cartesian product, so there's no wasted "brute force" to prune — every combination is valid by construction. The only question is generating the product cleanly. You *could* do it with nested loops, but the digit count is variable, so recursion (or an iterative queue build-up) is the natural fit.
+
+## Optimal — backtracking over the digit positions
+
+Map each digit to its letters, then walk the digits left to right. At position `i`, append each letter of `digits[i]`'s group, recurse to position `i+1`, and unchoose. When the path length equals the number of digits, record it.
+
+```java
+private static final String[] PAD = {
+    "", "", "abc", "def", "ghi", "jkl", "mno", "pqrs", "tuv", "wxyz"
+};
+
+List<String> letterCombinations(String digits) {
+    List<String> result = new ArrayList<>();
+    if (digits.isEmpty()) return result;          // guard: [] not [""]
+    backtrack(digits, 0, new StringBuilder(), result);
+    return result;
+}
+
+void backtrack(String digits, int i, StringBuilder path, List<String> result) {
+    if (i == digits.length()) {                   // one letter chosen per digit
+        result.add(path.toString());
+        return;
+    }
+    String letters = PAD[digits.charAt(i) - '0']; // letters for this digit
+    for (int j = 0; j < letters.length(); j++) {
+        path.append(letters.charAt(j));           // choose
+        backtrack(digits, i + 1, path, result);   // explore next digit
+        path.deleteCharAt(path.length() - 1);     // unchoose
+    }
+}
+```
+
+Each digit multiplies the count by its letter count (3 or 4), so for `n` digits there are up to `4ⁿ` combinations, each O(n) to materialize: **O(n · 4ⁿ)** time, **O(n)** recursion-stack space. That's optimal — the output is itself that large.
+
+The only real trap is the empty-input guard: returning early gives `[]`, whereas recursing immediately would record the empty string and return `[""]`.
+
+<Callout kind="tip" title="Iterative alternative">
+The same product builds iteratively: start with `[""]`, and for each digit replace the working list with every existing prefix concatenated to every letter of that digit. Some interviewers like seeing you avoid recursion entirely.
+</Callout>
+
+<ProbeNote>Get the digit→letters map right (note 7 and 9 have four letters) and handle empty input explicitly (`[]`, not `[""]`). State the `O(n · 4ⁿ)` bound and call out that it's output-bound, hence optimal. Having the iterative queue/list build-up ready is a nice bonus.</ProbeNote>

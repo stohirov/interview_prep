@@ -1,0 +1,55 @@
+**Problem.** Reverse the bits of a 32-bit unsigned integer (bit 0 becomes bit 31, and so on).
+
+## Bit-by-bit — O(32)
+
+Pull the lowest bit off `n`, push it onto the result from the left:
+
+```java
+int reverseBits(int n) {
+    int result = 0;
+    for (int i = 0; i < 32; i++) {
+        result <<= 1;            // make room at the low end
+        result |= (n & 1);       // copy n's lowest bit into result's lowest bit
+        n >>>= 1;                // >>> unsigned: drop the bit we just read
+    }
+    return result;
+}
+```
+
+Use `>>>` (unsigned shift) so the sign bit doesn't sign-extend and corrupt the high bits. Always 32 iterations.
+
+## Divide-and-conquer — O(log 32) = O(1) swaps
+
+Swap adjacent bits, then adjacent pairs, then nibbles, bytes, halves — five masked swaps reverse all 32 bits with no loop:
+
+```java
+int reverseBits(int n) {
+    n = ((n & 0xaaaaaaaa) >>> 1) | ((n & 0x55555555) << 1);  // swap odd/even bits
+    n = ((n & 0xcccccccc) >>> 2) | ((n & 0x33333333) << 2);  // swap bit pairs
+    n = ((n & 0xf0f0f0f0) >>> 4) | ((n & 0x0f0f0f0f) << 4);  // swap nibbles
+    n = ((n & 0xff00ff00) >>> 8) | ((n & 0x00ff00ff) << 8);  // swap bytes
+    return (n >>> 16) | (n << 16);                            // swap 16-bit halves
+}
+```
+
+Each line uses `>>>` for the high-to-low move. This is the fixed-width hardware-style trick — O(1) for a fixed 32-bit width.
+
+## Production answer
+
+```java
+int reverseBits(int n) {
+    return Integer.reverse(n);   // does exactly this, often with hardware support
+}
+```
+
+## "If called many times" follow-up
+
+Cache reversed bytes: precompute a 256-entry table of reversed bytes, then reverse a 32-bit value by reversing its four bytes and reassembling them. Trades 256 entries of memory for ~4 table lookups per call.
+
+<ComplexityTable rows={[
+  {op: "Bit-by-bit", best: "O(32)", average: "O(32)", worst: "O(32)", note: "needs >>> to avoid sign extension"},
+  {op: "Masked swaps", best: "O(1)", average: "O(1)", worst: "O(1)", note: "5 swaps, fixed width"},
+  {op: "Byte-cache (repeated calls)", best: "O(1)", average: "O(1)", worst: "O(1)", note: "256-entry lookup table"},
+]} />
+
+<ProbeNote>The `>>>` vs `>>` distinction is the trap — with `>>`, a negative `n` sign-extends and the reversal is wrong. Have the bit-by-bit version ready as the baseline; the masked-swap version and the "cache reversed bytes for repeated calls" idea are the senior flourishes. Mention `Integer.reverse` as the production answer.</ProbeNote>

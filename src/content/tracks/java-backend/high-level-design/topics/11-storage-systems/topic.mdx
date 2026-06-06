@@ -1,0 +1,31 @@
+Every storage decision in a system design is, underneath, a bet about **where data lives and how it's laid out** — and those two facts dominate latency far more than clever code. A read from CPU cache and a read from a remote disk differ by *seven orders of magnitude*. The senior skill is to carry an intuition for the **storage hierarchy and its latency numbers**, and to know the structural trade-offs — **B-tree vs LSM**, **row vs columnar**, **object vs block vs file**, **hot vs cold tiers** — well enough to justify a database or storage choice in one sentence.
+
+## The storage hierarchy
+
+Storage forms a pyramid: small/fast/expensive at the top, large/slow/cheap at the bottom. Each step down is roughly an order of magnitude slower and cheaper per byte: **CPU registers → L1/L2/L3 cache → RAM → local SSD (NVMe) → network/object storage → spinning disk/tape.** The whole game of performance engineering is keeping the working set as high in this pyramid as possible — which is why **caching** and **memory** are such leverage points. The canonical latency numbers make this concrete (RAM ≈ 100 ns, SSD ≈ 100 µs, same-datacenter round trip ≈ 500 µs, cross-region ≈ tens of ms).
+
+## On-disk structures: B-tree vs LSM-tree
+
+How a database arranges data on disk decides whether it's read-optimized or write-optimized.
+
+- **B-trees** (Postgres, MySQL/InnoDB) update data **in place** in a balanced tree of pages. Excellent, predictable reads; writes do random I/O and incur **write amplification** from page splits and the write-ahead log.
+- **LSM-trees** (Cassandra, RocksDB, LevelDB) buffer writes in memory and flush **sequential, immutable** SSTables, compacting them in the background. Superb write throughput; reads may touch several SSTables (mitigated by Bloom filters), and **compaction** is the cost.
+
+## Layout: row vs columnar
+
+- **Row storage** keeps a whole record contiguously — ideal for **OLTP**, where you read/write entire rows by key.
+- **Columnar storage** keeps each column contiguously — ideal for **OLAP**, where you scan a few columns over billions of rows and benefit from high compression and vectorized aggregation.
+
+## Object vs block vs file
+
+- **Block storage** (EBS, a raw disk): fixed-size blocks, low latency, the substrate under databases and filesystems.
+- **File storage** (NFS, EFS): a POSIX hierarchy of files and directories, shared across hosts.
+- **Object storage** (S3, GCS): immutable blobs with metadata, addressed by key over HTTP — effectively infinite, cheap, and durable, but higher latency. The home for media, backups, and data lakes.
+
+## Tiered hot / warm / cold
+
+Match the tier to access frequency: **hot** (frequent → RAM/SSD/standard object class), **warm** (occasional → infrequent-access tiers), **cold** (rare, archival → Glacier/tape, minutes-to-hours retrieval). Lifecycle policies move data down automatically, trading retrieval latency for large cost savings.
+
+## What the questions cover
+
+The questions pin down the canonical latency table, the B-tree-vs-LSM read/write trade-off and write amplification, row-vs-columnar for OLTP-vs-OLAP, and object/block/file storage with tiered hot/warm/cold data.

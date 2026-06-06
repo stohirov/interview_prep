@@ -1,0 +1,44 @@
+**Problem.** Given an array `nums` containing `n` distinct numbers drawn from `0..n` (so exactly one value in that range is missing), return the missing number. O(n) time, O(1) space.
+
+## Approach 1 — XOR indices against values
+
+XOR all the indices `0..n` together with all the array values. Every present number cancels with its matching index; the missing number's index has nothing to cancel against and survives:
+
+```java
+int missingNumber(int[] nums) {
+    int n = nums.length;
+    int xor = n;                       // start with index n (the loop below covers 0..n-1)
+    for (int i = 0; i < n; i++)
+        xor ^= i ^ nums[i];            // cancel each index with each value
+    return xor;
+}
+```
+
+`a ^ a = 0` and `a ^ 0 = a` do the work: indices `0..n` XOR'd with values `{0..n} \ {missing}` leave exactly `missing`. **Overflow-proof** — XOR can never overflow.
+
+## Approach 2 — Gauss sum
+
+The sum of `0..n` is `n(n+1)/2`; subtract the actual array sum to get the missing value:
+
+```java
+int missingNumber(int[] nums) {
+    int n = nums.length;
+    long expected = (long) n * (n + 1) / 2;   // long guards against int overflow
+    long actual = 0;
+    for (int v : nums) actual += v;
+    return (int) (expected - actual);
+}
+```
+
+Cleaner to explain, but `n(n+1)/2` can overflow `int` for large `n` — compute in `long`. The XOR version avoids that risk entirely.
+
+## Approach 3 — cyclic/index placement
+
+If allowed to mutate, you can also treat values as indices and find the gap, but XOR and Gauss are the expected O(1)-space answers.
+
+<ComplexityTable rows={[
+  {op: "XOR index vs value", best: "O(n)", average: "O(n)", worst: "O(n)", note: "O(1) space, no overflow"},
+  {op: "Gauss sum", best: "O(n)", average: "O(n)", worst: "O(n)", note: "O(1) space; use long to avoid overflow"},
+]} />
+
+<ProbeNote>Present both. The XOR solution is the safer one to highlight because it can't overflow; the sum solution is more intuitive but invites the overflow follow-up ("what if `n` is large?" → compute `n(n+1)/2` in `long`). Mentioning the overflow guard unprompted is the senior tell.</ProbeNote>

@@ -1,0 +1,41 @@
+## Why is distributed rate limiting hard?
+
+On one machine, rate limiting is a solved problem: keep a counter (or token bucket) in memory, guard it with a lock or an atomic, and you have an exact, microsecond-fast limit. The difficulty appears the moment the limit must be enforced across a **fleet of stateless instances** behind a load balancer. The single hard requirement is **shared state**.
+
+### The core problem: the counter is global, the servers are not
+
+Suppose the limit is "100 requests/minute per user" and traffic is balanced across 10 instances. If each instance keeps its own counter, a user can do 100 requests *on each instance* — an effective limit of 1,000/min. The local counter is correct locally and wrong globally.
+
+<Mermaid caption="Per-instance counters do not compose into a global limit">{`graph TB
+    U[User] --> LB[Load Balancer]
+    LB --> A[Instance 1<br/>local count: 100]
+    LB --> B[Instance 2<br/>local count: 100]
+    LB --> C[Instance 3<br/>local count: 100]
+    A --> R[Effective limit = 3x100<br/>= 300, not 100]
+    B --> R
+    C --> R`}</Mermaid>
+
+So the count must live somewhere **all instances can read and update atomically** — a shared store, almost always Redis. That single decision drags in every distributed-systems trade-off.
+
+### The trade-offs shared state forces
+
+- **A network round-trip per request.** Every limited request now makes a call to the limiter store, adding latency (typically sub-millisecond to Redis, but non-zero) and load on the hot path. The limiter must be faster than the work it protects.
+- **Atomicity / race conditions.** "Read count, check limit, increment" is a classic check-then-act race: two instances read 99 concurrently and both allow the request, pushing the count to 101. You need an **atomic** operation — `INCR` (which returns the new value) or a Lua script — not a read followed by a write. (Covered in detail in the Redis-limiter question.)
+- **The store becomes a dependency and a SPOF.** If Redis is down, what happens? **Fail-open** (allow all traffic — protects availability, abandons the limit) or **fail-closed** (reject all — protects the backend, causes an outage)? There is no free answer; you must choose and state it. The limiter store also needs its own HA (Redis Cluster / replication).
+- **Clock and window skew.** Sliding-window and token-bucket algorithms reason about time. Instances have slightly different clocks, so the time basis should come from the store (e.g., Redis `TIME`) rather than each app server's local clock.
+
+### Accuracy vs. latency vs. availability
+
+This is the senior framing. You can have a **perfectly accurate** global limit (every request synchronously coordinates through one store) or a **fast, available** limit, but not both at the extreme:
+
+- **Centralized (Redis) counter** — accurate, but a round-trip and a shared dependency.
+- **Local approximate limiting** — each instance enforces `limit / N` with no network hop; fast and dependency-free, but drifts when `N` changes (autoscaling) or traffic is unevenly balanced, so it is only approximate.
+- **Hybrid** — a local token bucket synced periodically against a central authority (the "sloppy counter" / sketch approach used by large gateways) trades a little accuracy for big latency and availability wins.
+
+<Callout kind="warn" title="Exactness is rarely required">
+Most rate limits are a *safety* mechanism, not a billing meter. Allowing 105 requests instead of 100 under load is usually fine; adding 5 ms to every request to guarantee exactly 100 usually is not. Decide how much accuracy you actually need before paying for it.
+</Callout>
+
+<ProbeNote>
+The interviewer wants you to immediately spot that per-instance counters do not give a global limit, then reach for an atomic shared store. Strong signal: naming the race condition explicitly, addressing what happens when the store is down (fail-open vs fail-closed), and articulating the accuracy/latency/availability trade-off rather than insisting on perfect accuracy.
+</ProbeNote>

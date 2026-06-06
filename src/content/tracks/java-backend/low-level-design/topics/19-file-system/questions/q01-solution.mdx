@@ -1,0 +1,173 @@
+## 1. Functional requirements
+
+- A hierarchical tree rooted at `/`; directories contain files and other directories.
+- Operations: `mkdir` (with intermediate dirs), `touch`/write file, `ls`, `cd`, `rm` (recursive flag), `mv`, `cp`.
+- Path resolution for **absolute** (`/a/b`) and **relative** (`b/c`, `.`, `..`) paths.
+- Files hold content (bytes/text); directories hold named children.
+
+## 2. Non-functional requirements
+
+- **Uniform treatment** — operate on a file or a whole subtree through one abstraction (Composite).
+- **Correctness at edges** — reject `rm` on a non-empty directory without the recursive flag; reject `mv` into a descendant of itself; `cp` must deep-copy.
+- **Extensibility** — permissions, symlinks, quotas attach to the `FSEntry` base without rewriting operations.
+- **Persistence** — in-memory only this round; on-disk/journaling is a follow-up. The seam is noted.
+
+## 3. Core entities
+
+| Entity | Responsibility |
+| --- | --- |
+| `FSEntry` | Abstract base (the Composite "component"): name, parent, metadata. |
+| `File` | Leaf: holds content and size. |
+| `Directory` | Composite: holds `Map<String, FSEntry>` children. |
+| `Path` | Parses/resolves a path string to an `FSEntry`. |
+| `Permissions` | rwx bits for user/group/other (follow-up seam). |
+| `FileSystem` | Singleton root + current-directory cursor; exposes the operations. |
+
+## 4. Class diagram
+
+<Mermaid caption="In-memory file system class model (Composite)">{`classDiagram
+    class FSEntry {
+      <<abstract>>
+      -String name
+      -Directory parent
+      -Permissions perms
+      -Instant modifiedAt
+      +size() long
+      +path() String
+    }
+    class File {
+      -byte[] content
+      +write(byte[])
+      +size() long
+    }
+    class Directory {
+      -Map~String, FSEntry~ children
+      +add(FSEntry)
+      +remove(String)
+      +child(String) FSEntry
+      +size() long
+    }
+    class FileSystem {
+      -Directory root
+      -Directory cwd
+      +mkdir(String)
+      +touch(String)
+      +ls(String) List~String~
+      +cd(String)
+      +rm(String, boolean)
+      +mv(String, String)
+      +cp(String, String)
+    }
+    class Permissions
+    FSEntry <|-- File
+    FSEntry <|-- Directory
+    Directory "1" o-- "*" FSEntry
+    FSEntry o-- Permissions
+    FileSystem o-- Directory`}</Mermaid>
+
+## 5. Key interfaces and classes
+
+```java
+abstract class FSEntry {
+    String name;
+    Directory parent;                       // null only for root
+    Permissions perms = Permissions.defaultFor();
+    Instant modifiedAt = Instant.now();
+    FSEntry(String name, Directory parent) { this.name = name; this.parent = parent; }
+
+    abstract long size();                   // Composite: leaf returns bytes, dir recurses
+
+    String path() {                         // walk to root
+        if (parent == null) return "/";
+        String p = parent.path();
+        return p.equals("/") ? "/" + name : p + "/" + name;
+    }
+}
+
+final class File extends FSEntry {
+    private byte[] content = new byte[0];
+    File(String name, Directory parent) { super(name, parent); }
+    void write(byte[] data) { this.content = data; modifiedAt = Instant.now(); }
+    long size() { return content.length; }
+}
+
+final class Directory extends FSEntry {
+    final Map<String, FSEntry> children = new TreeMap<>();   // sorted ls
+    Directory(String name, Directory parent) { super(name, parent); }
+    void add(FSEntry e)        { children.put(e.name, e); e.parent = this; }
+    void remove(String name)   { children.remove(name); }
+    FSEntry child(String name) { return children.get(name); }
+    long size() {                                            // Composite recursion
+        return children.values().stream().mapToLong(FSEntry::size).sum();
+    }
+}
+```
+
+```java
+public final class FileSystem {
+    private static final FileSystem INSTANCE = new FileSystem();
+    public static FileSystem get() { return INSTANCE; }
+
+    private final Directory root = new Directory("", null);
+    private Directory cwd = root;
+    private FileSystem() {}
+
+    private FSEntry resolve(String path) {                   // path resolution
+        Directory base = path.startsWith("/") ? root : cwd;
+        FSEntry cur = base;
+        for (String part : path.split("/")) {
+            if (part.isEmpty() || part.equals("."))      continue;
+            if (part.equals(".."))                       { cur = ((FSEntry) cur).parent; continue; }
+            if (!(cur instanceof Directory d))           throw new IllegalArgumentException("Not a dir");
+            cur = d.child(part);
+            if (cur == null)                             throw new NoSuchElementException(part);
+        }
+        return cur;
+    }
+
+    public void rm(String path, boolean recursive) {
+        FSEntry e = resolve(path);
+        if (e instanceof Directory d && !d.children.isEmpty() && !recursive)
+            throw new IllegalStateException("Directory not empty: " + path);   // edge guard
+        e.parent.remove(e.name);
+    }
+
+    public void mv(String src, String destDir) {
+        FSEntry e = resolve(src);
+        Directory target = (Directory) resolve(destDir);
+        for (FSEntry p = target; p != null; p = p.parent)
+            if (p == e) throw new IllegalArgumentException("Cannot move into own descendant"); // cycle guard
+        e.parent.remove(e.name);
+        target.add(e);
+    }
+    // mkdir, touch, ls, cd, cp(deep-clone) follow the same resolve-then-mutate shape
+}
+```
+
+## 6. Design patterns used
+
+- **Composite** — the heart of the design: `FSEntry` is the component, `File` the leaf, `Directory` the composite; `size()` and traversal work uniformly across single files and whole subtrees.
+- **Singleton** — one `FileSystem` owning the root and the current-directory cursor.
+- **Iterator** (implicit) — recursive traversal of the tree for `ls -R`, `du`, search.
+- **Visitor** (follow-up) — a clean way to add operations (size, search, permissions audit) over the tree without editing `FSEntry`.
+
+## 7. Trade-offs and alternatives
+
+- **Composite vs flat path map.** Composite models the real tree and makes `mv`/`cp`/recursive ops natural. A flat `Map<String, FSEntry>` keyed by full path gives O(1) lookup but makes subtree moves and renames expensive (rekey every descendant).
+- **Children: `TreeMap` vs `HashMap`.** `TreeMap` gives sorted `ls` for free; `HashMap` is faster but needs an explicit sort. Pick based on whether listing order matters.
+- **Storing parent pointers.** Back-pointers make `path()`, `..`, and the descendant-cycle check trivial, at the cost of keeping them consistent on every `mv`/`add`.
+- **In-memory vs on-disk.** In-memory is a tree of objects; on-disk needs inodes, block allocation, and journaling for crash consistency — a different problem, flagged as a follow-up.
+
+## 8. Common follow-up questions
+
+- **Symlinks** — a `SymLink` leaf holding a target path; resolve it during path walking, with a hop limit to avoid loops.
+- **Permissions (rwx user/group/other)** — check `Permissions` on the `FSEntry` before each operation; model owner/group.
+- **Quotas** — track bytes per directory/user; reject writes that exceed the limit (uses the recursive `size()`).
+- **Journaling / crash consistency** — write-ahead log of operations to replay after a crash (on-disk concern).
+- **In-memory vs on-disk** — discuss inodes, block maps, and durability versus the simple object tree.
+
+## 9. What interviewers are really probing
+
+<ProbeNote>
+That you (1) recognized **Composite** immediately and unified `File` and `Directory` under `FSEntry` instead of writing two disconnected classes, (2) wrote real **path resolution** handling `/`, `.`, `..`, and absolute/relative paths, (3) got the **edge cases** right — non-empty `rm`, deep-copy `cp`, and especially the **move-into-own-descendant cycle** — and (4) kept metadata (permissions/quota) on the base so the follow-ups attach cleanly. Catching the descendant cycle before being prompted is the clearest senior signal here.
+</ProbeNote>

@@ -1,0 +1,59 @@
+**Problem (I).** Houses on a street hold `nums[i]` cash. You cannot rob two **adjacent** houses (alarms link neighbors). Maximize the loot.
+
+**Problem (II).** Same, but the houses are arranged in a **circle** — the first and last are now adjacent.
+
+## House Robber I — the recurrence
+
+At house `i` you choose: **skip** it (carry `dp[i-1]`) or **rob** it (`nums[i] + dp[i-2]`, since `i-1` is then forbidden):
+
+```
+dp[i] = max(dp[i - 1], nums[i] + dp[i - 2])
+```
+
+Brute force tries every subset of non-adjacent houses — O(2ⁿ). The DP is O(n), and since `dp[i]` reads only the last two values it rolls to O(1) space:
+
+```java
+int rob(int[] nums) {
+    int prev2 = 0, prev1 = 0;          // best loot up to i-2, i-1
+    for (int x : nums) {
+        int cur = Math.max(prev1, prev2 + x);
+        prev2 = prev1;
+        prev1 = cur;
+    }
+    return prev1;
+}
+```
+
+## House Robber II — break the circle
+
+The circular constraint means the first and last houses cannot **both** be robbed. Split into two linear subproblems and take the better:
+
+- Rob houses `[0 .. n-2]` (exclude the last), or
+- Rob houses `[1 .. n-1]` (exclude the first).
+
+Either way the circular adjacency is broken, and each subproblem is plain House Robber I.
+
+```java
+int rob(int[] nums) {
+    int n = nums.length;
+    if (n == 1) return nums[0];
+    return Math.max(
+        robRange(nums, 0, n - 2),
+        robRange(nums, 1, n - 1));
+}
+private int robRange(int[] nums, int lo, int hi) {
+    int prev2 = 0, prev1 = 0;
+    for (int i = lo; i <= hi; i++) {
+        int cur = Math.max(prev1, prev2 + nums[i]);
+        prev2 = prev1;
+        prev1 = cur;
+    }
+    return prev1;
+}
+```
+
+Both are O(n) time, O(1) space.
+
+<ProbeNote>
+The elegant move in part II is reducing the circular case to **two runs** of the linear solver rather than inventing a new recurrence. Watch the `n == 1` edge case — the range `[1 .. n-1]` is empty and `[0 .. n-2]` is also empty, so guard it. House Robber III (a binary tree) is the common escalation: switch to a post-order DFS returning `{robThisNode, skipThisNode}` pairs.
+</ProbeNote>

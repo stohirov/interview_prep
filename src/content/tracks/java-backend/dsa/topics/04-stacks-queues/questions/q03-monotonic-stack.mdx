@@ -1,0 +1,41 @@
+A **monotonic stack** is a stack you keep sorted — strictly increasing or strictly decreasing — as you scan a sequence once. Before pushing the current element, you **pop every element that breaks the ordering**. That single discipline turns a class of "nearest larger/smaller neighbor" problems from O(n²) into O(n).
+
+## The key insight: amortized O(n)
+
+The scan *looks* nested — an inner `while` loop popping inside an outer `for` loop — but each element is **pushed exactly once and popped at most once**. Total work across the whole run is bounded by `2n` operations, so the algorithm is O(n) even though any single step might pop many elements.
+
+## When to reach for it
+
+Whenever the question is "for each element, find the nearest element to the left/right that is **greater/smaller**." The stack remembers candidates that are still "waiting" for their answer, and you resolve them in batches when a qualifying element finally arrives.
+
+- **Decreasing stack** → next/previous **greater** element.
+- **Increasing stack** → next/previous **smaller** element.
+
+Store **indices**, not values, when you need distances (e.g., Daily Temperatures) — the index lets you compute the gap.
+
+## Template
+
+```java
+int[] nextGreater(int[] a) {
+    int n = a.length;
+    int[] res = new int[n];
+    Arrays.fill(res, -1);
+    Deque<Integer> stack = new ArrayDeque<>();   // holds indices, values decreasing
+    for (int i = 0; i < n; i++) {
+        // current a[i] is the "next greater" for everything smaller on the stack
+        while (!stack.isEmpty() && a[stack.peek()] < a[i]) {
+            res[stack.pop()] = a[i];
+        }
+        stack.push(i);
+    }
+    return res;   // unresolved indices keep -1 (no greater element exists)
+}
+```
+
+## The family
+
+Next Greater Element, Daily Temperatures, Largest Rectangle in Histogram, Trapping Rain Water (stack variant), Stock Span, and Remove K Digits / build-the-smallest-number all reduce to this pattern.
+
+<ProbeNote>
+Two things interviewers want to hear: the **amortized O(n)** argument ("each index is pushed and popped once"), and the **direction choice** — increasing vs decreasing stack, and whether you scan left-to-right or right-to-left, depending on whether you want the *next* or *previous* qualifying neighbor. State the invariant ("the stack stays decreasing") before you write the loop.
+</ProbeNote>

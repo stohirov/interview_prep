@@ -1,0 +1,57 @@
+**Problem.** Find the **kth largest** element in an unsorted array (kth largest by value, not the kth distinct). Show both the heap and the QuickSelect solutions and contrast them.
+
+## Baseline — sort, O(n log n)
+
+`Arrays.sort(nums)` then return `nums[n - k]`. One line, correct, but does more work than needed: you don't need the whole array sorted.
+
+## Heap solution — O(n log k) time, O(k) space
+
+Keep a **min-heap of size k**. After scanning all elements, the heap holds the k largest, and its root is the kth largest. This is the streaming-friendly choice: it works when `n` is huge or data arrives online, since memory is bounded by `k`.
+
+```java
+int findKthLargestHeap(int[] nums, int k) {
+    PriorityQueue<Integer> heap = new PriorityQueue<>();  // min-heap
+    for (int x : nums) {
+        heap.offer(x);
+        if (heap.size() > k) heap.poll();   // evict the smallest -> keep top k
+    }
+    return heap.peek();
+}
+```
+
+## QuickSelect — O(n) average, O(1) extra space
+
+The kth largest sits at index `n - k` in sorted order. Partition (Lomuto) around a pivot; the pivot lands at its final sorted index `p`. If `p == target` we're done; otherwise recurse into **only the side that contains the target** — that's what turns the O(n log n) of a full sort into O(n) average (n + n/2 + n/4 + … = 2n).
+
+```java
+int findKthLargest(int[] nums, int k) {
+    int target = nums.length - k;            // index in ascending order
+    int lo = 0, hi = nums.length - 1;
+    Random rnd = new Random();
+    while (lo < hi) {
+        int p = partition(nums, lo, hi, lo + rnd.nextInt(hi - lo + 1));
+        if (p == target) break;
+        else if (p < target) lo = p + 1;     // recurse right only
+        else hi = p - 1;                     // recurse left only
+    }
+    return nums[target];
+}
+
+private int partition(int[] a, int lo, int hi, int pivotIdx) {
+    int pivot = a[pivotIdx];
+    swap(a, pivotIdx, hi);                   // park pivot at the end
+    int store = lo;
+    for (int i = lo; i < hi; i++)
+        if (a[i] < pivot) swap(a, store++, i);
+    swap(a, store, hi);                      // pivot to its final position
+    return store;
+}
+
+private void swap(int[] a, int i, int j) { int t = a[i]; a[i] = a[j]; a[j] = t; }
+```
+
+<Callout kind="tip" title="Which to reach for">
+QuickSelect: O(n) average, in-place — best when you have the whole array in memory and want raw speed. Min-heap of size k: O(n log k), bounded memory — best for streams or when k ≪ n and you can't mutate/hold the full array. The **random pivot** is non-negotiable for QuickSelect: a fixed pivot on adversarial input degrades to O(n²).
+</Callout>
+
+<ProbeNote>Offer both and state the trade-off out loud. The two mistakes interviewers watch for: forgetting that the worst case of QuickSelect is O(n²) (mitigate with a random pivot; median-of-medians guarantees O(n) but is rarely coded), and the off-by-one in `target = n - k` for *largest* vs *smallest*. For a stream, the heap is the only viable option.</ProbeNote>

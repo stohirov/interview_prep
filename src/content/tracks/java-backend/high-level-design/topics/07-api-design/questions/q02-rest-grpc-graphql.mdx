@@ -1,0 +1,59 @@
+## REST vs gRPC vs GraphQL — when to use each
+
+There is no universal winner; each optimizes a different axis. The senior answer names the axis and matches it to the call site.
+
+### The three at a glance
+
+| | REST | gRPC | GraphQL |
+| --- | --- | --- | --- |
+| Transport | HTTP/1.1 or 2, JSON | HTTP/2, Protobuf (binary) | HTTP, JSON, single endpoint |
+| Schema | optional (OpenAPI) | mandatory (`.proto`) | mandatory (SDL) |
+| Shape | server defines resources | server defines RPC methods | **client** picks fields |
+| Streaming | SSE / WebSockets bolt-on | native bidirectional streams | subscriptions |
+| Caching | HTTP caching "for free" | none built-in | hard (POST, dynamic shape) |
+| Best at | public, cacheable, resource APIs | internal high-throughput RPC | client-driven aggregation |
+
+### REST — the default for public, resource-shaped APIs
+
+Use REST when the domain is naturally resources, when callers are third parties or browsers, and when you want HTTP **caching, intermediaries, and tooling for free**. It's the most interoperable and the easiest to debug (curl, browser). The cost is **over-/under-fetching** (endpoints return a fixed shape) and **chatty** clients (one round trip per resource).
+
+### gRPC — internal, high-throughput, low-latency RPC
+
+Reach for gRPC for **service-to-service** calls inside your own network. Wins:
+
+- **Binary Protobuf** is far smaller and faster to (de)serialize than JSON.
+- **HTTP/2 multiplexing** runs many calls over one connection; **bidirectional streaming** is native.
+- The **`.proto` contract** gives generated, type-safe clients in every language and disciplined schema evolution.
+
+Costs: not natively browser-friendly (needs gRPC-Web + a proxy), binary payloads are harder to eyeball, and you lose HTTP caching. This is why the common pattern is **REST/GraphQL at the edge, gRPC between internal services**.
+
+<Callout kind="tip" title="The interview phrasing">
+"REST or GraphQL at the public edge for cacheability and browser support; **gRPC between internal microservices** for throughput, streaming, and a strict contract." That one sentence signals you've shipped both.
+</Callout>
+
+### GraphQL — client-driven shape, kill the endpoint sprawl
+
+GraphQL fits when **many heterogeneous clients** (web, iOS, Android, partners) each need a different slice of a graph of related data, and a REST API would either explode into custom endpoints or force over-fetching. The client sends one query describing exactly the fields it wants; the server resolves them. It excels at aggregating multiple back-end sources behind one schema.
+
+But it carries sharp traps:
+
+- **The N+1 problem.** A query for `users { posts { comments } }` naively fires one query per user, then per post — a fan-out explosion. The fix is a **batching/caching layer (DataLoader)** that coalesces the per-field fetches into batched lookups. Always mention DataLoader.
+- **Caching is hard.** Queries are usually `POST` with a dynamic shape, so HTTP/CDN caching doesn't apply; you need persisted queries or app-level caching.
+- **Cost / abuse control.** A single query can be arbitrarily deep/expensive, so you need **query depth/complexity limits** and timeouts.
+- **Over-fetch on the *server*.** GraphQL solves client over-fetch, not server over-fetch — a sloppy resolver can still pull whole rows.
+
+<Mermaid caption="Where each protocol typically lives">{`graph LR
+    Web[Browser / Mobile] -->|REST or GraphQL| GW[API Gateway / BFF]
+    GW -->|gRPC| S1[Service A]
+    GW -->|gRPC| S2[Service B]
+    S1 -->|gRPC stream| S3[Service C]`}</Mermaid>
+
+### How to choose, in one pass
+
+- Public, cacheable, resource CRUD, third-party consumers → **REST**.
+- Internal, latency-sensitive, high-volume, streaming, polyglot services → **gRPC**.
+- Diverse clients shaping their own queries over a connected data graph → **GraphQL** (with DataLoader + complexity limits).
+
+<ProbeNote>
+Interviewers want the *axis* behind each pick, not a favorite. Land "gRPC internal / REST or GraphQL edge", explain GraphQL's over-fetch win **and** its N+1 and caching costs (naming DataLoader), and note gRPC's binary/HTTP-2 throughput advantage. Saying "GraphQL is just better REST" is the junior tell.
+</ProbeNote>

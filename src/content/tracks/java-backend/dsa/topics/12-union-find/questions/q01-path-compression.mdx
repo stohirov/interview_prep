@@ -1,0 +1,43 @@
+**Path compression** is the optimization applied during `find`: after locating the root of `x`, repoint every node visited along the way **directly to the root**, flattening the tree. Subsequent `find` calls on those nodes then terminate in O(1).
+
+## What it does
+
+A `find` already has to walk from `x` up to its root. Path compression piggybacks on that walk — it costs nothing extra in the current call but permanently shortens the path for everyone it touched.
+
+<Diagram caption="find(d) walks to root a, then re-parents every node on the path directly to a.">{`  before find(d)        after find(d)
+       a                     a
+       |                  / / | \\
+       b                 b c  d (all point straight to a)
+       |
+       c
+       |
+       d`}</Diagram>
+
+## The two forms
+
+```java
+// Recursive — full compression; every node on the path points to the root.
+int find(int x) {
+    if (parent[x] != x) parent[x] = find(parent[x]);
+    return parent[x];
+}
+
+// Iterative — path halving; every node points to its grandparent. One pass, no stack.
+int findHalving(int x) {
+    while (parent[x] != x) {
+        parent[x] = parent[parent[x]];   // skip a level
+        x = parent[x];
+    }
+    return x;
+}
+```
+
+Full compression flattens completely but recurses; **path halving** flattens nearly as well in a single iterative pass with no recursion stack — the production-favored variant.
+
+## Why it matters
+
+Without compression, even union-by-rank trees stay O(log n) tall, so `m` operations cost O(m log n). **Path compression combined with union by rank/size** drops the amortized cost to **O(α(n))** per operation — inverse Ackermann, effectively constant. Neither optimization alone reaches that bound; it is the combination that does.
+
+<ProbeNote>
+The key sentence: compression flattens the tree *during the traversal you were already doing*, so it is amortized-free yet pays off forever. Be ready to write both forms and to state that the near-constant α(n) bound requires path compression **and** union by rank/size together — a classic follow-up trap.
+</ProbeNote>

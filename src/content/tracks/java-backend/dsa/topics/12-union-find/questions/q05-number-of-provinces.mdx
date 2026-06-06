@@ -1,0 +1,51 @@
+**Problem.** Given an `n × n` matrix `isConnected` where `isConnected[i][j] == 1` means city `i` and city `j` are directly connected, return the number of **provinces** — groups of cities connected directly or transitively. This is a **connected-components count**, the textbook union-find application.
+
+## Brute force — DFS/BFS flood fill, O(n²) time
+
+Iterate over unvisited cities; from each, DFS across the adjacency matrix marking everything reachable, incrementing a province counter per new flood. Perfectly valid and O(n²) since the matrix has n² entries. Union-find is the more *composable* answer and the one this topic is about.
+
+## Optimal — union-find, O(n² · α(n)) time, O(n) space
+
+Union every connected pair, then count distinct roots. Below is the **reusable DSU class** used throughout this topic — both optimizations, a live component count, and a `connected` helper.
+
+```java
+class DSU {
+    int[] parent, rank;
+    int count;                                    // number of disjoint sets
+    DSU(int n) {
+        parent = new int[n];
+        rank = new int[n];
+        count = n;
+        for (int i = 0; i < n; i++) parent[i] = i;
+    }
+    int find(int x) {                             // path compression
+        if (parent[x] != x) parent[x] = find(parent[x]);
+        return parent[x];
+    }
+    boolean union(int a, int b) {                 // union by rank
+        int ra = find(a), rb = find(b);
+        if (ra == rb) return false;               // already in same set
+        if (rank[ra] < rank[rb]) { int t = ra; ra = rb; rb = t; }
+        parent[rb] = ra;
+        if (rank[ra] == rank[rb]) rank[ra]++;
+        count--;                                   // one fewer set after a merge
+        return true;
+    }
+    boolean connected(int a, int b) { return find(a) == find(b); }
+}
+
+public int findCircleNum(int[][] isConnected) {
+    int n = isConnected.length;
+    DSU dsu = new DSU(n);
+    for (int i = 0; i < n; i++)
+        for (int j = i + 1; j < n; j++)            // upper triangle is enough
+            if (isConnected[i][j] == 1) dsu.union(i, j);
+    return dsu.count;                              // distinct sets = provinces
+}
+```
+
+Maintaining `count` in the DSU (decrement on every real merge) means the answer is O(1) at the end — no final pass to count roots. We scan only the upper triangle because the matrix is symmetric.
+
+<ProbeNote>
+Lead by naming this as **counting connected components**. The clean trick is tracking the set count inside the DSU and decrementing on each successful union, so the answer falls out for free. Iterate `j` from `i + 1` to exploit symmetry. This DSU class is the reusable workhorse for the rest of the topic — Redundant Connection, Accounts Merge, and the others reuse it verbatim.
+</ProbeNote>

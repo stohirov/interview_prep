@@ -1,0 +1,30 @@
+The **Euclidean algorithm** computes the greatest common divisor by repeatedly replacing the larger number with the remainder of dividing it by the smaller:
+
+```
+gcd(a, b) = gcd(b, a mod b),   gcd(a, 0) = a
+```
+
+## Why it's correct
+
+The proof rests on one lemma: **`gcd(a, b) = gcd(b, a mod b)`**.
+
+Write `a = q·b + r` where `r = a mod b`. Any common divisor `d` of `a` and `b` divides `a` and `b`, hence divides `r = a - q·b` — so `d` is also a common divisor of `b` and `r`. Conversely, any common divisor of `b` and `r` divides `a = q·b + r`. The two pairs `(a, b)` and `(b, r)` therefore have *exactly the same set of common divisors*, so their greatest common divisors are equal. Each step strictly shrinks the second argument (`r < b`), so the process must reach `gcd(g, 0) = g` — and `g` is the GCD.
+
+```java
+long gcd(long a, long b) {
+    return b == 0 ? a : gcd(b, a % b);
+}
+```
+
+## Why it's fast — O(log min(a, b))
+
+Each step at least *halves* the larger operand within two iterations: if `b <= a/2`, then `a mod b < b <= a/2`; if `b > a/2`, then `a mod b = a - b < a/2`. Either way the value roughly halves every two steps, so the number of iterations is logarithmic. The worst case is consecutive **Fibonacci numbers** — the slowest-converging inputs (this is Lamé's theorem).
+
+## Practical notes
+
+- Works regardless of which argument is larger — the first recursive call swaps them automatically (`gcd(4, 18)` → `gcd(18, 4)`).
+- For negatives, take absolute values first, or rely on `Math.abs`, since sign doesn't affect divisibility.
+- **LCM** follows: `lcm(a, b) = a / gcd(a, b) * b` — divide before multiplying to avoid overflow.
+- `BigInteger.gcd` is the production tool for arbitrary precision.
+
+<ProbeNote>The expected answer is the lemma `gcd(a, b) = gcd(b, a mod b)` *with* the "same set of common divisors" justification — not just the code. The standout follow-up is the complexity: O(log min(a,b)), with consecutive Fibonacci numbers as the worst case. Mention dividing before multiplying for LCM to show overflow awareness.</ProbeNote>

@@ -1,0 +1,36 @@
+**Problem.** Given a sorted array `nums` and a `target`, return its index, or `-1` if absent. O(log n) required.
+
+## Brute force — O(n)
+
+A linear scan ignores the sortedness — correct but defeats the point. The whole reason the array is sorted is to permit O(log n).
+
+## Optimal — binary search, O(log n)
+
+Maintain an inclusive window `[lo, hi]`. Each step compares the midpoint to the target and discards half the window.
+
+```java
+int search(int[] nums, int target) {
+    int lo = 0, hi = nums.length - 1;        // inclusive bounds
+    while (lo <= hi) {                        // <= : lo == hi is still a candidate
+        int mid = lo + (hi - lo) / 2;         // overflow-safe
+        if (nums[mid] == target) return mid;
+        else if (nums[mid] < target) lo = mid + 1;   // discard left half + mid
+        else hi = mid - 1;                            // discard right half + mid
+    }
+    return -1;
+}
+```
+
+**O(log n)** time — the window halves every iteration — and **O(1)** space.
+
+## The three details that make it correct
+
+- **`lo <= hi`** matches the inclusive `hi = length - 1`. With `lo < hi` you'd skip the final single-element window.
+- **`lo + (hi - lo) / 2`** avoids the `int` overflow that `(lo + hi) / 2` suffers on huge arrays.
+- **`mid + 1` / `mid - 1`** move strictly past `mid`, guaranteeing the window shrinks every iteration so the loop always terminates.
+
+<Callout kind="tip" title="Use the library when you can">
+In production, `Arrays.binarySearch(nums, target)` does this for you — but note it returns `-(insertionPoint) - 1` for a miss, not `-1`, and gives an *arbitrary* match index among duplicates. When you need a specific occurrence or a custom return, write it yourself.
+</Callout>
+
+<ProbeNote>This is the template every other variant builds on, so getting all three details right — `<=`, overflow-safe mid, strict `±1` updates — matters more than the problem itself. Mention `Arrays.binarySearch` and its non-obvious negative return value for misses; that's a frequent follow-up.</ProbeNote>

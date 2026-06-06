@@ -1,0 +1,22 @@
+**Problem.** What is Timsort, and why is it fast on real-world data?
+
+## The idea
+
+**Timsort** (Tim Peters, 2002, originally for Python; adopted by Java for `Arrays.sort(Object[])` and `Collections.sort`) is an **adaptive, stable MergeSort** tuned for the data programs actually sort: mostly-ordered arrays, concatenations of sorted blocks, and short inputs. Its worst case is O(n log n), but on partially sorted data it approaches **O(n)**.
+
+## How it works
+
+1. **Find natural runs.** Scan the array for maximal already-sorted segments (ascending, or strictly descending — which it reverses in place). Real data is full of these.
+2. **Extend short runs with binary insertion sort.** If a run is shorter than a computed `minrun` (32–64), it's extended by binary-insertion-sorting the next few elements. Insertion sort is near-optimal on tiny, nearly-sorted arrays.
+3. **Merge runs by a stack discipline.** Run lengths are pushed on a stack that maintains invariants (each run roughly the sum of the two above it) so merges stay **balanced**, keeping the overall cost O(n log n).
+4. **Galloping mode.** When merging, if one run keeps "winning," Timsort switches to exponential (binary) search to jump ahead, skipping element-by-element comparison. This is what makes merging structured data dramatically faster.
+
+## Why real-world-fast
+
+Theoretical sorts assume random input; real input is rarely random. Timsort is **adaptive** — it detects existing order and does proportionally less work, hitting O(n) on already-sorted input. It's **stable**, satisfying the object-sort contract. And `minrun` + binary insertion sort keep small subproblems cache-friendly.
+
+<Callout kind="info" title="One historical gotcha">
+The original run-merging invariant had a bug (found in 2015 via formal verification) that could violate the stack invariant on adversarial inputs; the JDK bumped its run-stack sizing to fix it. Trivia, but a great signal you actually understand the merge-stack mechanics.
+</Callout>
+
+<ProbeNote>Hit the three pillars: natural runs + insertion-sort extension, balanced merge via the run stack, and galloping mode. The headline is "adaptive and stable" — O(n) on nearly-sorted data, O(n log n) worst case, stability for free. That combination is why it beats a textbook MergeSort on the inputs that occur in practice.</ProbeNote>

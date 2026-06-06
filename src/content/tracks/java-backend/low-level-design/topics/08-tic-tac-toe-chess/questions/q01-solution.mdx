@@ -1,0 +1,219 @@
+This solution uses **chess** as the running example (tic-tac-toe is the same shape with a trivial `canMove` and a row/col/diagonal win check). The design specializes four things: piece movement (polymorphism/Strategy), creation (Factory), reversibility (Command), and lifecycle (State).
+
+## 1. Functional requirements
+
+- An 8×8 board with the six piece types: **King, Queen, Rook, Bishop, Knight, Pawn**, in two colors.
+- Two players alternate turns; only the player whose turn it is may move.
+- A move is legal only if it obeys the moving piece's **movement rules**, the path is clear (except the knight), the destination isn't occupied by a friendly piece, and it does **not leave the mover's king in check**.
+- Detect **check**, **checkmate**, and **stalemate**; end the game accordingly.
+- Support **undo / redo** of moves.
+- Capture opponent pieces; (follow-ups: castling, en passant, promotion).
+
+## 2. Non-functional requirements
+
+- **Extensibility** — adding a piece (e.g. a fairy-chess piece) or a rule variant must not edit existing pieces (Open/Closed).
+- **Reversibility** — every move must be perfectly undoable, including restoring a captured piece.
+- **Separation of concerns** — board state, movement rules, and game lifecycle are independent.
+- **Testability** — `canMove` per piece is pure and unit-testable in isolation.
+
+## 3. Core entities
+
+| Entity | Responsibility |
+| --- | --- |
+| `Game` | Orchestrates turns; holds board, players, current `GameState`, and the move history. |
+| `Board` | 8×8 grid of `Cell`s; `pieceAt`, `setPiece`, clone/snapshot for check testing. |
+| `Cell` | A square (row, col) holding an optional `Piece`. |
+| `Piece` | Abstract; concrete subtypes implement `canMove`. Knows color. |
+| `Player` | A participant bound to a color (white/black). |
+| `Move` | A **Command**: from-cell, to-cell, captured piece; `execute` / `undo`. |
+| `MoveValidator` | Validates a move against piece rules **and** check-safety. |
+| `GameState` | Lifecycle: `ACTIVE`, `CHECK`, `CHECKMATE`, `STALEMATE`. |
+| `PieceFactory` | Builds the initial piece set by color. |
+
+## 4. Class diagram
+
+<Mermaid caption="Chess class model — polymorphic pieces, Command moves, State lifecycle">{`classDiagram
+    class Game {
+      -Board board
+      -Player[] players
+      -GameState state
+      -Deque~Move~ history
+      -Deque~Move~ redoStack
+      +makeMove(from, to) boolean
+      +undo()
+      +redo()
+    }
+    class Board {
+      -Cell[][] cells
+      +pieceAt(int,int) Piece
+      +setPiece(int,int,Piece)
+    }
+    class Piece {
+      <<abstract>>
+      -Color color
+      +canMove(Board, Cell from, Cell to) boolean
+    }
+    class Move {
+      -Cell from
+      -Cell to
+      -Piece captured
+      +execute(Board)
+      +undo(Board)
+    }
+    class MoveValidator {
+      +isLegal(Board, Move, Color) boolean
+    }
+    class PieceFactory {
+      +createInitial(Color) List~Piece~
+    }
+    Game o-- Board
+    Game o-- "*" Move
+    Game --> GameState
+    Game ..> MoveValidator
+    Board o-- "*" Cell
+    Cell o-- Piece
+    Piece <|-- King
+    Piece <|-- Queen
+    Piece <|-- Rook
+    Piece <|-- Bishop
+    Piece <|-- Knight
+    Piece <|-- Pawn`}</Mermaid>
+
+## 5. Key interfaces and classes
+
+Each piece validates **its own** movement — no central type-switch (Strategy via polymorphism):
+
+```java
+enum Color { WHITE, BLACK }
+
+abstract class Piece {
+    protected final Color color;
+    protected Piece(Color color) { this.color = color; }
+    public Color color() { return color; }
+
+    /** Pseudo-legal: respects this piece's geometry & path, ignoring check. */
+    public abstract boolean canMove(Board board, Cell from, Cell to);
+}
+
+final class Rook extends Piece {
+    Rook(Color c) { super(c); }
+    public boolean canMove(Board b, Cell from, Cell to) {
+        if (from.row() != to.row() && from.col() != to.col()) return false; // straight only
+        return b.isPathClear(from, to) && !b.isFriendlyAt(to, color);
+    }
+}
+
+final class Knight extends Piece {
+    Knight(Color c) { super(c); }
+    public boolean canMove(Board b, Cell from, Cell to) {
+        int dr = Math.abs(from.row() - to.row()), dc = Math.abs(from.col() - to.col());
+        return (dr == 2 && dc == 1) || (dr == 1 && dc == 2)   // L-shape, jumps over pieces
+            && !b.isFriendlyAt(to, color);
+    }
+}
+```
+
+A move is a **Command** that records what it captured, so it can undo itself:
+
+```java
+final class Move {
+    private final Cell from, to;
+    private Piece captured;                 // filled on execute, used on undo
+
+    Move(Cell from, Cell to) { this.from = from; this.to = to; }
+
+    void execute(Board b) {
+        Piece moving = b.pieceAt(from);
+        captured = b.pieceAt(to);           // may be null
+        b.setPiece(to, moving);
+        b.clear(from);
+    }
+    void undo(Board b) {
+        Piece moving = b.pieceAt(to);
+        b.setPiece(from, moving);
+        b.setPiece(to, captured);           // restores captured piece (or clears)
+    }
+}
+```
+
+The **validator** layers check-safety on top of pseudo-legal moves; the **game** drives turns and the state machine:
+
+```java
+final class MoveValidator {
+    boolean isLegal(Board b, Move m, Color mover) {
+        Piece p = b.pieceAt(m.from());
+        if (p == null || p.color() != mover) return false;
+        if (!p.canMove(b, m.from(), m.to())) return false;
+        m.execute(b);                         // try it...
+        boolean exposesKing = b.isKingInCheck(mover);
+        m.undo(b);                            // ...then roll back
+        return !exposesKing;
+    }
+}
+
+final class Game {
+    private final Board board = new Board();
+    private final Deque<Move> history = new ArrayDeque<>();
+    private final Deque<Move> redoStack = new ArrayDeque<>();
+    private final MoveValidator validator = new MoveValidator();
+    private GameState state = GameState.ACTIVE;
+    private Color turn = Color.WHITE;
+
+    boolean makeMove(Cell from, Cell to) {
+        Move m = new Move(from, to);
+        if (state == GameState.CHECKMATE || state == GameState.STALEMATE) return false;
+        if (!validator.isLegal(board, m, turn)) return false;
+        m.execute(board);
+        history.push(m);
+        redoStack.clear();
+        turn = (turn == Color.WHITE) ? Color.BLACK : Color.WHITE;
+        state = board.evaluate(turn);         // ACTIVE / CHECK / CHECKMATE / STALEMATE
+        return true;
+    }
+
+    void undo() {
+        if (history.isEmpty()) return;
+        Move m = history.pop();
+        m.undo(board);
+        redoStack.push(m);
+        turn = (turn == Color.WHITE) ? Color.BLACK : Color.WHITE;
+    }
+    void redo() {
+        if (redoStack.isEmpty()) return;
+        Move m = redoStack.pop();
+        m.execute(board);
+        history.push(m);
+        turn = (turn == Color.WHITE) ? Color.BLACK : Color.WHITE;
+    }
+}
+```
+
+## 6. Design patterns used
+
+- **Strategy (via polymorphism)** — each `Piece` subtype owns `canMove`. Movement rules vary per piece with zero central conditionals; new pieces extend `Piece` only.
+- **Factory** — `PieceFactory.createInitial(color)` centralizes the starting layout, so construction details live in one place.
+- **Command** — `Move` encapsulates execute/undo with the captured piece, turning history into a stack of reversible commands; this *is* undo/redo.
+- **State** — `GameState` (ACTIVE / CHECK / CHECKMATE / STALEMATE) governs whether moves are accepted; the game recomputes it after each move.
+- **Observer** — the UI / logger / network peer subscribes to board changes and re-renders (sketched in follow-ups).
+
+## 7. Trade-offs and alternatives
+
+- **Pseudo-legal then verify, vs fully-legal generation.** Validating geometry first and *then* testing check-safety by making-and-undoing the move is simple and correct, but the make/undo on every candidate is wasteful for an engine. An AI would generate fully-legal moves directly with attack bitboards.
+- **Polymorphic pieces vs a rules table.** Per-piece `canMove` is clean OO and the expected answer; a data-driven move table is more compact and easier to retune but obscures the OO modeling the interviewer wants to see.
+- **Command undo vs board snapshots.** Storing a captured piece per move is O(1) memory; full board snapshots per move are simpler to reason about but O(64) each — fine for tic-tac-toe, wasteful for long chess games.
+- **Special moves.** Castling, en passant, and promotion don't fit plain `Move` cleanly — model them as `Move` subclasses (still Commands) whose `execute`/`undo` move two pieces or swap a pawn.
+
+## 8. Common follow-up questions
+
+- **Undo / redo** — two `Deque<Move>` stacks; `undo` pops history and reverses the command, `redo` re-executes. (Shown above.)
+- **Time controls** — a per-player `Clock`; the `Game` decrements the active player's clock and can end the game on flag-fall.
+- **Save / load** — serialize the move history (or FEN/PGN) rather than the board; replay commands to reconstruct state.
+- **AI opponent** — a `MoveGenerator` + minimax/alpha-beta `Strategy`; the `Game` interface is unchanged.
+- **Multiplayer / networked** — `Move` is already a serializable command; an Observer pushes board deltas to remote clients; the server is the authority on legality.
+- **Special rules** — castling, en passant, promotion as `Move` subclasses; threefold-repetition and the 50-move rule as draw detectors in `evaluate`.
+
+## 9. What interviewers are really probing
+
+<ProbeNote>
+That you (1) framed the simple game first and *upgraded* the same skeleton to chess instead of starting over, (2) made movement **polymorphic per piece** rather than a `switch (pieceType)` in one giant validator, (3) modeled each `Move` as a **Command** so undo/redo is a stack — and recognized that capturing the taken piece is what makes undo correct, and (4) used a **State** machine for check/checkmate/stalemate. The sharpest signal is separating *pseudo-legal* movement (the piece's geometry) from *legality* (does it leave my king in check?) — candidates who conflate them produce subtly illegal chess.
+</ProbeNote>

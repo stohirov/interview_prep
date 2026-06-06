@@ -1,0 +1,23 @@
+"SQL vs NoSQL" is the wrong framing — and interviewers know it. There is no single NoSQL; there is a **family of specialized stores**, each tuned for an access pattern that the relational model serves poorly. The senior skill is not picking a side but **matching the data model and query pattern to the right engine**, and being honest about the operational cost of running several at once. Get this right and every "which database?" moment in a design becomes a defensible, one-sentence justification.
+
+## The decision is access pattern, not buzzword
+
+Start from how the data is written and read, not from a product name. A few questions settle most choices: Are entities **richly related** (joins, transactions across them) or **self-contained**? Is the query pattern **known and narrow** (look up by key) or **ad-hoc** (arbitrary filters, aggregations)? What is the **read/write shape and scale**? What **consistency** does correctness demand? The answers point at a family.
+
+## The families and when each wins
+
+- **Relational (Postgres, MySQL).** Structured data with relationships, multi-row **ACID transactions**, ad-hoc queries via SQL, and strong consistency. The correct default for most systems — orders, users, inventory, anything with invariants.
+- **Document (MongoDB, DynamoDB).** Self-contained, schema-flexible aggregates read and written as a whole (a product catalog entry, a user profile). Wins when the data is hierarchical and you rarely join.
+- **Key-value (Redis, DynamoDB).** Pure lookup by key at extreme throughput and low latency — sessions, caches, feature flags. No query flexibility, by design.
+- **Wide-column (Cassandra, ScyllaDB, HBase).** Massive write throughput and linear horizontal scale with tunable consistency. Time-series at scale, event logs, write-heavy feeds. You design the table per query.
+- **Graph (Neo4j, Neptune).** Many-hop relationship traversal — social graphs, fraud rings, recommendations — where SQL joins explode combinatorially.
+- **Search (Elasticsearch, OpenSearch).** Full-text relevance, fuzzy matching, faceting. A read-optimized **index**, usually fed from a system of record, not the source of truth.
+- **Time-series (TimescaleDB, InfluxDB, Prometheus).** Append-heavy, time-stamped metrics with downsampling and retention. Optimized for "range over time, aggregate."
+
+## Polyglot persistence — and its tax
+
+Using the right tool per workload is **polyglot persistence**. It is genuinely powerful (each store excels at its job) but it is not free: more systems to operate, back up, monitor, and secure; **dual-write / consistency** problems across stores (solved with the outbox pattern + CDC); and a steeper on-call burden. The mature default is **"Postgres until you can't"** — Postgres covers relational, JSON documents, key-value, full-text search, and time-series (via extensions) remarkably far — then introduce a specialized store only when a specific access pattern demonstrably outgrows it.
+
+## What the questions cover
+
+The questions name RDBMS strengths and limits, walk each NoSQL family with its sweet spot, weigh polyglot persistence honestly, and pin down the concrete signals that you have actually outgrown Postgres.

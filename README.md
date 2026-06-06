@@ -4,9 +4,10 @@ A web app for senior Java backend interview preparation. Structured topics with 
 written for FAANG- and EPAM-style questions, every claim linked back to the JDK 25
 Javadoc, the JLS, or a JEP.
 
-Four modules ship seeded — **Collections**, **OOP**, **PostgreSQL**, and **Spring
-Framework & Spring Boot** — and Concurrency, JVM, System Design and DSA modules slot
-into the same scaffold without any structural changes.
+Seven modules ship seeded — **Collections**, **OOP**, **PostgreSQL**, **Spring
+Framework & Spring Boot**, **Data Structures & Algorithms**, **Low-Level Design**, and
+**High-Level Design** — and further modules (Concurrency, JVM) slot into the same scaffold
+without any structural changes.
 
 ## Modules
 
@@ -16,9 +17,13 @@ into the same scaffold without any structural changes.
 | **Object-Oriented Programming** | 16 | Four pillars, equals/hashCode, immutability, SOLID, GoF patterns, modern Java records/sealed/pattern matching |
 | **PostgreSQL** | 15 | Relational model, data types, indexing, query planning & EXPLAIN, transactions/MVCC, locks, partitioning, replication, backup/PITR, tuning |
 | **Spring Framework & Spring Boot** | 16 | IoC/DI, bean lifecycle, auto-configuration, MVC/REST, Spring Data JPA, transactions, security, AOP, caching, async/virtual threads, WebFlux, Actuator, testing, Boot 3 stack — layered middle → senior |
+| **Data Structures & Algorithms** | 20 | Arrays, strings, linked lists, stacks/queues, hash tables, trees, tries, heaps, graphs (BFS/DFS), sorting, binary search, two-pointers, sliding window, recursion/backtracking, dynamic programming, greedy — each with the coding-question structure (problem → brute force + Big-O → optimal + reasoning → full Java) |
+| **Low-Level Design** | 21 | OO/machine-coding interviews: parking lot, elevator, library, vending machine, ATM, movie booking, ride-sharing, logger, rate limiter, LRU/LFU cache, pub/sub, notification system, scheduler and more — each a 9-section design solution with GoF patterns and `<Mermaid>` class diagrams |
+| **High-Level Design** | 28 | Distributed-systems interviews: fundamentals (CAP/PACELC, replication, partitioning), building blocks (caching, queues, SQL vs NoSQL, rate limiting, load balancing, CDN, observability), and full system designs (URL shortener, Twitter feed, chat, ride-sharing, Instagram, video streaming, notifications, web crawler, autocomplete, distributed KV store, job scheduler, Google Docs, payments, exam-prep) — each an 11-section solution with capacity math and `<Mermaid>` architecture graphs, across FAANG / EU-contracting / regional styles |
 
 PostgreSQL doc links use `/docs/current/` so they auto-track the latest major version;
-Spring links use the Framework 6.x / Boot 3.x reference paths under `docs.spring.io`.
+Spring links use the Framework 6.x / Boot 3.x reference paths under `docs.spring.io`. The
+DSA / LLD / HLD modules add **Mermaid** (client-side-rendered) diagrams to the MDX stack.
 
 ## Run it
 
@@ -36,6 +41,7 @@ npm run check:sources   # HEAD-check every source URL, fail on 404
 - **React Router v6** for routing
 - **Tailwind CSS** (with `darkMode: 'class'`) for styling
 - **MDX** via `@mdx-js/rollup` for content authoring
+- **Mermaid** (`mermaid@11`) for diagrams — code-split and lazy-loaded, rendered client-side via the `<Mermaid>` MDX component
 - **Shiki** (via `@shikijs/rehype`) for build-time syntax highlighting (dual light/dark themes)
 - **Zustand** for client state (progress, theme, bookmarks)
 - **LocalStorage** for persistence — abstracted behind `ProgressRepository` so a backend can swap in
@@ -67,7 +73,7 @@ src/
   components/
     layout/           Header, Footer, Breadcrumbs
     content/          TopicCard, QuestionCard, SourceList, DifficultyBadge, ProgressRing, TagPill
-    mdx/              custom MDX components (Callout, ProbeNote, ComplexityTable, Diagram)
+    mdx/              custom MDX components (Callout, ProbeNote, ComplexityTable, Diagram, Mermaid)
   content/
     types.ts          Track / Module / Topic / Question / Source
     loader.ts         compile-time tree assembly + lookup helpers

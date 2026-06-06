@@ -1,0 +1,50 @@
+**Problem.** `times[i] = {u, v, w}` is a directed edge: a signal from node `u` reaches `v` after `w` time. Given `n` nodes (labeled `1..n`) and a start node `k`, return the time for **all** nodes to receive the signal, or `-1` if some node is unreachable. This is single-source shortest path on a directed, non-negative-weight graph — textbook **Dijkstra**; the answer is the **maximum** of the shortest distances.
+
+## Brute force — Bellman-Ford, O(V·E)
+
+Relax every edge `V - 1` times. Correct and simple, but ignores the non-negative-weight structure that lets us go faster.
+
+## Optimal — Dijkstra, O(E log V) time, O(V + E) space
+
+Compute the shortest distance from `k` to every node, then return the largest (the slowest node sets the total time). If any node is still at infinity, it is unreachable → `-1`.
+
+```java
+public int networkDelayTime(int[][] times, int n, int k) {
+    Map<Integer, List<int[]>> adj = new HashMap<>();
+    for (int[] t : times)
+        adj.computeIfAbsent(t[0], x -> new ArrayList<>()).add(new int[]{t[1], t[2]});
+
+    int[] dist = new int[n + 1];
+    Arrays.fill(dist, Integer.MAX_VALUE);
+    dist[k] = 0;
+
+    PriorityQueue<int[]> pq = new PriorityQueue<>((a, b) -> a[0] - b[0]); // {dist, node}
+    pq.add(new int[]{0, k});
+
+    while (!pq.isEmpty()) {
+        int[] top = pq.poll();
+        int d = top[0], u = top[1];
+        if (d > dist[u]) continue;                       // stale entry
+        for (int[] e : adj.getOrDefault(u, List.of())) { // e = {to, weight}
+            int nd = d + e[1];
+            if (nd < dist[e[0]]) {
+                dist[e[0]] = nd;
+                pq.add(new int[]{nd, e[0]});
+            }
+        }
+    }
+
+    int max = 0;
+    for (int i = 1; i <= n; i++) {
+        if (dist[i] == Integer.MAX_VALUE) return -1;     // unreachable node
+        max = Math.max(max, dist[i]);
+    }
+    return max;
+}
+```
+
+Edges are non-negative, so Dijkstra's settle-once invariant holds. The `if (d > dist[u]) continue` line is the lazy-deletion trick that lets Java's `PriorityQueue` (which lacks decrease-key) stay at O(E log V).
+
+<ProbeNote>
+Watch the 1-based labeling (size arrays `n + 1`, scan `1..n`). State why Dijkstra is valid here — non-negative weights — and why the answer is the **max** of distances (the signal arrives everywhere only once the farthest node is reached). The unreachable check distinguishes this from a vanilla shortest-path problem.
+</ProbeNote>

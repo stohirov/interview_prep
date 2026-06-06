@@ -1,0 +1,16 @@
+The **library management system** is a favorite at consultancies like EPAM because it rewards clean domain modeling over algorithmic flash. The single insight the whole problem turns on is the distinction between a **Book** (the abstract title, identified by ISBN) and a **BookItem** (a physical copy you can actually borrow). Candidates who collapse the two into one class produce a model that cannot represent "3 copies, 2 on loan, 1 reserved" — and the interviewer learns everything they need to in the first five minutes.
+
+## What the interviewer is testing
+
+- Do you separate **identity from instance** — the catalog title vs the borrowable copy? This is the load-bearing decision.
+- Can you model a **lifecycle** (a copy moves available → loaned → reserved → lost) as a proper state, not scattered flags?
+- Do you give borrowing rules, fine calculation, and notifications **their own seams** (Strategy, Observer) rather than burying them in a God `Library` class?
+- Can you reason about the **hold/reservation queue**: who gets the next returned copy, and how is a member notified?
+
+## How to frame it
+
+Clarify scope: members and librarians, a max-books-per-member and loan-period limit, reservations when all copies are out, and fines for overdue returns. State your non-functional bar: extensible fine policy, pluggable notification channels, and a clean availability model.
+
+Then lay out the entities. A **Library** (Singleton aggregate root) owns the catalog of **Book**s; each `Book` has many **BookItem** copies. A **Member** holds an **Account** with active **Loan**s and **Reservation**s. **Checkout** finds an available copy, transitions it to *loaned*, and creates a `Loan` with a due date. **Return** frees the copy — and if a reservation queue exists, the next member is notified and the copy is held. A **FineCalculator** (Strategy) prices overdue days; a **NotificationService** (Observer) pushes overdue and hold-available alerts.
+
+Drive the loop: **search catalog → checkout available copy → loan with due date → on overdue, observer notifies and fine accrues → return → reservation queue head is notified.** The worked solution follows the full 9-section template; the Book/BookItem split and the copy state machine are where you score.

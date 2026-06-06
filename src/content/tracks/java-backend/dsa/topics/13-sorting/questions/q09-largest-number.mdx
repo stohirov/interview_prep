@@ -1,0 +1,33 @@
+**Problem.** Given a list of non-negative integers, arrange them to form the **largest possible number** and return it as a string. E.g. `[3, 30, 34, 5, 9]` → `"9534330"`.
+
+## The wrong instinct
+
+Sorting numerically descending gives `[34, 30, 9, 5, 3]` → `"34309 5 3"` — wrong. And comparing `3` vs `30` numerically says `30` is larger, but `"3" + "30" = "330"` beats `"30" + "3" = "303"`. Numeric order is simply not the right order here.
+
+## Optimal — custom comparator on concatenation, O(n log n)
+
+Define order by which concatenation is larger: `a` comes before `b` if `a+b > b+a` as strings. This comparator is provably a **total order** (it's transitive), so a normal sort produces the globally optimal arrangement.
+
+```java
+String largestNumber(int[] nums) {
+    String[] s = new String[nums.length];
+    for (int i = 0; i < nums.length; i++) s[i] = String.valueOf(nums[i]);
+
+    // Descending: put the pair that forms the larger concatenation first.
+    Arrays.sort(s, (a, b) -> (b + a).compareTo(a + b));
+
+    if (s[0].equals("0")) return "0";   // all zeros -> "00...0" should be "0"
+
+    StringBuilder sb = new StringBuilder();
+    for (String x : s) sb.append(x);
+    return sb.toString();
+}
+```
+
+**O(n log n · k)** time, where `k` is the max digit length (each comparison concatenates and compares O(k)-length strings); **O(n)** space for the string array.
+
+<Callout kind="warn" title="The all-zeros trap">
+After sorting, if the largest element is `"0"`, every element is `0`, and naive concatenation yields `"000"`. Return `"0"`. Checking `s[0].equals("0")` catches this in one line — a classic case interviewers plant.
+</Callout>
+
+<ProbeNote>The crux is recognizing this is a **custom comparator** problem, not a numeric sort, and that `(b+a).compareTo(a+b)` defines a valid total order so a standard sort is optimal. Lead with the `3` vs `30` example to show *why* numeric order fails, then handle the all-zeros edge case.</ProbeNote>

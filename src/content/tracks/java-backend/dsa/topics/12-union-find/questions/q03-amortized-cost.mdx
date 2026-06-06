@@ -1,0 +1,25 @@
+With **both** path compression and union by rank/size, a sequence of `m` operations on `n` elements runs in **O(m · α(n))** total, where `α` is the **inverse Ackermann function**. That makes each operation **O(α(n))** amortized — effectively, but not literally, O(1).
+
+## What α(n) is
+
+The **Ackermann function** `A(m, n)` grows almost incomprehensibly fast — `A(4, 4)` already dwarfs the number of atoms in the universe. Its inverse `α(n)` therefore grows almost incomprehensibly *slowly*: it stays **≤ 4 for any `n` up to roughly 2^65536**. For every input that will ever exist, `α(n) ≤ 5`. So while it is technically not a constant, it is bounded by a tiny constant in practice — hence "effectively O(1)."
+
+## Why the two optimizations together get there
+
+- **Union by rank/size** alone bounds tree height at **O(log n)** — so without compression, operations are O(log n).
+- **Path compression** alone (no rank) also achieves roughly O(log n) amortized.
+- **Together**, they interact: compression flattens the very trees that rank kept short, and the analysis (Tarjan) collapses the combined cost to **O(α(n))** amortized. Neither optimization alone reaches this bound — it is genuinely the combination.
+
+## Why "amortized," not worst-case
+
+A *single* `find` can still cost O(log n) — when it walks a tall path for the first time. But that same walk **compresses** the path, so the cost is "paid forward": the next `find` on those nodes is O(1). Averaged over the whole sequence, the per-operation cost is α(n). This is the classic amortized argument — expensive operations are rare and make subsequent ones cheap.
+
+<ComplexityTable rows={[
+  {op: "No optimizations", best: "O(1)", average: "O(n)", worst: "O(n)", note: "trees degrade to linked lists"},
+  {op: "Union by rank/size only", best: "O(1)", average: "O(log n)", worst: "O(log n)", note: "bounded tree height"},
+  {op: "Both optimizations", best: "O(1)", average: "O(α(n))", worst: "O(α(n))", note: "amortized; α(n) ≤ 5 in practice"}
+]} />
+
+<ProbeNote>
+Say "amortized," not "worst-case per operation" — a single first-time `find` is still O(log n); compression makes the *next* one cheap. Anchor α(n) with a number ("≤ 5 for any realistic n") and stress that the bound requires **both** optimizations. Treating DSU as "basically O(1) per op" is fair for back-of-envelope analysis.
+</ProbeNote>

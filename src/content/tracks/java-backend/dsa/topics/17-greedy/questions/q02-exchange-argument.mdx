@@ -1,0 +1,28 @@
+The **exchange argument** is the standard technique for *proving* a greedy algorithm is optimal. It is the answer to "how do you know your greedy choice is safe?" — the question that turns a plausible heuristic into a defensible solution.
+
+## The structure of the proof
+
+You argue by contradiction or by transformation:
+
+1. Let `G` be the solution your greedy algorithm produces, and let `O` be any optimal solution.
+2. If `O = G`, done. Otherwise find the first position where they differ.
+3. **Exchange**: show you can swap the element `O` chose for the element `G` chose at that position, producing a new solution `O'` that is **no worse** than `O`.
+4. Since `O'` is still optimal and agrees with `G` in one more position, repeat. After finitely many exchanges, `O` has been transformed entirely into `G` — so `G` is optimal.
+
+The crux is step 3: proving the swap never hurts.
+
+## Worked example — interval scheduling (max non-overlapping intervals)
+
+Greedy rule: among intervals compatible with what you've picked, always take the one that **ends earliest**.
+
+**Claim:** the earliest-finishing interval is in some optimal solution.
+
+**Exchange:** let `O` be optimal and let `g` be the earliest-finishing interval overall. Let `o` be the first interval `O` picks. Then `o.end >= g.end` (since `g` finishes earliest). Replace `o` with `g`. Because `g` finishes no later than `o`, `g` cannot overlap anything `O` scheduled *after* `o` that `o` didn't overlap. So `O' = O - {o} + {g}` is still a valid schedule of the **same size** — still optimal — and now contains the greedy choice. Induct on the rest.
+
+## Why this matters in interviews
+
+- It is the difference between "this looks right on the examples" and "this is provably optimal."
+- The same skeleton proves the optimality of activity selection, minimum arrows to burst balloons, and many deadline-scheduling problems.
+- You usually don't write the full induction — you say "by an exchange argument, swapping any optimal choice for the earliest-finishing one keeps the schedule valid and the same size, so greedy is optimal."
+
+<ProbeNote>If asked to *justify* a greedy solution, reach for the exchange argument by name and sketch the swap. The reusable phrasing: "take any optimal solution; swapping its first choice for my greedy choice yields a valid solution no worse than optimal, then induct." Naming the technique signals you've seen the formal side, not just memorized patterns.</ProbeNote>

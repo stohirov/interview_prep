@@ -1,0 +1,42 @@
+## Cache-aside vs read-through vs write-through vs write-behind
+
+The four patterns answer one question: **who is responsible for reading and writing the cache — your application code, or the cache layer itself — and is the write synchronous or buffered?** Picking the right one decides your consistency guarantees and how the system behaves when the cache or database fails.
+
+### The four patterns
+
+| Pattern | Read path | Write path | Consistency | Main risk |
+| --- | --- | --- | --- | --- |
+| **Cache-aside** (lazy) | App checks cache; on miss, app reads DB and populates cache | App writes DB, then **invalidates/updates** cache | Good if invalidation is correct | Stale entry on a missed invalidation; thundering herd on cold keys |
+| **Read-through** | App asks cache; **cache** fetches from DB on miss | (usually paired with write-through) | Same as cache-aside, logic centralized | Needs a cache that supports a loader |
+| **Write-through** | From cache | App writes **cache**, which synchronously writes DB | Strong: cache and DB always agree | Higher write latency (two hops) |
+| **Write-behind** (write-back) | From cache | App writes cache; cache **flushes to DB async** | Weak: DB lags the cache | **Data loss** if cache dies before flush |
+
+### Read paths visualized
+
+<Mermaid caption="Cache-aside (app-managed) vs read-through (cache-managed) on a miss">{`graph TB
+    subgraph CacheAside[Cache-aside]
+      A1[App] -->|1 get| CA[(Cache)]
+      CA -->|2 miss| A1
+      A1 -->|3 read| DA[(DB)]
+      A1 -->|4 populate| CA
+    end
+    subgraph ReadThrough[Read-through]
+      A2[App] -->|1 get| CR[(Cache)]
+      CR -->|2 miss: load| DR[(DB)]
+      DR -->|3 fill| CR
+      CR -->|4 return| A2
+    end`}</Mermaid>
+
+### How to choose
+
+- **Cache-aside is the default.** It is simple, resilient (if the cache is down, the app falls back to the DB), and only caches what is actually read. The downside is duplicated read/write logic and the classic stale-after-write bug, which is why **on a write you invalidate (delete) rather than update** the cache entry — deletion is idempotent and avoids racing a concurrent read that repopulates with old data.
+- **Read-through / write-through** centralize the logic in the cache library (or a sidecar), so application code just sees a fast store. Write-through guarantees the cache and DB never diverge, at the cost of a slower write. Good when reads must always be warm and consistent.
+- **Write-behind** gives the lowest write latency and can coalesce/batch writes (great for counters, metrics, write-heavy workloads), but you accept a window where the DB is behind and an outright **data-loss risk** if the cache crashes before flushing. Use only where some loss is tolerable or the cache is durable/replicated.
+
+### The consistency footgun
+
+In cache-aside, the order matters: **update the DB first, then invalidate the cache.** Updating the cache first (or before the DB commits) lets a failed transaction leave a wrong value cached. Even with the right order, a concurrent reader can repopulate a stale value between your DB write and your delete — bounded TTLs and, in strict cases, delayed double-delete or versioned keys mitigate it.
+
+<ProbeNote>
+Name the four patterns crisply and map each to its consistency and failure behavior. The strongest signals: defaulting to cache-aside with *delete-on-write*, knowing write-behind trades durability for latency, and articulating the read-after-write race that bounded TTLs exist to contain.
+</ProbeNote>

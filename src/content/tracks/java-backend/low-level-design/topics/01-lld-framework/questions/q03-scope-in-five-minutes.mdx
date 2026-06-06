@@ -1,0 +1,38 @@
+Scoping is a timed skill. Given "design a ride-sharing app," you have about five minutes to converge on a problem small enough to finish but rich enough to show depth. Here is a concrete procedure.
+
+## The 5-minute scoping procedure
+
+### Minute 1 — Restate and bound
+Repeat the prompt in your own words and immediately propose a boundary: *"I'll design the in-memory class model for matching a rider to a driver and managing a ride's lifecycle — not the maps service, payments gateway, or the distributed backend."* Boundaries are subtractive; cutting scope is your most powerful move.
+
+### Minutes 2–3 — List functional requirements
+Write 4–6 bullet points of must-have operations. Keep them as verbs the system performs:
+
+<Diagram caption="Example: ride-sharing functional scope">{`- requestRide(rider, pickup, drop)
+- matchDriver(request)            -> nearest / surge strategy
+- ride lifecycle: REQUESTED -> ASSIGNED -> ONGOING -> COMPLETED
+- computeFare(ride)               -> pluggable pricing
+- (out of scope) live GPS, payment settlement, ratings`}</Diagram>
+
+### Minute 4 — Note non-functional drivers
+One line each on the axes that will shape classes: concurrency (many riders matching at once), extensibility (new pricing/matching strategies), and what you're deliberately deferring.
+
+### Minute 5 — Pick the "happy path" to drive
+Choose the **one core flow** you'll model end-to-end. Everything else is a follow-up. For ride-sharing that's *request → match → ride lifecycle → fare*. Announcing this focus keeps you from sprawling.
+
+## Heuristics for cutting scope fast
+
+<Callout kind="info" title="Scope-cutting heuristics">
+- **One happy path, modeled fully** beats five paths sketched vaguely.
+- **Defer persistence, auth, payments, and networking** unless they're the point of the problem.
+- **Pick the variation axes the prompt hints at** — "different pricing" → Strategy; "different vehicle types" → polymorphism + Factory. Model those; hard-code the rest.
+- **Capacity/scale numbers** rarely matter for LLD; note them and move on.
+</Callout>
+
+## Anti-pattern: boiling the ocean
+
+If you try to model GPS tracking, surge pricing, payments, ratings, *and* driver onboarding, you'll have a dozen empty class stubs and no working core at minute 40. A tight, complete slice with clean seams (interfaces where the deferred parts will plug in) demonstrates far more than broad, shallow coverage.
+
+<ProbeNote>
+The skill being tested is judgment under time pressure: can you find the 20% of the problem that shows 80% of your design ability? Stating an explicit boundary and one driving flow in the first five minutes is exactly the senior behavior interviewers are looking for.
+</ProbeNote>

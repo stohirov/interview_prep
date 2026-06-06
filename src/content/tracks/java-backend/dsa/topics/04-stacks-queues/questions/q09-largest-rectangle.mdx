@@ -1,0 +1,42 @@
+**Problem.** Given an array of bar `heights` in a histogram (each bar width 1), find the area of the **largest rectangle** that fits entirely within the bars. Example: `[2,1,5,6,2,3]` → `10` (the `5` and `6` bars, width 2 × height 5).
+
+## Brute force — O(n²) time
+
+For each bar, treat its height as the rectangle's height and expand left and right while neighbors are at least as tall; the area is `height × width`. Examining every bar as the limiting one is O(n²).
+
+## Optimal — O(n) with a monotonic stack
+
+For a bar of height `h`, the widest rectangle of height `h` extends until it hits a **strictly shorter** bar on each side. So for every bar we need its nearest-smaller-bar to the left and right — the classic monotonic-stack job.
+
+Keep an **increasing** stack of indices. When the current bar is shorter than the stack top, the top bar can extend no further right — pop it and compute its area immediately: its height is `heights[popped]`, its right boundary is the current index, and its left boundary is the new stack top.
+
+```java
+int largestRectangleArea(int[] heights) {
+    int n = heights.length, max = 0;
+    Deque<Integer> stack = new ArrayDeque<>();   // indices, heights increasing
+    // i == n acts as a height-0 sentinel that flushes the stack
+    for (int i = 0; i <= n; i++) {
+        int h = (i == n) ? 0 : heights[i];
+        while (!stack.isEmpty() && heights[stack.peek()] > h) {
+            int height = heights[stack.pop()];
+            // width spans from just after the new top to just before i
+            int left  = stack.isEmpty() ? -1 : stack.peek();
+            int width = i - left - 1;
+            max = Math.max(max, height * width);
+        }
+        stack.push(i);
+    }
+    return max;
+}
+```
+
+The `i == n` sentinel with height 0 forces every remaining bar to be popped and measured at the end, so no rectangle is missed.
+
+<ComplexityTable rows={[
+  {op: "largestRectangleArea", best: "O(n)", average: "O(n)", worst: "O(n)", note: "each bar pushed and popped once"},
+  {op: "space", best: "O(n)", average: "O(n)", worst: "O(n)", note: "increasing heights fill the stack"},
+]} />
+
+<ProbeNote>
+The width formula is where candidates slip: when you pop, the rectangle's left edge is the *new* stack top (the nearest shorter bar to the left), so `width = i - stack.peek() - 1`, and `-1` when the stack empties (no shorter bar to the left, extends to the array start). The height-0 sentinel that flushes the stack is the second thing to mention. This problem also underpins **Maximal Rectangle** in a binary matrix — run this routine per row over cumulative column heights.
+</ProbeNote>

@@ -1,0 +1,73 @@
+**Problem.** Given an `m × n` board of letters and a list of `words`, return every word that can be formed by a path of **adjacent** (up/down/left/right) cells, where each cell is used at most once per word. Example: board with `oath`, `pea`, `eat`, `rain` reachable → return those that exist on the board.
+
+## Brute force — DFS each word separately, O(W · m·n · 4^L)
+
+Run a board DFS for every word independently. With `W` words of length up to `L` on an `m × n` board, this is `O(W · m·n · 4^L)` — you re-explore the same board prefixes once per word. When many words share prefixes (`eat`, `eath`, `ear`), that repetition is pure waste.
+
+## Optimal — build a trie of all words, DFS the board once
+
+Put **all words into a trie**, then DFS from each board cell, advancing through the trie in lockstep with the path. The trie collapses all shared prefixes into one traversal: at each cell you only continue if the current character is a child in the trie, so a dead prefix prunes **every** word that shares it at once.
+
+```java
+class Solution {
+    private static class Node {
+        Node[] next = new Node[26];
+        String word;          // non-null only at a word's end (the word itself)
+    }
+
+    public List<String> findWords(char[][] board, String[] words) {
+        Node root = buildTrie(words);
+        List<String> out = new ArrayList<>();
+        for (int r = 0; r < board.length; r++)
+            for (int c = 0; c < board[0].length; c++)
+                dfs(board, r, c, root, out);
+        return out;
+    }
+
+    private Node buildTrie(String[] words) {
+        Node root = new Node();
+        for (String w : words) {
+            Node cur = root;
+            for (char ch : w.toCharArray()) {
+                int i = ch - 'a';
+                if (cur.next[i] == null) cur.next[i] = new Node();
+                cur = cur.next[i];
+            }
+            cur.word = w;     // store the full word at its terminal node
+        }
+        return root;
+    }
+
+    private void dfs(char[][] board, int r, int c, Node node, List<String> out) {
+        if (r < 0 || c < 0 || r >= board.length || c >= board[0].length) return;
+        char ch = board[r][c];
+        if (ch == '#') return;                 // already on the current path
+        Node child = node.next[ch - 'a'];
+        if (child == null) return;             // prefix dead in the trie -> prune
+
+        if (child.word != null) {              // found a complete word
+            out.add(child.word);
+            child.word = null;                 // de-dup: don't report it twice
+        }
+
+        board[r][c] = '#';                     // mark visited for this path
+        dfs(board, r + 1, c, child, out);
+        dfs(board, r - 1, c, child, out);
+        dfs(board, r, c + 1, child, out);
+        dfs(board, r, c - 1, child, out);
+        board[r][c] = ch;                      // backtrack: restore the cell
+    }
+}
+```
+
+Three details carry the solution:
+
+- **Store the whole word at its terminal node** (`child.word = w`), not just an `isWord` flag — then you can add it directly without reconstructing the path.
+- **De-dup by nulling `child.word`** after collecting it, so the same word found via two paths is reported once.
+- **`'#'` sentinel** marks the cell as on the current path and is restored on backtrack — the standard in-place visited trick, avoiding a separate visited matrix.
+
+## Complexity
+
+The board DFS visits `m·n` start cells; from each, the trie prunes the branching so you only follow paths that spell real prefixes. Worst case is `O(m · n · 4^(L−1))` where `L` is the longest word, but in practice the trie pruning makes it far faster than the per-word brute force, and shared prefixes are explored only once.
+
+<ProbeNote>The key insight to verbalize: a trie lets you search for **all words simultaneously** in one board traversal, pruning a dead prefix for every word at once — that's the whole reason it beats per-word DFS. Implementation tells the interviewer watches for: storing the full word at the leaf (cleaner than rebuilding the path), nulling it to de-duplicate, and the in-place `'#'` visited marker with backtracking restore. A common optimization to mention: prune leaf trie nodes after a word is found to shrink the search space.</ProbeNote>

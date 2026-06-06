@@ -1,0 +1,47 @@
+**Problem.** Count the number of primes **strictly less than** a non-negative integer `n`.
+
+## Trial division — O(n√n), too slow
+
+Testing each number for primality up to `√n` is O(n√n) — fine for small `n`, but the interview expects the sieve.
+
+## Sieve of Eratosthenes — O(n log log n)
+
+Mark composites by sweeping multiples of each prime, then count what's left unmarked:
+
+```java
+int countPrimes(int n) {
+    if (n < 3) return 0;                      // no primes below 2
+    boolean[] composite = new boolean[n];     // composite[i] == true means i is not prime
+
+    int count = 0;
+    for (int i = 2; i < n; i++) {
+        if (composite[i]) continue;           // already marked
+        count++;                              // i is prime
+        // start at i*i; smaller multiples already marked by smaller primes.
+        // (long) i * i avoids int overflow when i is near sqrt(Integer.MAX_VALUE)
+        for (long j = (long) i * i; j < n; j += i)
+            composite[(int) j] = true;
+    }
+    return count;
+}
+```
+
+## The two optimizations that matter
+
+- **Start the inner loop at `i*i`:** any multiple of `i` smaller than `i²` (like `2i`, `3i`) was already marked when sieving the smaller primes `2, 3, ...`. Starting at `i²` avoids redundant work.
+- **Outer loop need only run to `√n`** for *marking*, but here we also use the outer pass to *count*, so it runs to `n` — only primes `≤ √n` actually enter the inner marking loop (larger primes find nothing to mark, which is fine).
+
+## The overflow trap
+
+`i * i` overflows `int` when `i` exceeds ~46340 (`√(2^31)`). Cast to `long` for the loop bound and index, or guard with `(long) i * i < n` before entering. A classic silent-bug source in this exact problem.
+
+## Why O(n log log n)
+
+Summing the inner-loop work `n/p` over all primes `p < n` gives `n · Σ(1/p) = n · O(log log n)`, since the sum of reciprocals of primes grows like `log log n`. Space is **O(n)** for the boolean array; a `BitSet` cuts the constant by 8×.
+
+<ComplexityTable rows={[
+  {op: "Trial division", best: "O(n)", average: "O(n√n)", worst: "O(n√n)", note: "too slow for large n"},
+  {op: "Sieve of Eratosthenes", best: "O(n log log n)", average: "O(n log log n)", worst: "O(n log log n)", note: "O(n) space; BitSet shrinks constant"},
+]} />
+
+<ProbeNote>The sieve is the expected solution — know its O(n log log n) bound and *why*. Two details win points: the `i*i` start (and explaining why smaller multiples are pre-marked) and the `(long) i * i` overflow guard. Mention `BitSet` to cut memory 8× for large `n`. Watch the "strictly less than `n`" boundary in the loop bound.</ProbeNote>

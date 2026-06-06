@@ -1,0 +1,48 @@
+**Problem.** Given an array `nums` where `nums[i]` is the maximum jump length from index `i`:
+- **Jump Game I** — can you reach the last index? Return a boolean.
+- **Jump Game II** — return the *minimum* number of jumps to reach the last index (assume it's always reachable).
+
+## Jump Game I — track the farthest reachable index
+
+The greedy insight: you don't need to know *how* you got somewhere, only the farthest index reachable so far. Sweep left to right; if the current index is ever beyond what's reachable, you're stuck.
+
+```java
+boolean canJump(int[] nums) {
+    int farthest = 0;
+    for (int i = 0; i < nums.length; i++) {
+        if (i > farthest) return false;          // can't even reach i
+        farthest = Math.max(farthest, i + nums[i]);
+        if (farthest >= nums.length - 1) return true;
+    }
+    return true;
+}
+```
+
+O(n) time, O(1) space. The greedy choice — always extend `farthest` — is safe because reachability is monotone: if index `i` is reachable, so is every index up to `farthest`.
+
+## Jump Game II — implicit BFS by levels
+
+Minimizing jumps is a shortest-path-by-edges problem, so it's BFS — but you can run it in O(n) without a queue. Treat each "jump" as a BFS level: `[curEnd]` is the farthest index reachable with the current jump count. When you reach the end of a level, you must spend one more jump, and the new boundary is the farthest you saw in this level.
+
+```java
+int jump(int[] nums) {
+    int jumps = 0, curEnd = 0, farthest = 0;
+    for (int i = 0; i < nums.length - 1; i++) {   // stop before last index
+        farthest = Math.max(farthest, i + nums[i]);
+        if (i == curEnd) {                        // exhausted current jump's range
+            jumps++;
+            curEnd = farthest;                    // commit to the best reachable boundary
+        }
+    }
+    return jumps;
+}
+```
+
+We loop to `length - 1` so we don't count a phantom jump *from* the last index. Each time `i` hits `curEnd`, we've consumed one BFS level and extend the boundary to `farthest` — the greedy choice that this level's best reach is the optimal next boundary.
+
+<ComplexityTable rows={[
+  {op: "Jump Game I", best: "O(n)", average: "O(n)", worst: "O(n)", note: "O(1) space"},
+  {op: "Jump Game II", best: "O(n)", average: "O(n)", worst: "O(n)", note: "O(1) space; implicit BFS"},
+]} />
+
+<ProbeNote>For II, the trap is incrementing `jumps` when you actually move versus when you cross a boundary — the boundary formulation avoids double counting. Be ready to explain why "farthest reach of this level" is the optimal next boundary (any index in the level is reachable, so picking the one that reaches farthest dominates). Mention it's BFS-in-disguise — that framing impresses.</ProbeNote>

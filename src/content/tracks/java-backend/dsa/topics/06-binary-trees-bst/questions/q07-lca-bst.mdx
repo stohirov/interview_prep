@@ -1,0 +1,50 @@
+**Problem.** Given a **binary search tree** and two nodes `p` and `q`, find their **lowest common ancestor** (LCA) — the deepest node that has both `p` and `q` as descendants (a node is a descendant of itself).
+
+## Why the BST version is easy
+
+In a general binary tree, finding the LCA requires searching both subtrees (see the next problem). A BST gives you a shortcut: the **ordering invariant tells you which way to go** without any searching. Compare both target values to the current node:
+
+- If **both** `p` and `q` are **less** than the current node, the LCA lies in the **left** subtree.
+- If **both** are **greater**, it lies in the **right** subtree.
+- Otherwise they **split** — one is `≤` and the other is `≥` the current node (or one *is* the current node). The current node is the lowest point where their paths diverge: it is the LCA.
+
+<Diagram caption="The split point is the LCA">{`
+          6
+        /   \\
+       2     8
+      / \\   / \\
+     0   4 7   9
+        / \\
+       3   5
+
+LCA(2,8): 2<6 and 8>6 -> split at 6
+LCA(3,5): both < 6 -> go left; both > 2 -> go right; split at 4
+`}</Diagram>
+
+## Optimal — O(h) time, O(1) space iteratively
+
+Walk down from the root, steering by the comparisons above, until the targets fall on opposite sides (or you land on one of them).
+
+```java
+TreeNode lowestCommonAncestor(TreeNode root, TreeNode p, TreeNode q) {
+    TreeNode cur = root;
+    while (cur != null) {
+        if (p.val < cur.val && q.val < cur.val) {
+            cur = cur.left;             // both smaller -> go left
+        } else if (p.val > cur.val && q.val > cur.val) {
+            cur = cur.right;            // both larger -> go right
+        } else {
+            return cur;                 // split (or matched) -> LCA found
+        }
+    }
+    return null;
+}
+```
+
+We descend a single root-to-leaf path, so the work is **O(h)** — O(log n) on a balanced BST, O(n) on a degenerate one. The iterative form uses **O(1)** extra space; a recursive version would be O(h) on the stack.
+
+<ComplexityTable rows={[
+  {op: "LCA in BST (iterative)", best: "O(log n)", average: "O(log n)", worst: "O(n)", note: "O(1) space; worst = skewed tree"},
+]} />
+
+<ProbeNote>The whole trick is exploiting the BST ordering to avoid searching both subtrees — say that out loud, because it is the entire reason this is easier than the general-tree LCA. The iterative O(1)-space version is the one to prefer. A common follow-up immediately drops the BST assumption, pivoting you to the general binary-tree LCA — be ready to switch techniques.</ProbeNote>

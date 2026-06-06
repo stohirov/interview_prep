@@ -1,0 +1,23 @@
+Both are self-balancing BSTs with O(log n) search, insert, and delete. The difference is **how strictly** they balance, which trades read speed against write cost.
+
+## The core trade-off
+
+- **AVL** enforces a tight invariant (subtree heights differ by ≤ 1), so the tree stays *short* — height `≤ ~1.44·log₂ n`. Shorter tree → fewer comparisons → **faster lookups**. The price: maintaining tight balance means **more rotations** on insert and delete.
+- **Red-black** tolerates more imbalance (longest path ≤ 2× shortest), so the tree is *taller* — height up to `2·log₂ n`. Lookups do a few more comparisons, but rebalancing is cheaper: an insert needs **at most 2 rotations**, a delete **at most 3**, with the rest of the fix-up done by O(1)-each recoloring.
+
+<ComplexityTable rows={[
+  {op: "Search", best: "O(log n)", average: "O(log n)", worst: "O(log n)", note: "AVL marginally faster — shorter tree"},
+  {op: "Insert", best: "O(log n)", average: "O(log n)", worst: "O(log n)", note: "AVL may cascade more rotations on delete; RB caps rotations"},
+  {op: "Delete", best: "O(log n)", average: "O(log n)", worst: "O(log n)", note: "RB ≤ 3 rotations; AVL rotations can cascade to root"},
+]} />
+
+## When each wins
+
+- **AVL** when reads dominate writes — lookup-heavy, write-rarely workloads (in-memory indexes, symbol tables built once and queried millions of times). The stricter balance pays off every read.
+- **Red-black** when writes are frequent or mixed with reads, and you want predictable, bounded rebalancing cost per write. This is the general-purpose default — which is why **Java's `TreeMap`/`TreeSet`, C++ `std::map`/`std::set`, and the Linux kernel scheduler all use red-black trees**, and why `HashMap` treeifies buckets into red-black trees.
+
+## The practical answer
+
+For most code you will never hand-roll either — you reach for `TreeMap`. The reason the standard library chose red-black is the write profile: real maps get mutated, and red-black's bounded rotation count makes worst-case insert/delete latency tighter and more uniform than AVL's potentially cascading deletes.
+
+<ProbeNote>Frame it as strictness vs. write cost: AVL is shorter (faster reads, more rotations), red-black is bushier-tolerant (slightly slower reads, cheaper writes). Then land the concrete fact — the JDK, C++ STL, and Linux all picked red-black because real workloads mutate. That single example signals you know this beyond the textbook.</ProbeNote>

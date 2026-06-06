@@ -1,0 +1,24 @@
+The expected complexity of `HashMap.get` is **O(1)**. The interesting part is the worst case — and the answer changed in Java 8.
+
+## Pre-Java 8: O(n)
+
+Every bucket was a singly linked list. If every key hashed to the same bucket (an adversarial input, or a terrible `hashCode()`), `get` degraded to a linear scan of one giant chain — **O(n)**. This was a real denial-of-service vector: attackers could craft keys (e.g. HTTP form fields) that all collide, turning a map into a linked list and pinning a CPU.
+
+## Java 8+: O(log n)
+
+Java 8 added **treeification**. When a single bucket grows to 8 nodes and the table capacity is at least 64, that bucket converts from a linked list into a **red-black tree**. A balanced tree gives O(log k) lookup within the bucket, so even a fully-colliding map answers `get` in **O(log n)** worst case instead of O(n).
+
+<ComplexityTable rows={[
+  {op: "get (expected)", best: "O(1)", average: "O(1)", worst: "O(log n)", note: "treeified bucket; pre-Java 8 worst case was O(n)"},
+  {op: "put (expected)", best: "O(1)", average: "O(1)", worst: "O(log n)", note: "plus amortized resize cost"},
+]} />
+
+## The catch — treeification needs a comparator
+
+Red-black ordering needs to compare keys. If two keys have the same hash but the key type does **not** implement `Comparable`, the tree falls back to comparing by identity hash and class name, and ties still need linear-ish tie-breaking. So O(log n) is the guarantee specifically when keys are mutually `Comparable`; otherwise the bound is softer but the tree still bounds the damage far better than a flat list.
+
+<Callout kind="info" title="The point of treeification">
+Treeification is a *safety net against bad hashing*, not a performance feature for normal use. With a decent `hashCode()`, buckets almost never reach 8 entries, so you stay at O(1) and pay nothing.
+</Callout>
+
+<ProbeNote>The crisp answer: "Expected O(1), worst case O(log n) in Java 8+ thanks to red-black treeified buckets — it was O(n) before." Bonus points for naming the hash-collision DoS that motivated the change, and for noting the keys must be `Comparable` for the clean O(log n) bound.</ProbeNote>

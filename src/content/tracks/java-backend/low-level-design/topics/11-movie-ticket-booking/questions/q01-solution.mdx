@@ -1,0 +1,189 @@
+## 1. Functional requirements
+
+- Search **shows** by city, cinema, and movie, filtered by date/time.
+- Display a **seat map** for a show with live availability.
+- **Hold** selected seats for a user for a fixed TTL (e.g., 15 minutes) while they pay.
+- Take **payment** (card / wallet / UPI) and **confirm** the booking, issuing tickets.
+- **Auto-release** held seats whose TTL expires without payment.
+- **Cancel** a confirmed booking and trigger a refund.
+
+## 2. Non-functional requirements
+
+- **No double-booking** — a seat for a given show is sold at most once, even under concurrent requests. This is the dominant constraint.
+- **No inventory leak** — held-but-unpaid seats must return to the pool automatically.
+- **Read-heavy** — seat maps are viewed far more than booked; availability reads should be cheap.
+- **Extensibility** — new pricing rules and payment methods should not touch booking logic.
+
+## 3. Core entities
+
+| Entity | Responsibility |
+| --- | --- |
+| `City` / `Cinema` / `CinemaHall` | Location hierarchy; a hall has a fixed physical seat layout. |
+| `Movie` | Title, duration, language, rating. |
+| `Show` | A `Movie` in a `CinemaHall` at a start time; owns the bookable `Seat`s. |
+| `Seat` | A seat *for a specific show*; holds `SeatStatus` + a `version` for CAS. |
+| `Booking` | A user's reservation of seats for a show; has a `BookingState`. |
+| `Payment` | Payment attempt for a booking; created by a `PaymentFactory`. |
+| `User` | The customer making the booking. |
+| `PricingStrategy` | Computes seat price (early-bird, weekend, premium). |
+| `SeatLockManager` | Atomically holds/releases seats and enforces the TTL. |
+
+## 4. Class diagram
+
+<Mermaid caption="Movie booking class model">{`classDiagram
+    class Show {
+      -String id
+      -Movie movie
+      -CinemaHall hall
+      -Instant startTime
+      -Map~String,Seat~ seats
+    }
+    class Seat {
+      -String id
+      -SeatType type
+      -SeatStatus status
+      -long version
+    }
+    class Booking {
+      -String id
+      -User user
+      -Show show
+      -List~Seat~ seats
+      -BookingState state
+      +confirm()
+      +cancel()
+    }
+    class SeatLockManager {
+      +lock(Show, List~Seat~, User) boolean
+      +unlock(Show, List~Seat~, User)
+      +commit(Show, List~Seat~)
+    }
+    class PricingStrategy {
+      <<interface>>
+      +price(Show, Seat) Money
+    }
+    class BookingState {
+      <<interface>>
+      +confirm(Booking)
+      +cancel(Booking)
+    }
+    class PaymentFactory {
+      +create(PaymentMethod) Payment
+    }
+    Show "1" o-- "*" Seat
+    Booking --> Show
+    Booking "1" o-- "*" Seat
+    Booking o-- BookingState
+    Booking ..> SeatLockManager
+    Booking ..> PricingStrategy
+    Booking ..> PaymentFactory
+    BookingState <|.. PendingState
+    BookingState <|.. ConfirmedState
+    BookingState <|.. CancelledState`}</Mermaid>
+
+## 5. Key interfaces and classes
+
+```java
+enum SeatStatus { AVAILABLE, HELD, BOOKED }
+enum SeatType   { REGULAR, PREMIUM, RECLINER }
+
+interface PricingStrategy {                 // Strategy — pricing varies independently
+    Money price(Show show, Seat seat);
+}
+
+final class WeekendPricing implements PricingStrategy {
+    public Money price(Show show, Seat seat) {
+        Money base = seat.type().basePrice();
+        boolean weekend = isWeekend(show.startTime());
+        return weekend ? base.multiply(1.25) : base;
+    }
+}
+```
+
+```java
+/** Optimistic hold: compare-and-set on each seat's version, all-or-nothing. */
+final class SeatLockManager {
+    // seatKey -> (userId, expiry); concurrent for read-heavy access
+    private final ConcurrentHashMap<String, Hold> holds = new ConcurrentHashMap<>();
+    private final Duration ttl = Duration.ofMinutes(15);
+
+    boolean lock(Show show, List<Seat> seats, String userId) {
+        List<String> acquired = new ArrayList<>();
+        for (Seat seat : seats) {
+            String key = show.id() + ":" + seat.id();
+            Hold existing = holds.get(key);
+            if (existing != null && !existing.expired()) {           // someone else holds it
+                rollback(acquired);
+                return false;
+            }
+            Hold mine = new Hold(userId, Instant.now().plus(ttl));
+            if (holds.putIfAbsent(key, mine) != null                 // CAS-style claim
+                && !replaceIfExpired(key, mine)) {
+                rollback(acquired);
+                return false;
+            }
+            seat.markHeld();
+            acquired.add(key);
+        }
+        return true;                                                 // all seats held atomically
+    }
+
+    void commit(Show show, List<Seat> seats) {                       // payment succeeded
+        for (Seat s : seats) { s.markBooked(); holds.remove(show.id() + ":" + s.id()); }
+    }
+    void unlock(Show show, List<Seat> seats, String userId) { /* release + reset to AVAILABLE */ }
+    private void rollback(List<String> keys) { keys.forEach(holds::remove); }
+}
+```
+
+```java
+interface BookingState {                    // State — booking lifecycle
+    void confirm(Booking b);
+    void cancel(Booking b);
+}
+
+final class PendingState implements BookingState {
+    public void confirm(Booking b) {
+        if (b.payment().isSettled()) {
+            b.lockManager().commit(b.show(), b.seats());
+            b.setState(new ConfirmedState());
+        } else throw new IllegalStateException("payment not settled");
+    }
+    public void cancel(Booking b) {
+        b.lockManager().unlock(b.show(), b.seats(), b.user().id());  // release holds
+        b.setState(new CancelledState());
+    }
+}
+```
+
+## 6. Design patterns used
+
+- **State** — `Booking` moves through `Pending → Confirmed → Cancelled`; each state defines what `confirm`/`cancel` mean and forbids the rest. Confirming releases nothing; cancelling releases holds or refunds.
+- **Strategy** — `PricingStrategy` (early-bird, weekend, premium) lets pricing vary per show/seat without editing booking code.
+- **Factory** — `PaymentFactory` creates the right `Payment` (card/wallet/UPI) so adding a method touches one place.
+- **Observer** — clients subscribe to a show's seat-availability changes to live-update the seat map when seats are held/booked/released.
+
+## 7. Trade-offs and alternatives
+
+The seat-contention problem has three standard answers:
+
+- **Pessimistic locking** — `SELECT ... FOR UPDATE` on the seat rows (or a per-show lock) for the duration of the booking. Simplest to reason about and guarantees no double-book, but holds DB locks across a slow user payment step, hurting throughput and risking lock timeouts. Acceptable when contention is high and bookings are short.
+- **Optimistic locking** — each `Seat` carries a `version` column; booking reads the version, then `UPDATE ... WHERE id = ? AND version = ?`. If zero rows update, someone else won — retry or fail. No locks held during think-time; best when contention is low (most shows). The skeleton above is the in-memory analogue (CAS on a hold map).
+- **Seat-hold with TTL** — decouple *hold* from *pay*. The user atomically reserves seats (status `HELD`, 15-minute expiry) before paying; on payment success the hold commits to `BOOKED`, on expiry a sweeper releases it. This is what real systems use because it solves both double-booking *and* the "user abandons checkout" inventory leak. Holds live in Redis with a native TTL key in production.
+
+Pricing precision uses a `Money` value object (minor-unit `long`), never `double`. The seat map is read-heavy, so availability is cached and invalidated on hold/commit events (the Observer feed).
+
+## 8. Common follow-up questions
+
+- **Seat-hold TTL (15 min)** — Redis key with `EXPIRE`; a background sweeper (or Redis keyspace notification) flips expired holds back to `AVAILABLE` and fires the Observer event.
+- **Waitlist** — when a show is full, queue users; on cancellation, offer released seats to the head of the queue with a short claim window.
+- **Group booking** — atomic all-or-nothing hold across N adjacent seats; the `lock` method already rolls back partial acquisition.
+- **Refunds** — `CancelledState` triggers a refund `Payment` via the Factory; refund amount depends on a cancellation-policy Strategy (time-before-show tiers).
+- **Dynamic pricing** — a `PricingStrategy` that factors current occupancy/demand, recomputed per request.
+- **Multi-city search** — index shows by `(city, movie, date)`; the location hierarchy makes this a straightforward filter.
+
+## 9. What interviewers are really probing
+
+<ProbeNote>
+That you (1) named the **double-booking race** as the central problem within the first minute, (2) can compare **pessimistic vs optimistic locking** with their throughput/contention trade-offs rather than just saying "add a lock," (3) proposed the **hold-then-pay TTL** flow that solves both double-booking and abandoned-checkout inventory leaks, and (4) kept pricing, payment, and lifecycle behind Strategy/Factory/State so the design stays open for extension. Reaching for optimistic locking + Redis TTL unprompted is the senior signal.
+</ProbeNote>

@@ -1,0 +1,57 @@
+**Problem.** A number is **happy** if repeatedly replacing it with the sum of the squares of its digits eventually reaches `1`. Unhappy numbers loop forever without reaching `1`. Determine whether a given `n` is happy.
+
+## The key observation — it's cycle detection
+
+The digit-square-sum process forms a sequence. It either reaches `1` (happy) or enters a **cycle** that never includes `1` (unhappy). The sequence is bounded (any number eventually maps below ~243 for inputs in `int` range), so it *must* either hit `1` or repeat — there's no third option. Detecting "we've been here before" is exactly cycle detection.
+
+## Approach 1 — hash set, O(log n) space
+
+Track every value seen; if one repeats before `1` appears, it's a cycle:
+
+```java
+boolean isHappy(int n) {
+    Set<Integer> seen = new HashSet<>();
+    while (n != 1 && seen.add(n)) {     // add returns false if n already present -> cycle
+        n = squareDigitSum(n);
+    }
+    return n == 1;
+}
+
+int squareDigitSum(int n) {
+    int sum = 0;
+    while (n > 0) {
+        int d = n % 10;
+        sum += d * d;
+        n /= 10;
+    }
+    return sum;
+}
+```
+
+## Approach 2 — Floyd's tortoise and hare, O(1) space
+
+Treat the sequence as an implicit linked list (each number "points" to its digit-square-sum) and apply Floyd's cycle detection. Slow advances one step, fast two; they meet inside any cycle:
+
+```java
+boolean isHappy(int n) {
+    int slow = n, fast = squareDigitSum(n);
+    while (fast != 1 && slow != fast) {
+        slow = squareDigitSum(slow);                    // +1 step
+        fast = squareDigitSum(squareDigitSum(fast));    // +2 steps
+    }
+    return fast == 1;
+}
+```
+
+If the chain ends at `1`, `fast` reaches `1` first; if it cycles, `slow` and `fast` collide. This drops the auxiliary set, giving **O(1) space**.
+
+## Why it always terminates
+
+For any number with `d` digits, the digit-square-sum is at most `81d`, which is far smaller than the number itself once `d ≥ 4`. So values rapidly fall into a small bounded range and the sequence must repeat or hit `1` — guaranteeing termination.
+
+<ComplexityTable rows={[
+  {op: "Hash set", best: "O(log n)", average: "O(log n)", worst: "O(log n)", note: "iterations × digit work; O(log n) extra space"},
+  {op: "Floyd's two pointers", best: "O(log n)", average: "O(log n)", worst: "O(log n)", note: "O(1) space"},
+]} />
+
+<ProbeNote>The framing that impresses: "this is cycle detection in an implicit sequence." The hash-set solution is the obvious one; offering Floyd's tortoise-and-hare for O(1) space is the senior upgrade — and it directly reuses the linked-list cycle-detection technique. Be ready to argue termination (digit-square-sum shrinks large numbers into a bounded range).</ProbeNote>

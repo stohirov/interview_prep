@@ -1,0 +1,28 @@
+`ArrayDeque` is the recommended implementation for both a **stack** and a **queue** in single-threaded code. It implements `Deque`, so one class covers every operation at both ends in amortized O(1).
+
+## Why it beats the alternatives
+
+- **vs `Stack`** — `Stack` extends `Vector`, so it is synchronized (lock overhead) and leaks `List` methods that break the LIFO contract. `ArrayDeque` is unsynchronized and exposes only deque operations.
+- **vs `LinkedList`** — `LinkedList` allocates a heap node *per element* and scatters them across memory, so every traversal is a cache-miss tour. `ArrayDeque` stores elements in one contiguous array, which the CPU prefetcher loves. Fewer allocations, far better locality.
+
+## How it works
+
+Internally it is a **circular buffer**: a power-of-two array with `head` and `tail` indices that wrap via masking (`index & (capacity - 1)`). Push/pop at either end just adjusts an index — no shifting. When full, it **doubles** the array and copies, giving *amortized* O(1) adds (a single add can be O(n), but the cost averages out across many adds, exactly like `ArrayList`).
+
+```java
+Deque<Integer> stack = new ArrayDeque<>();
+stack.push(1); stack.pop();      // LIFO: addFirst / removeFirst
+
+Deque<Integer> queue = new ArrayDeque<>();
+queue.offer(1); queue.poll();    // FIFO: addLast / removeFirst
+```
+
+<ComplexityTable rows={[
+  {op: "push / pop / peek (stack)", best: "O(1)", average: "O(1)", worst: "O(n)", note: "worst = resize copy; amortized O(1)"},
+  {op: "offer / poll / peek (queue)", best: "O(1)", average: "O(1)", worst: "O(n)", note: "worst = resize copy; amortized O(1)"},
+  {op: "contains / remove(Object)", best: "O(1)", average: "O(n)", worst: "O(n)", note: "linear scan"},
+]} />
+
+<ProbeNote>
+The one real caveat: `ArrayDeque` **forbids null elements**, because `poll`/`peek` use `null` as the "empty" sentinel. `LinkedList` allows nulls. If you genuinely need to store nulls in a queue you cannot use `ArrayDeque` — but that requirement is rare and usually a smell. Mention amortized O(1) and the "no nulls" rule and you have covered what interviewers probe for.
+</ProbeNote>

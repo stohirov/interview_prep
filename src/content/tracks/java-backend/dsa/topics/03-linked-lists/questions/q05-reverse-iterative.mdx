@@ -1,0 +1,45 @@
+**Problem.** Reverse a singly linked list in place and return the new head. `1 → 2 → 3 → null` becomes `3 → 2 → 1 → null`.
+
+We use a `ListNode` definition shared across the linked-list problems:
+
+```java
+class ListNode {
+    int val;
+    ListNode next;
+    ListNode() {}
+    ListNode(int val) { this.val = val; }
+    ListNode(int val, ListNode next) { this.val = val; this.next = next; }
+}
+```
+
+## Brute force — O(n) time, O(n) space
+
+Push every value onto a stack (or into a list), then pop them back into a new list. Correct but wasteful: it allocates O(n) extra storage and ignores that the nodes already exist and only need their pointers flipped.
+
+## Optimal — O(n) time, O(1) space
+
+Walk the list once, rewiring each node's `next` to point at its predecessor. Three pointers: `prev` (the reversed part built so far), `curr` (node being processed), and a saved `next` so we don't lose the rest of the list when we flip `curr.next`.
+
+```java
+ListNode reverseList(ListNode head) {
+    ListNode prev = null;
+    ListNode curr = head;
+    while (curr != null) {
+        ListNode next = curr.next;   // save the rest of the list
+        curr.next = prev;            // flip the pointer backward
+        prev = curr;                 // advance prev
+        curr = next;                 // advance curr
+    }
+    return prev;                     // prev is the new head
+}
+```
+
+The invariant: at the top of each iteration, everything before `curr` is already reversed and `prev` is its head. When `curr` falls off the end, `prev` holds the fully reversed list.
+
+<Callout kind="warn" title="The one bug everyone hits">
+Forgetting to save `next` before `curr.next = prev`. Once you overwrite `curr.next`, the unprocessed tail is gone. Save it first, always.
+</Callout>
+
+<ProbeNote>
+Be able to dry-run the four-line loop on `1 → 2 → 3` and name the new head (`prev`, not `curr` — `curr` is `null` at the end). Interviewers often follow up with the recursive version (q06) and "reverse only a sublist" — the iterative three-pointer dance is the building block for both, and for reverse-in-k-groups (q10).
+</ProbeNote>

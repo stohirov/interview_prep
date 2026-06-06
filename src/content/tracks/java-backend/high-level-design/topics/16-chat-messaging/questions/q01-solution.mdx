@@ -1,0 +1,117 @@
+## 1. Functional requirements
+
+- Send/receive **1:1** messages and **group** messages (groups up to **10K members**).
+- **Delivery** and **read** receipts.
+- **Presence**: online / last-seen.
+- Offline delivery: queue messages and replay in order on reconnect.
+- Media (images/video/voice) via attachments.
+- (Mention) **E2E encryption** — payloads opaque to the server.
+
+## 2. Non-functional requirements
+
+- **Scale:** 2B users, ~500M concurrent connections, **~100B messages/day**.
+- **Latency:** message delivery p99 < 500 ms when recipient is online.
+- **Ordering:** per-chat ordering guaranteed; no duplicates (exactly-once *to the device*).
+- **Durability:** an accepted message is never lost, even if undelivered.
+- **Availability:** 99.99%; a gateway failure must not drop in-flight messages.
+
+## 3. Capacity estimation
+
+- Messages: 100B/day ≈ **~1.16M msg/s** (×~3 peak ≈ 3.5M/s).
+- Connections: ~500M concurrent WebSockets. At ~50K connections/gateway node → **~10K gateway nodes**.
+- Receipts roughly double message-event traffic (each message → delivered + read events).
+- Storage: 100B msg/day × ~300 B ≈ **~30 TB/day** of message metadata; media is far larger and lives in object storage. Retain hot messages ~30 days in the primary store, archive the rest.
+- Fan-out: a 10K-member group message = up to **10K per-recipient enqueues** from one send.
+
+## 4. High-level architecture
+
+<Mermaid caption="Chat system — stateful WebSocket gateways, a session registry for routing, durable message store sharded by chat">{`graph LR
+    C[Client device] -->|WebSocket| GW[Connection Gateway]
+    GW --> SES[(Session Registry - Redis)]
+    GW --> MSGSVC[Message Service]
+    MSGSVC --> STORE[(Message Store - sharded by chatId)]
+    MSGSVC --> MQ[(Kafka per-recipient queue)]
+    MQ --> DELIV[Delivery Workers]
+    DELIV --> SES
+    DELIV --> GW2[Recipient Gateway]
+    GW2 -->|push| C2[Recipient device]
+    MSGSVC --> OBJ[(Object Storage)]
+    OBJ --> CDN[CDN]`}</Mermaid>
+
+## 5. API design
+
+```
+WebSocket /ws/connect            (auth via token; pins device to a gateway)
+
+-> SEND     { "clientMsgId": "uuid", "chatId": "c_9", "ciphertext": "...", "mediaIds": [] }
+<- ACK      { "clientMsgId": "uuid", "serverMsgId": "m_88", "seq": 4012 }
+<- MESSAGE  { "serverMsgId": "m_88", "chatId": "c_9", "seq": 4012, "from": "u_3", "ciphertext": "..." }
+-> RECEIPT  { "chatId": "c_9", "serverMsgId": "m_88", "type": "DELIVERED" | "READ" }
+<- PRESENCE { "userId": "u_3", "status": "ONLINE", "lastSeen": "..." }
+```
+
+`clientMsgId` makes sends **idempotent** — a retried send after a flaky connection dedupes server-side.
+
+## 6. Data model
+
+```sql
+CREATE TABLE message (
+  chat_id     BIGINT NOT NULL,
+  seq         BIGINT NOT NULL,         -- per-chat monotonic sequence = ordering
+  server_id   BIGINT NOT NULL,
+  sender_id   BIGINT NOT NULL,
+  ciphertext  BYTEA,                   -- opaque under E2E
+  media_ids   TEXT[],
+  created_at  TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (chat_id, seq)
+);                                      -- sharded by chat_id
+
+CREATE TABLE chat_member (
+  chat_id   BIGINT, user_id BIGINT, role TEXT,
+  PRIMARY KEY (chat_id, user_id)
+);
+
+CREATE TABLE receipt (
+  chat_id BIGINT, server_id BIGINT, user_id BIGINT,
+  delivered_at TIMESTAMPTZ, read_at TIMESTAMPTZ,
+  PRIMARY KEY (chat_id, server_id, user_id)
+);
+-- Session registry (Redis): userId/deviceId -> gatewayNode, with TTL/heartbeat.
+```
+
+## 7. Detailed component design — delivery flow
+
+- **Connect.** The device opens a WebSocket to a gateway; the gateway writes `device → node` into the Redis session registry with a heartbeat TTL.
+- **Send.** Gateway forwards to the message service, which assigns a **per-chat `seq`** (the ordering source of truth), persists the message, ACKs the sender, then publishes one event **per recipient** to Kafka.
+- **Route + deliver.** Delivery workers consume per-recipient events, look up the recipient's gateway in the session registry, and push over its live connection. If the recipient is on a gateway in another region, the worker routes to that region's gateway.
+- **Offline.** No live connection → leave the message in the store; on reconnect the device sends its last-seen `seq` per chat and the service replays everything newer, in order.
+- **Receipts** are just small messages flowing the other way, deduped by `(server_id, user_id)`.
+- **Groups.** The service expands membership and enqueues per-member events; a 10K group becomes 10K enqueues, absorbed by Kafka and the worker pool rather than a synchronous spike.
+
+## 8. Scaling considerations
+
+- **Gateways are stateful** — shard connections across ~10K nodes; the session registry decouples "who is connected where" from message routing.
+- **Shard by chat ID** so a conversation's messages and `seq` counter are co-located (single-shard ordering, no cross-shard coordination).
+- **Presence** is high-churn and best-effort: heartbeat into Redis with a short TTL; fan presence changes only to users who have the subject open, not globally.
+- **Group fan-out** scales by worker count; very large groups may switch to a pull-on-open model for inactive members.
+
+## 9. Trade-offs and alternatives
+
+- **WebSocket vs long-polling.** WebSockets give true server push and low latency but require sticky, stateful gateways and connection accounting; long-polling is simpler and firewall-friendly but wastes resources and adds latency. Use WebSockets, fall back to polling.
+- **Per-chat `seq` vs global timestamps.** A per-chat sequence gives clean ordering on a single shard; global ordering across chats is unnecessary and expensive — don't promise it.
+- **E2E encryption trade-off.** With Signal-style E2E, the server stores only ciphertext: no server-side search, no content-based ranking, and key exchange/multi-device becomes the hard part. Say what you give up.
+- **Fan-out on write vs read for groups** — same trade-off as feeds; push for small/active groups, pull for huge ones.
+
+## 10. Common follow-up questions
+
+- "Multi-device sync" → fan out to every device of the user; track per-device delivery and `seq` cursor.
+- "Exactly-once" → idempotent `clientMsgId` on send + dedup by `server_id` on the device.
+- "Recipient on another data center" → session registry resolves the gateway region; cross-region routing.
+- "Out-of-order under retries" → ordering is by stored `seq`, not arrival time; client sorts by `seq`.
+- "Media" → upload to object storage first, send only the media ID; serve via CDN.
+
+## 11. What interviewers are really probing
+
+<ProbeNote>
+**All styles:** that you treated this as a stateful connection-routing + durable-delivery problem, not a CRUD app — persist first, then deliver, with idempotent sends and per-chat ordering. **FAANG:** the gateway/session-registry split, cross-region routing, group fan-out via a worker pool, presence at scale, and exactly-once-to-device. **EU/contracting:** a pragmatic WebSocket + store + queue design with correct receipts and an honest note on what E2E encryption costs you. **Regional:** a clean Spring WebSocket service, a chat-sharded schema, and a defensible send/deliver flow. The classic failure is making the gateway hold the message in memory and treating delivery as synchronous — so a recipient who is offline (or whose gateway crashes) loses messages, and ordering collapses under retries.
+</ProbeNote>

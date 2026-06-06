@@ -1,0 +1,54 @@
+## A Redis-based distributed limiter — INCR + EXPIRE and Lua atomicity
+
+Redis is the default backing store for distributed rate limiting: it is in-memory (sub-millisecond), single-threaded (commands are serialized, so no data races *within* a command), and ships with the exact primitives a limiter needs — atomic counters, TTLs, and server-side scripting. The four algorithms themselves live in the LLD *Design a Rate Limiter* topic; here we implement the **fixed-window** counter and show why the naive version is subtly wrong.
+
+### The simplest correct primitive: INCR + EXPIRE
+
+For a fixed window, the key encodes the identity *and* the current time bucket, e.g. `rl:{userId}:{epochMinute}`. The flow:
+
+```
+key = "rl:" + userId + ":" + (now / 60)   # one key per minute
+count = INCR key                          # atomic; returns the new value
+if count == 1:  EXPIRE key 60             # first hit in this window -> set TTL
+if count > limit:  reject (429)
+```
+
+`INCR` is atomic and returns the post-increment value, so the check-then-act race from the single-machine case disappears: two concurrent requests get distinct return values (say 99 and 100), and only the one that crosses the limit is rejected. The `EXPIRE` lets the key self-clean when the window rolls over, so the keyspace doesn't grow unbounded.
+
+### The bug: INCR and EXPIRE are two commands
+
+The code above has a latent defect. `INCR` and `EXPIRE` are **separate round-trips**. If a client `INCR`s the key (creating it) and then crashes — or the connection drops — *before* `EXPIRE` runs, the key has **no TTL** and lives forever. That user is now permanently counted in a window that never resets: they get locked out indefinitely. This is a real production failure mode, not a theoretical one.
+
+You cannot fix it by reordering, and `SET key 1 EX 60 NX` plus a separate `INCR` reintroduces a race. The clean fix is to make the whole operation atomic.
+
+### The fix: a Lua script (atomic, one round-trip)
+
+Redis executes a Lua script **atomically** — the entire script runs as a single unit with nothing interleaved — and in **one** network round-trip. This collapses increment, first-hit TTL, and limit check into one indivisible operation:
+
+```lua
+-- KEYS[1] = rate-limit key, ARGV[1] = limit, ARGV[2] = window seconds
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[2])   -- set TTL only on first hit
+end
+if count > tonumber(ARGV[1]) then
+  return 0                                  -- rejected
+end
+return 1                                    -- allowed
+```
+
+Because the script is atomic, the "crash between INCR and EXPIRE" window is gone — either both happen or neither does. This is exactly how libraries like **Bucket4j** (with its Redis/Lettuce backend) and gateway plugins implement their limiters; token-bucket variants are a slightly longer script that reads the stored token count and last-refill timestamp, refills based on elapsed time, and conditionally decrements — all in one atomic script.
+
+<Callout kind="warn" title="Fixed window has a burst edge">
+A fixed-window counter allows up to 2x the limit across a window boundary: a user can send `limit` requests at 00:59 and another `limit` at 01:00. If that burst matters, use a sliding-window counter (two adjacent buckets, weighted by position in the window) or a token bucket — same Redis + Lua mechanics, slightly more state per key. See the LLD topic for the algorithm details.
+</Callout>
+
+### Scaling and operational notes
+
+- **Sharding / hot keys.** Keys are distributed across a Redis Cluster by hash slot, so load spreads naturally — unless one key is hot (a single abusive IP). A hot key pins to one node; mitigate with local pre-checks or by sharding that key.
+- **Time basis.** Derive the window from Redis (`TIME`) or pass a consistent timestamp, so app-server clock skew doesn't fragment counts.
+- **Availability.** Redis is now on your hot path. Run it with replication/Cluster, set a tight timeout, and decide fail-open vs fail-closed when it is unreachable (see the "why distributed is hard" question).
+
+<ProbeNote>
+The interviewer wants `INCR` for atomic counting and `EXPIRE` for self-cleaning windows — and, crucially, recognition that the two commands together are *not* atomic, so a Lua script (or a `MULTI` transaction) is needed to close the "no-TTL" gap. Bonus signal: the fixed-window 2x-burst edge and how the same Redis+Lua pattern extends to token buckets.
+</ProbeNote>

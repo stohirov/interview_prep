@@ -1,0 +1,53 @@
+## WebSockets vs SSE vs long polling for real-time
+
+Plain HTTP is **request/response** — the client must ask before the server can answer. "Real-time" means the **server pushes** when something changes. There are three mainstream ways to get push semantics over the web, in increasing capability and cost.
+
+### The three transports
+
+| | Long polling | SSE | WebSockets |
+| --- | --- | --- | --- |
+| Direction | server→client (per request) | server→client (one stream) | **full-duplex** |
+| Protocol | plain HTTP | HTTP (`text/event-stream`) | `ws://` upgrade from HTTP |
+| Connection | many short requests | one long-lived HTTP response | one long-lived TCP socket |
+| Auto-reconnect | n/a (client re-requests) | **built in** (browser) | manual |
+| Binary | yes | no (text only) | yes |
+| Proxy/firewall friendliness | best | good | sometimes blocked |
+| Server cost | high (constant reconnects) | low | low |
+
+### Long polling — the compatible fallback
+
+The client makes a request; the server **holds it open** until it has data (or a timeout), responds, and the client immediately reconnects. It needs no special protocol, so it works through any proxy and old browser. The cost is **overhead and latency**: a flood of reconnections, header re-sending each time, and a window between responses where events queue. Use it only as a fallback when WebSockets/SSE aren't available.
+
+### SSE (Server-Sent Events) — one-way stream, cheap and robust
+
+The server keeps a single HTTP response open and streams `text/event-stream` frames. It's **unidirectional** (server→client only), text-only, and runs over ordinary HTTP — so it traverses proxies cleanly and the browser **reconnects automatically** and resumes from the `Last-Event-ID`. Perfect for **feeds, notifications, live scores, dashboards, LLM token streaming** — anywhere the client mostly listens.
+
+<Callout kind="tip" title="SSE is underrated">
+For server→client push you rarely need full duplex. SSE gives you streaming with built-in reconnect over plain HTTP and far less operational weight than WebSockets. Reach for it first; upgrade to WebSockets only when the client must also push continuously.
+</Callout>
+
+### WebSockets — full-duplex, the heavy hitter
+
+A WebSocket upgrades an HTTP connection to a persistent, **bidirectional** TCP channel; both sides send frames anytime, text or binary, with minimal per-message overhead. It's the right tool for **chat, multiplayer games, collaborative editing, live trading** — anything with frequent client→server *and* server→client traffic.
+
+Costs to call out:
+
+- **Stateful connections.** Each socket pins a client to a server, which complicates load balancing and horizontal scaling — you need a **pub/sub backplane** (e.g. Redis) so any server can deliver a message regardless of which one holds the socket.
+- **No free reconnect/heartbeat.** You implement ping/pong and reconnection yourself.
+- **Infra friction.** Some proxies/load balancers need explicit WebSocket support; L7 LBs must handle the upgrade.
+
+<Mermaid caption="Choosing a real-time transport">{`graph TB
+    Q{Does the client need to<br/>push continuously too?}
+    Q -->|Yes| WS[WebSockets<br/>chat, games, collab]
+    Q -->|No, mostly listens| SSE[SSE<br/>feeds, notifications, token streams]
+    Q -->|Must work everywhere,<br/>can't use either| LP[Long polling fallback]`}</Mermaid>
+
+### Decision rule
+
+- Mostly **server→client** push → **SSE** (cheap, auto-reconnect, proxy-friendly).
+- Frequent **two-way** traffic → **WebSockets** (plan for the pub/sub backplane and sticky/aware routing).
+- Need to work through hostile networks or legacy clients → **long polling** as the graceful fallback.
+
+<ProbeNote>
+The interviewer wants you to map the *traffic pattern* to the transport — and to volunteer that WebSockets are **stateful**, so scaling them needs a Redis-style pub/sub backplane and the LB must support the upgrade. Reflexively reaching for WebSockets when SSE would do (or forgetting the backplane) is the tell.
+</ProbeNote>

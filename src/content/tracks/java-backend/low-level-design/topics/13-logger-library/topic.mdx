@@ -1,0 +1,14 @@
+A **logging library** — the engine behind Log4j, Logback, and the SLF4J facade — is the single best problem for showing that you can make design patterns *collaborate*. Most LLD problems lean on one or two patterns; a logger naturally composes five or more, and interviewers (Amazon especially) use it to see whether you reach for patterns because they earn their place or because you memorized a catalog.
+
+## What the interviewer is testing
+
+- Can you separate the four orthogonal axes of logging — **what** (LogEvent), **whether** (level + filters), **how** (formatter), and **where** (appender) — so each varies independently?
+- Do you name the right pattern for each axis and explain why: Strategy for formatters/appenders, Chain of Responsibility for level/filter gating, Singleton for the factory, Observer/producer-consumer for async, Decorator for cross-cutting appender behavior?
+- Do you understand the cost model? Logging sits on the hot path; a synchronous `ERROR` write to disk on every request will sink throughput. The senior answer talks about async appenders, a bounded queue, and what to do when that queue fills.
+- Thread-safety: many threads call `log()` concurrently into shared appenders.
+
+## How to frame it
+
+Start with the call site: `logger.info("order {} placed", id)`. Walk the event left to right: the `Logger` checks its **effective level** (inherited from its parent in the package hierarchy), builds a `LogEvent`, runs it through a **filter chain**, then hands it to each configured **appender**; each appender uses a **formatter** to render the event and writes it to its sink.
+
+Emphasize the composition: an async appender is a Decorator wrapping a console/file appender, draining a `BlockingQueue` on a background thread (Observer/producer-consumer); a formatter is a Strategy plugged into any appender; the level check and filters are a Chain of Responsibility short-circuiting cheaply before any formatting cost is paid. The worked solution shows all five patterns interlocking, plus the follow-ups interviewers always pull in: log rotation, runtime level changes, and graceful shutdown of the async pipeline.

@@ -1,0 +1,53 @@
+A concrete plan beats vague "do more problems" advice. Here is how many problems to solve, the template to internalize, and a schedule that gets you ready in two to three weeks.
+
+## How many problems — and which
+
+You don't need all twenty. Aim for **12–15 problems chosen to span the archetypes**, so every pattern and concurrency situation shows up at least twice.
+
+| Archetype | Representative problems | What it drills |
+| --- | --- | --- |
+| State machine | Vending machine, elevator, ATM | State pattern, lifecycle |
+| Strategy-heavy | Parking lot, rate limiter | Strategy, pluggable algorithms |
+| Composite tree | File system | Composite, recursion |
+| Concurrency-critical | Movie booking, LRU cache, pub/sub | Locking, atomics, races |
+| Multi-pattern showcase | Logger library, notification system | Combining 4+ patterns |
+| Warm-ups | Snake & ladder, tic-tac-toe | Speed, clean modeling |
+
+Do one from each row first; then a second pass for depth.
+
+## The internalizable template
+
+Memorize this nine-section structure so any solution writes itself in the same shape (it's the structure of every solution in this module):
+
+<Diagram caption="The solution template — same shape every time">{`1. Functional requirements      what it must do
+2. Non-functional requirements  concurrency, extensibility, scale
+3. Core entities                the nouns -> classes (table)
+4. Class diagram                relationships
+5. Key interfaces & classes     the code that proves it
+6. Design patterns used         pattern + the trigger that justified it
+7. Trade-offs & alternatives    what you'd change and why
+8. Common follow-ups            anticipate the next questions
+9. What interviewers probe      the senior signals`}</Diagram>
+
+## A 3-week schedule
+
+<Diagram caption="Sample ramp — adjust to your timeline">{`WEEK 1  Framework + patterns + concurrency topics.
+        Then 4 problems UNTIMED, studying the template.
+WEEK 2  6 problems TIMED at 45 min, narrating out loud.
+        Review each against the reference; log misses.
+WEEK 3  4-5 problems TIMED, ideally with a mock partner.
+        Re-do the 2-3 problems you scored worst on.`}</Diagram>
+
+## Make practice match the real thing
+
+<Callout kind="tip" title="Practice the way you'll perform">
+Three habits transfer directly to the interview: (1) **start a timer** every time — pacing is a learned skill; (2) **talk out loud** even when solo, because silent practice doesn't train the communication the rubric grades; (3) **write real code** for the core class, not just diagrams, so typing under pressure feels normal.
+</Callout>
+
+## Keep a mistake log
+
+After each problem, write down what you missed: the race you didn't spot, the God class you built, the pattern you forced. Patterns will emerge — most people repeat the same two or three mistakes. Targeting those is far higher-leverage than grinding new problems.
+
+<ProbeNote>
+The meta-skill being built is *transfer*: doing enough distinct archetypes that a fresh prompt triggers "this is a state machine with a Strategy," not panic. Twelve well-reviewed, timed, narrated reps beat thirty passively-read solutions every time.
+</ProbeNote>

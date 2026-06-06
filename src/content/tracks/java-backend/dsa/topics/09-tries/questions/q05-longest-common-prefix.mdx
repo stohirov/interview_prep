@@ -1,0 +1,60 @@
+**Problem.** Given an array of strings, return the longest common prefix shared by all of them. If there is none, return the empty string. Example: `["flower", "flow", "flight"]` → `"fl"`; `["dog", "cat"]` → `""`.
+
+## Vertical scan — O(S) time, O(1) space, the practical answer
+
+Compare characters **column by column**: at position `i`, check that every string has the same character as the first string; stop at the first mismatch or when any string ends. `S` is the total number of characters across all inputs.
+
+```java
+String longestCommonPrefix(String[] strs) {
+    if (strs == null || strs.length == 0) return "";
+    for (int i = 0; i < strs[0].length(); i++) {
+        char c = strs[0].charAt(i);
+        for (int j = 1; j < strs.length; j++) {
+            if (i == strs[j].length() || strs[j].charAt(i) != c)
+                return strs[0].substring(0, i);   // mismatch or a string ran out
+        }
+    }
+    return strs[0];                               // strs[0] is itself the prefix
+}
+```
+
+This short-circuits at the first divergence, so in practice it touches far fewer than `S` characters. It is the answer to give for the standalone problem — simplest and O(1) extra space.
+
+## Trie approach — why this problem lives in the tries chapter
+
+Insert all strings into a trie. The **longest common prefix is the path from the root that continues while each node has exactly one child and is not itself a word-end.** The moment a node branches (two children) or terminates a word, the common prefix ends.
+
+```java
+String longestCommonPrefixTrie(String[] strs) {
+    if (strs == null || strs.length == 0) return "";
+    Node root = new Node();
+    for (String s : strs) {
+        if (s.isEmpty()) return "";               // empty string -> no common prefix
+        Node cur = root;
+        for (char c : s.toCharArray())
+            cur = cur.children.computeIfAbsent(c, k -> new Node());
+        cur.isWord = true;
+    }
+    StringBuilder sb = new StringBuilder();
+    Node cur = root;
+    while (cur.children.size() == 1 && !cur.isWord) {
+        Map.Entry<Character, Node> only = cur.children.entrySet().iterator().next();
+        sb.append(only.getKey());
+        cur = only.getValue();
+    }
+    return sb.toString();
+}
+
+static class Node {
+    Map<Character, Node> children = new HashMap<>();
+    boolean isWord = false;
+}
+```
+
+The two stop conditions matter: **branching** (`children.size() != 1`) means strings diverge here; **`isWord`** means one of the input strings *is* this prefix, and a prefix can't be longer than the shortest string (e.g. `["flow", "flower"]` → `"flow"`).
+
+## Which to use
+
+For just this question, the vertical scan wins — O(S) time, no extra structure, O(1) space. The trie pays off when you'll run **many** prefix queries against the same set of strings (the build cost amortizes), or when LCP is one piece of a larger trie-based system.
+
+<ProbeNote>Lead with the vertical scan and its short-circuit — it's optimal and the trie is overkill for a one-shot query. But be ready to explain the trie framing, since that's why this sits in the tries chapter: LCP is the single-child, non-word-end path from the root. The trie wins only when the string set is queried repeatedly. Edge cases either approach must handle: empty array, an empty string in the set (forces `""`), and a string that is itself a prefix of the others.</ProbeNote>

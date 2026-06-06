@@ -1,0 +1,165 @@
+## 1. Functional requirements
+
+- Multi-floor lot; each floor has many spots.
+- Spot types: **Motorcycle**, **Compact**, **Large**, plus **Handicapped** and **EV** (with charging).
+- Vehicle types: **Motorcycle**, **Car**, **Bus/Truck**; each fits a set of spot types.
+- On entry, the system finds a free compatible spot and issues a **ticket** (timestamped).
+- On exit, the system computes the fee, takes **payment**, and frees the spot.
+- Multiple **entry/exit gates**.
+- Display free-spot counts per floor/type.
+
+## 2. Non-functional requirements
+
+- **Concurrency** — two vehicles at different gates must never be assigned the same spot.
+- **Extensibility** — adding a spot type, vehicle type, or pricing scheme should not touch existing classes (Open/Closed).
+- **Persistence** — out of scope for the in-memory LLD round, but the repository seam is shown.
+
+## 3. Core entities
+
+| Entity | Responsibility |
+| --- | --- |
+| `ParkingLot` | Aggregate root / manager (Singleton); orchestrates park & unpark. |
+| `ParkingFloor` | Holds spots; tracks availability per type. |
+| `ParkingSpot` | A single spot with a type and occupancy. |
+| `Vehicle` | Abstract; subtypes know which spot types they fit. |
+| `Ticket` | Entry record: spot, vehicle, entry time. |
+| `SpotAllocationStrategy` | Chooses a spot for a vehicle (nearest, first-fit…). |
+| `PricingStrategy` | Computes fee from a ticket + exit time. |
+| `Gate` (Entry/Exit) | Entry issues tickets; exit settles payment. |
+
+## 4. Class diagram
+
+<Mermaid caption="Parking lot class model">{`classDiagram
+    class ParkingLot {
+      -List~ParkingFloor~ floors
+      -SpotAllocationStrategy allocator
+      -PricingStrategy pricing
+      +park(Vehicle) Ticket
+      +unpark(Ticket) double
+    }
+    class ParkingFloor {
+      -int floorNo
+      -List~ParkingSpot~ spots
+      +findSpot(Vehicle) ParkingSpot
+    }
+    class ParkingSpot {
+      -String id
+      -SpotType type
+      -boolean free
+      +canFit(Vehicle) boolean
+    }
+    class Vehicle {
+      <<abstract>>
+      -String plate
+      +fits() Set~SpotType~
+    }
+    class Ticket {
+      -String id
+      -Instant entryTime
+    }
+    class SpotAllocationStrategy {
+      <<interface>>
+      +allocate(List~ParkingFloor~, Vehicle) ParkingSpot
+    }
+    class PricingStrategy {
+      <<interface>>
+      +price(Ticket, Instant) double
+    }
+    ParkingLot "1" o-- "*" ParkingFloor
+    ParkingFloor "1" o-- "*" ParkingSpot
+    ParkingLot ..> SpotAllocationStrategy
+    ParkingLot ..> PricingStrategy
+    Ticket --> ParkingSpot
+    Ticket --> Vehicle
+    Vehicle <|-- Car
+    Vehicle <|-- Motorcycle
+    Vehicle <|-- Truck`}</Mermaid>
+
+## 5. Key interfaces and classes
+
+```java
+enum SpotType { MOTORCYCLE, COMPACT, LARGE, HANDICAPPED, EV }
+
+abstract class Vehicle {
+    final String plate;
+    Vehicle(String plate) { this.plate = plate; }
+    abstract Set<SpotType> fits();          // spot types this vehicle can use
+}
+
+final class Car extends Vehicle {
+    Car(String plate) { super(plate); }
+    Set<SpotType> fits() { return EnumSet.of(SpotType.COMPACT, SpotType.LARGE, SpotType.EV); }
+}
+
+final class ParkingSpot {
+    final String id;
+    final SpotType type;
+    private boolean free = true;
+    ParkingSpot(String id, SpotType type) { this.id = id; this.type = type; }
+    boolean canFit(Vehicle v) { return free && v.fits().contains(type); }
+    synchronized boolean tryOccupy(Vehicle v) {   // CAS-like guard against double assignment
+        if (!canFit(v)) return false;
+        free = false; return true;
+    }
+    synchronized void release() { free = true; }
+}
+
+interface SpotAllocationStrategy {
+    Optional<ParkingSpot> allocate(List<ParkingFloor> floors, Vehicle v);
+}
+
+interface PricingStrategy {
+    double price(Ticket ticket, Instant exitTime);
+}
+```
+
+```java
+public final class ParkingLot {                 // Singleton manager
+    private static final ParkingLot INSTANCE = new ParkingLot();
+    public static ParkingLot get() { return INSTANCE; }
+
+    private final List<ParkingFloor> floors = new CopyOnWriteArrayList<>();
+    private SpotAllocationStrategy allocator = new NearestFirstAllocation();
+    private PricingStrategy pricing = new HourlyPricing();
+    private ParkingLot() {}
+
+    public Ticket park(Vehicle v) {
+        ParkingSpot spot = allocator.allocate(floors, v)
+            .orElseThrow(() -> new IllegalStateException("Lot full for " + v.plate));
+        // allocate() returns a spot it already atomically occupied
+        return new Ticket(UUID.randomUUID().toString(), spot, v, Instant.now());
+    }
+
+    public double unpark(Ticket t, Instant exit) {
+        double fee = pricing.price(t, exit);
+        t.spot().release();
+        return fee;
+    }
+}
+```
+
+## 6. Design patterns used
+
+- **Strategy** — `SpotAllocationStrategy` and `PricingStrategy` let allocation (nearest-first, by-floor, EV-aware) and pricing (hourly, flat, weekend) vary independently without editing `ParkingLot`.
+- **Singleton** — one `ParkingLot` manager per deployment.
+- **Factory** — a `VehicleFactory` / `SpotFactory` (omitted for brevity) centralizes creation by type, so new types are added in one place.
+- **Observer** — displays/waiting apps subscribe to spot-availability changes (sketched in follow-ups).
+
+## 7. Trade-offs and alternatives
+
+- **Thread-safety granularity.** Per-spot `synchronized tryOccupy` is fine-grained and avoids a global lock; the allocator must *occupy as it finds* (not "find then occupy", which races). Alternative: a per-floor lock or a concurrent free-spot queue per type for O(1) allocation.
+- **Allocation as a queue vs scan.** Scanning floors is simple and fine for small lots; for huge lots keep a `Queue<ParkingSpot>` per `SpotType` so `allocate` is O(1).
+- **Pricing precision.** Returning `double` is interview-acceptable; production money should be `BigDecimal` / minor-unit `long`.
+
+## 8. Common follow-up questions
+
+- Add **EV charging** spots with charge tracking — new `SpotType` + a charging-aware allocation strategy.
+- **Monthly subscriptions / reservations** — a `Reservation` entity and a reserved-spot pool.
+- **Multiple entry/exit gates** — gates are stateless clients of `ParkingLot`; concurrency is handled at the spot level.
+- **Distributed deployment** — move the free-spot pool into Redis; the Singleton becomes a service (links to the HLD module).
+
+## 9. What interviewers are really probing
+
+<ProbeNote>
+That you (1) clarified scope before coding, (2) modeled vehicles/spots polymorphically instead of with `if (type == CAR)` ladders, (3) named Strategy/Factory/Singleton and justified each, and (4) spotted the **find-then-occupy race** and fixed it with atomic per-spot occupancy. Naming the race unprompted is the senior signal here.
+</ProbeNote>

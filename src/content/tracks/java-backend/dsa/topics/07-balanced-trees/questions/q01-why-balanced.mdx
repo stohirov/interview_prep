@@ -1,0 +1,28 @@
+A binary search tree promises O(log n) search, insert, and delete — but that promise is **conditional on the tree staying balanced**. The cost of every BST operation is proportional to the tree's **height**, not its size. Balanced trees exist to bound that height.
+
+## The worst case
+
+Insert keys in sorted order — `1, 2, 3, 4, 5` — into a naive BST and every key becomes the right child of the previous one. You get a **degenerate tree**: a linked list in disguise, height `n - 1`. Search, insert, and delete are now O(n). This is not a rare edge case; sorted or nearly-sorted input is extremely common (timestamps, auto-increment IDs, already-sorted imports), and an adversary can trigger it deliberately as a denial-of-service vector.
+
+<Diagram caption="Same keys, two trees: degenerate (O(n)) vs balanced (O(log n)).">{`  inserted 1..5 sorted        balanced
+
+    1                             3
+     \\                          / \\
+      2                        2   4
+       \\                      /     \\
+        3                    1       5
+         \\
+          4
+           \\
+            5
+  height = 4  (O(n))         height = 2  (O(log n))`}</Diagram>
+
+## The bound balancing guarantees
+
+For `n` keys the minimum possible height is `⌊log₂ n⌋`. A self-balancing tree (AVL, red-black) guarantees height stays within a constant factor of that optimum — `≤ ~1.44·log₂ n` for AVL, `≤ 2·log₂ n` for red-black — **regardless of insertion order**. The difference is dramatic: for one million keys, a balanced tree is ~20 levels deep; the degenerate one is a million.
+
+## The cost of the guarantee
+
+Balancing is not free: each insert/delete may trigger O(log n) rotations or recolorings as the tree restores its invariant. But that work is bounded and small, and it converts a fragile O(n) worst case into a hard O(log n) ceiling.
+
+<ProbeNote>The one-line answer interviewers want: "BST cost tracks height, sorted input degenerates a plain BST to a linked list at O(n), and balancing caps height at O(log n) for *any* input order." Mention that this is a real DoS surface — it is why `HashMap` treeifies buckets and why databases never use plain BSTs.</ProbeNote>

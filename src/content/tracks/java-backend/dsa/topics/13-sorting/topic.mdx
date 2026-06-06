@@ -1,0 +1,30 @@
+**Sorting** is the workhorse of algorithms: it is the preprocessing step that turns hard problems (deduplication, nearest-pair, interval merging, two-sum-on-sorted) into easy ones, and it is the canonical place interviewers probe your grasp of time/space trade-offs.
+
+## Comparison vs non-comparison sorts
+
+A **comparison sort** only ever asks "is `a` before `b`?" via a comparator. Any such sort must make at least Ω(n log n) comparisons in the worst case — the decision tree distinguishing `n!` permutations has height log₂(n!) ≈ n log n. QuickSort, MergeSort, HeapSort, and Timsort all live here.
+
+**Non-comparison sorts** break the bound by exploiting structure in the keys: CountingSort, RadixSort, and BucketSort read the digits/values directly and run in O(n + k) or O(d·n). They only apply when keys are bounded small integers (or decompose into bounded digits).
+
+## Two properties that matter
+
+- **Stable** — equal elements keep their original relative order. Essential when sorting by one field after another (sort by name, then stably by department). MergeSort, Timsort, and CountingSort are stable; QuickSort and HeapSort are not.
+- **In-place** — O(1) (or O(log n) stack) auxiliary space. QuickSort and HeapSort are in-place; MergeSort and Timsort need O(n) scratch.
+
+<ComplexityTable rows={[
+  {op: "QuickSort", best: "O(n log n)", average: "O(n log n)", worst: "O(n²)", note: "in-place, unstable"},
+  {op: "MergeSort", best: "O(n log n)", average: "O(n log n)", worst: "O(n log n)", note: "O(n) space, stable"},
+  {op: "HeapSort", best: "O(n log n)", average: "O(n log n)", worst: "O(n log n)", note: "in-place, unstable"},
+  {op: "Timsort", best: "O(n)", average: "O(n log n)", worst: "O(n log n)", note: "O(n) space, stable, adaptive"},
+  {op: "CountingSort", best: "O(n + k)", average: "O(n + k)", worst: "O(n + k)", note: "non-comparison, stable"},
+]} />
+
+## What Java actually does
+
+- **`Arrays.sort(int[])` and other primitives** use a **dual-pivot QuickSort** (Vladimir Yaroslavskiy's variant). Primitives have no notion of "identity beyond value," so stability is irrelevant — and the in-place, cache-friendly quicksort wins on speed.
+- **`Arrays.sort(Object[])` and `Collections.sort(List)`** use **Timsort** (an adaptive MergeSort). Objects need a **stable** sort because two objects that compare equal may still be distinguishable, and developers rely on stable behavior for multi-key sorts.
+- `Collections.sort` simply delegates to `list.sort(c)`, which copies to an array and runs Timsort.
+
+<Callout kind="tip" title="The senior framing">
+The dual library choice is deliberate: stability is meaningless for primitives, so the JDK picks raw speed; stability is contractually guaranteed for objects, so the JDK picks Timsort. Knowing *why* the two paths differ is the answer interviewers are listening for.
+</Callout>

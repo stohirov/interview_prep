@@ -1,0 +1,45 @@
+**Problem.** Given a binary tree and a target sum, return **all root-to-leaf paths** whose node values add up to the target. Each path is the list of node values from root to leaf.
+
+## The idea — DFS with backtracking
+
+This is a textbook **backtracking** problem on a tree. Descend from the root, maintaining the current path and the remaining target. At a **leaf**, if the remaining target equals the leaf's value, the path is a hit — snapshot it. The crucial discipline: after exploring a node's children, **remove it from the path** so sibling branches start clean. That add-recurse-remove rhythm is the backtracking signature.
+
+## Optimal — O(n) traversal, output-bound, O(h) extra (excl. output)
+
+```java
+List<List<Integer>> pathSum(TreeNode root, int targetSum) {
+    List<List<Integer>> result = new ArrayList<>();
+    dfs(root, targetSum, new ArrayList<>(), result);
+    return result;
+}
+
+private void dfs(TreeNode n, int remaining,
+                 List<Integer> path, List<List<Integer>> result) {
+    if (n == null) return;
+
+    path.add(n.val);                              // choose
+    remaining -= n.val;
+
+    if (n.left == null && n.right == null && remaining == 0) {
+        result.add(new ArrayList<>(path));        // leaf + target hit -> snapshot a COPY
+    } else {
+        dfs(n.left,  remaining, path, result);    // explore
+        dfs(n.right, remaining, path, result);
+    }
+
+    path.remove(path.size() - 1);                 // un-choose (backtrack)
+}
+```
+
+Two details carry the correctness:
+
+- **Snapshot a copy** (`new ArrayList<>(path)`) when recording a hit — `path` is mutated as we backtrack, so storing the reference would later corrupt it.
+- **The leaf test is both children null**, not "remaining == 0 anywhere." The problem demands root-to-*leaf* paths; matching the sum mid-tree does not count.
+
+We visit each node once, so the traversal is **O(n)**, but copying matched paths can add up to O(n) per path; the total is bounded by the size of the output. The recursion stack and the working `path` are **O(h)**.
+
+<ComplexityTable rows={[
+  {op: "DFS + backtracking", best: "O(n)", average: "O(n)", worst: "O(n²)", note: "worst when many full-length matching paths"},
+]} />
+
+<ProbeNote>The two things graders watch for: copying the path on a match (forgetting this is the most common bug), and the precise leaf condition (`left == null && right == null`). Negative node values matter — you cannot prune a branch just because `remaining` went negative partway down, since a later negative could bring it back. Contrast with Path Sum I (does *any* such path exist?), which returns a boolean and needs no backtracking list.</ProbeNote>

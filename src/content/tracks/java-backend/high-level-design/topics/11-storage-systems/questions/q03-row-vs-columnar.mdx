@@ -1,0 +1,45 @@
+## Row vs columnar storage — OLTP vs OLAP
+
+How a database lays bytes out on disk — by **row** or by **column** — determines which workload it serves well. It maps almost perfectly onto the **OLTP vs OLAP** divide, and naming that mapping with the *why* is the senior answer.
+
+### The two layouts
+
+Take a table `(id, user_id, amount, created_at)`:
+
+<Diagram caption="Row storage keeps a record contiguous; columnar storage keeps a column contiguous">{`
+ ROW STORAGE (OLTP)                    COLUMNAR STORAGE (OLAP)
+ -----------------------               -----------------------
+ [1, 42, 9.99, t0]                     id:        [1, 2, 3, ...]
+ [2, 17, 4.50, t1]                     user_id:   [42, 17, 88, ...]
+ [3, 88, 12.0, t2]                     amount:    [9.99, 4.50, 12.0, ...]
+ ...                                   created_at:[t0, t1, t2, ...]
+ one record = one contiguous chunk     one column = one contiguous chunk
+`}</Diagram>
+
+### Row storage → OLTP
+
+Row stores (Postgres, MySQL/InnoDB) keep each record's fields **contiguous**. Reading or writing a whole row touches one location.
+
+- **Great for:** point lookups and writes of **entire records** — "fetch user 42," "insert this order," "update this row." This is **OLTP** (Online Transaction Processing): many small, indexed reads/writes, high concurrency, low latency, transactional correctness.
+- **Weak for:** scanning one column over the whole table — `SELECT AVG(amount)` over a billion rows drags every *other* field through I/O and cache too, because they're interleaved with the column you want.
+
+### Columnar storage → OLAP
+
+Column stores (BigQuery, Redshift, ClickHouse, Parquet files, Snowflake) keep each **column** contiguous.
+
+- **Great for:** analytical scans and aggregations over a few columns across billions of rows — `SUM`, `AVG`, `GROUP BY`. You read only the columns the query touches, so I/O drops dramatically. This is **OLAP** (Online Analytical Processing).
+- **Compression is far better:** a column holds values of one type with low cardinality and locality, so run-length/dictionary encoding shrinks it enormously — less disk, less I/O.
+- **Vectorized execution:** tight, cache-friendly loops over one column enable CPU-level (SIMD) speedups.
+- **Weak for:** reading or updating whole rows, and for high-frequency single-row writes — reconstructing a record means gathering from many column files, and updates are expensive. Columnar stores are typically append/batch-loaded.
+
+### How they coexist
+
+Real systems use **both**: a row-store OLTP primary (Postgres) for the transactional workload, with data piped (via CDC / ETL) into a columnar warehouse for analytics — so heavy analytical scans never compete with user-facing transactions on the primary.
+
+<Callout kind="tip" title="The one-line rule">
+Read/write whole records by key, many at a time, transactionally → **row store (OLTP)**. Scan a few columns over enormous datasets to aggregate → **columnar store (OLAP)**. If analytics is hurting your transactional database, that's the signal to add a columnar warehouse.
+</Callout>
+
+<ProbeNote>
+The interviewer wants the layout-to-workload mapping with the mechanism: row = contiguous record → cheap whole-row OLTP access; columnar = contiguous column → reads only needed columns, compresses and vectorizes well → OLAP scans. Strong answers add that the two coexist (OLTP primary feeding a columnar warehouse via CDC/ETL) so analytics doesn't degrade transactional latency.
+</ProbeNote>

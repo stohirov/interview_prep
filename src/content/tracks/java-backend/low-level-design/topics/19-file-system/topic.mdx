@@ -1,0 +1,17 @@
+An **in-memory file system** is *the* canonical **Composite-pattern** problem. The whole design turns on one insight: a directory contains files *and* other directories, and you want to treat a single file and a whole subtree uniformly. That is exactly the Composite pattern — a base `FSEntry` (the component), `File` as the leaf, and `Directory` as the composite that holds children.
+
+Google and Amazon love this question because the modeling is clean but the operations (`mkdir`, `touch`, `ls`, `cd`, `rm`, `mv`, `cp`) and the path-resolution logic exercise real recursion and tree manipulation, and the follow-ups (permissions, symlinks, quotas) scale it to any seniority.
+
+## What the interviewer is testing
+
+- Do you reach for **Composite** so that `Directory` and `File` share an `FSEntry` abstraction, instead of two unrelated classes with duplicated traversal code?
+- Can you implement **path resolution** — splitting `/a/b/c`, walking the tree from the root, handling `.`, `..`, and absolute vs relative paths?
+- Are your operations correct at the edges: `rm` on a non-empty directory, `mv` into a descendant of itself, `cp` deep-copying a subtree?
+
+## How to frame it
+
+Start by **clarifying scope**: in-memory (state it — on-disk persistence/journaling is a follow-up), single-user vs permissions, whether content matters or just structure, and which operations are in scope.
+
+Then anchor on the **Composite tree**: a Singleton root `/`, an `FSEntry` base carrying name/parent/metadata, `Directory` holding a `Map<String, FSEntry>` of children, and `File` holding bytes. Build a `Path` helper that resolves a string to an `FSEntry` by walking from root or the current directory.
+
+Implement operations against the tree: `mkdir` creates intermediate directories, `ls` lists a directory's children, `cd` moves the cursor, `rm` unlinks (with a recursive flag for non-empty dirs), `mv` re-parents (rejecting moves into a descendant), and `cp` deep-clones a subtree. The senior signal is catching the **move-into-own-descendant** cycle and the **non-empty-directory delete** guard before the interviewer asks.

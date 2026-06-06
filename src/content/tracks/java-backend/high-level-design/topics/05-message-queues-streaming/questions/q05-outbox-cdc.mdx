@@ -1,0 +1,57 @@
+## Outbox pattern and CDC — solving the dual-write problem
+
+This is the question that separates engineers who've actually run event-driven systems from those who've only drawn the diagram. The setup is everywhere: a service updates its database **and** publishes an event ("order placed") so other services react. Doing both reliably is harder than it looks.
+
+### The dual-write problem
+
+You have two systems to update — the **database** and the **message broker** — and no transaction spans both. Whatever order you choose, a crash in the gap leaves them inconsistent:
+
+- **DB commit, then publish** → if the service crashes after commit but before publish, the order exists but **no event is ever sent**. Downstream never finds out. (Lost event.)
+- **Publish, then DB commit** → if the publish succeeds but the DB transaction rolls back, you've announced an order that **doesn't exist**. (Phantom event.)
+
+<Mermaid caption="Two independent systems, no shared transaction — a crash in the gap diverges them">{`graph LR
+    S[Service] -->|1. commit| DB[(Database)]
+    S -->|2. publish| MQ[(Broker)]
+    X[Crash between 1 and 2] -.->|DB has it, broker doesn't| Lost[Lost event]`}</Mermaid>
+
+Wrapping them in a **distributed transaction (2PC)** technically works but is slow, couples availability of the DB and broker, and most modern brokers don't support it well. So the standard solution avoids 2PC entirely.
+
+### The transactional outbox pattern
+
+The insight: make the event part of the **same local database transaction** as the business data. Instead of publishing to the broker directly, the service **inserts the event into an `outbox` table** in the same DB, in the same transaction as the order write. Now there is exactly one atomic commit — either both the order and the outbox row persist, or neither does. No dual write.
+
+```sql
+BEGIN;
+  INSERT INTO orders (id, customer_id, total) VALUES (...);
+  INSERT INTO outbox (id, aggregate_id, type, payload, created_at)
+       VALUES (gen_random_uuid(), :orderId, 'OrderPlaced', :json, now());
+COMMIT;   -- atomic: order + event, or nothing
+```
+
+A separate **relay / message-relay** process then reads unpublished rows from the outbox and publishes them to the broker, marking them sent (or deleting them) afterward. Because the relay publishes with **at-least-once** semantics and may retry, consumers must be **idempotent** — but no event is ever lost.
+
+### Two ways to drain the outbox
+
+- **Polling publisher.** A background job `SELECT`s new outbox rows on an interval and publishes them. Simple, no extra infrastructure, but adds DB load and polling latency.
+- **Change Data Capture (CDC).** Instead of polling, **tail the database's transaction log** (Postgres WAL, MySQL binlog). A connector reads committed changes in commit order and streams them out. **Debezium** running on **Kafka Connect** is the canonical tool: it captures inserts to the outbox table and publishes them to Kafka topics, with no polling and minimal DB overhead. CDC can even be applied to the business tables directly — but routing through an explicit outbox table gives you clean, intentional event shapes rather than leaking raw row diffs.
+
+<Mermaid caption="Outbox + CDC: one atomic commit, then Debezium tails the WAL into Kafka">{`graph LR
+    S[Service] -->|single TX: order + outbox row| DB[(Postgres)]
+    DB -->|WAL| DBZ[Debezium / Kafka Connect]
+    DBZ --> K[(Kafka topic)]
+    K --> Cs[Downstream consumers - idempotent]`}</Mermaid>
+
+<Callout kind="note" title="Why CDC reads the log, not the table">
+Tailing the WAL/binlog captures changes in **commit order**, includes only **committed** transactions, and imposes almost no load on the source (it's the same stream replication already uses). Polling a table competes with live traffic and can miss the exact ordering. This log-based capture is also how database replication itself works — CDC just exposes that stream to your pipeline.
+</Callout>
+
+### Trade-offs to mention
+
+- **Ordering:** CDC preserves commit order; route by aggregate id to a Kafka partition to keep per-entity ordering downstream.
+- **Idempotency is still required:** the relay is at-least-once, so duplicates happen on retry — consumers dedup on the event id.
+- **Outbox cleanup:** the table grows; prune published rows (or rely on the connector's offset + a TTL sweep).
+- **Operational cost:** CDC adds Debezium/Connect to operate and monitor; polling is simpler if event volume and latency tolerance allow.
+
+<ProbeNote>
+The interviewer wants you to name the **dual-write problem** precisely (no transaction spans DB and broker, so a crash loses or phantoms an event) and solve it with the **outbox** — event written in the same local transaction as the data — drained by a **polling publisher or CDC (Debezium on Kafka Connect)**. Strong signals: rejecting 2PC for the reasons it's avoided, noting the relay is at-least-once so consumers must be idempotent, and explaining why CDC tails the WAL rather than polling the table.
+</ProbeNote>

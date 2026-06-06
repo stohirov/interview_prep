@@ -1,0 +1,53 @@
+## How FAANG, EU/contracting, and regional styles differ
+
+The 4-step framework is universal, but **what gets you the offer differs by who is interviewing you**. Reading the room — and tailoring depth, pragmatism, and presentation accordingly — is itself a senior skill. These three angles recur on every design topic in this track, so it's worth internalizing them once.
+
+### FAANG — depth and scale
+
+Big-tech interviewers (Amazon, Google, Meta, Netflix) optimize for **scale and rigor**. They will:
+
+- Push the numbers: "now assume 1B users — what breaks?"
+- Drill the deep dive hard: consistency under partition, hot partitions, ID-generation collisions, replication lag, exactly-once semantics.
+- Expect fluency with named techniques: consistent hashing, quorums, CDC, leaderless replication.
+- Score the *trade-off articulation* as much as the choice ("I'd pick eventual consistency here because…").
+
+**To land it:** be fast and correct on capacity math, reserve most of the clock for the deep dive, and always state what breaks at 10× and how you'd fix it.
+
+### EU / remote contracting — pragmatism and cost
+
+EU and remote-contracting interviews optimize for **shipping a cost-appropriate system**. They will:
+
+- Reward "Postgres + Redis gets you very far" over a premature 12-service microservice mesh.
+- Ask about operational cost, team size, and maintenance burden.
+- Treat over-engineering as a red flag — sharding 300 GB or reaching for Kafka without justification counts against you.
+- Value clear reasoning about *when* you'd add complexity, not adding it upfront.
+
+**To land it:** justify every component on cost and operational simplicity; explicitly defer complexity until the numbers demand it.
+
+### Regional (EPAM / Uzum) — clean, buildable diagrams
+
+Regional and outsourcing-heavy interviewers (EPAM, Uzum, and similar) optimize for **a real system you can defend**. They will:
+
+- Want a clean REST API, a sensible relational schema, and a diagram you can explain line by line.
+- Care that the design is concrete and implementable with a normal stack (Spring Boot, Postgres, Redis).
+- Be less interested in exotic scale and more in correctness, clarity, and a working data model.
+
+**To land it:** draw a clear architecture diagram, specify a real schema with keys and indexes, and walk it end to end.
+
+### Quick comparison
+
+| Dimension | FAANG | EU / contracting | Regional (EPAM / Uzum) |
+|---|---|---|---|
+| Primary lens | Scale & rigor | Cost & simplicity | Clarity & buildability |
+| Deep-dive depth | Very high | Moderate | Moderate |
+| Over-engineering | Tolerated if justified | Penalized | Penalized |
+| Default stack bias | Distributed stores | Postgres + Redis | Spring + Postgres + Redis |
+| What wins | "What breaks at 10×?" | "Cheapest correct design" | "A diagram I can defend" |
+
+<Callout kind="tip" title="One design, three emphases">
+You don't need three different designs — you need one solid design and the judgment to dial depth, complexity, and presentation to the room. Start pragmatic, then say "if we needed FAANG-scale, here's how I'd evolve it" — that single sentence covers all three audiences.
+</Callout>
+
+<ProbeNote>
+Beyond the technical content, the interviewer is assessing fit: can you match the organization's engineering culture? Demonstrating that you *know* when to reach for distributed-systems machinery versus when a boring, cheap, correct design wins is the mark of someone who has shipped real systems.
+</ProbeNote>

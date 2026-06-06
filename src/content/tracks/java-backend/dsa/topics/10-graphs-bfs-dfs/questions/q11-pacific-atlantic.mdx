@@ -1,0 +1,47 @@
+**Problem.** Given an `m × n` grid of cell heights, water flows from a cell to a neighbor (4-directional) of **equal or lower** height. The Pacific touches the top and left edges; the Atlantic touches the bottom and right edges. Return all cells from which water can reach **both** oceans.
+
+## The key insight — reverse the flow
+
+The brute force runs a search from every cell asking "can this reach each ocean?" — O((m·n)²), far too slow. Flip the direction: instead of asking where water *flows to*, start **from each ocean's border** and search inward to every cell water could have *flowed from* — i.e., move to a neighbor of **equal or greater** height. A cell reachable in *both* reverse searches can drain to both oceans.
+
+Two multi-source traversals, one per ocean, each O(m·n). Intersect the two reachable sets.
+
+## Approach — DFS from both borders, O(m·n) time, O(m·n) space
+
+```java
+public List<List<Integer>> pacificAtlantic(int[][] h) {
+    int m = h.length, n = h[0].length;
+    boolean[][] pac = new boolean[m][n], atl = new boolean[m][n];
+
+    for (int r = 0; r < m; r++) {          // left col -> Pacific, right col -> Atlantic
+        dfs(h, pac, r, 0);
+        dfs(h, atl, r, n - 1);
+    }
+    for (int c = 0; c < n; c++) {          // top row -> Pacific, bottom row -> Atlantic
+        dfs(h, pac, 0, c);
+        dfs(h, atl, m - 1, c);
+    }
+
+    List<List<Integer>> res = new ArrayList<>();
+    for (int r = 0; r < m; r++)
+        for (int c = 0; c < n; c++)
+            if (pac[r][c] && atl[r][c]) res.add(List.of(r, c));
+    return res;
+}
+
+private void dfs(int[][] h, boolean[][] reach, int r, int c) {
+    reach[r][c] = true;
+    int[][] dirs = {{1,0},{-1,0},{0,1},{0,-1}};
+    for (int[] d : dirs) {
+        int nr = r + d[0], nc = c + d[1];
+        if (nr < 0 || nc < 0 || nr >= h.length || nc >= h[0].length) continue;
+        if (reach[nr][nc]) continue;               // already visited
+        if (h[nr][nc] < h[r][c]) continue;         // reverse flow: must be >= current
+        dfs(h, reach, nr, nc);
+    }
+}
+```
+
+Each ocean's DFS visits each cell at most once, so the total is **O(m·n)** time and **O(m·n)** space for the two visited matrices plus the recursion stack.
+
+<ProbeNote>The whole problem hinges on reversing the flow — start from the ocean borders and climb uphill (neighbor height ≥ current). Saying that out loud is the senior signal; a forward per-cell search is the O((mn)²) trap. Watch the comparison direction (`>=` going outward becomes "neighbor not lower" in reverse) and the equal-height case, which flows in both directions. BFS from the borders works identically if recursion depth is a concern.</ProbeNote>

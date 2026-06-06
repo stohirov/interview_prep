@@ -1,0 +1,27 @@
+When a problem asks for a **shortest path**, three algorithms compete. The cue that decides between them is the **edge weights**.
+
+## The decision table
+
+<ComplexityTable rows={[
+  {op: "When you see…", best: "…use", average: "Complexity", worst: "Fails when"},
+  {op: "Unweighted edges (or all weight 1)", best: "BFS", average: "O(V + E)", worst: "edges have varying weights"},
+  {op: "Non-negative weighted edges", best: "Dijkstra (heap)", average: "O((V + E) log V)", worst: "any negative edge"},
+  {op: "Some negative edges, no neg cycle", best: "Bellman-Ford", average: "O(V·E)", worst: "negative cycle (report it)"},
+  {op: "All-pairs shortest paths, dense", best: "Floyd-Warshall", average: "O(V³)", worst: "very large V"},
+  {op: "Single target + good heuristic", best: "A*", average: "≤ Dijkstra", worst: "no admissible heuristic"},
+]} />
+
+## How to choose, step by step
+
+1. **Are edges unweighted (or uniform)?** → **BFS**. Level order equals distance; the first time you reach a node is via a shortest path. This includes implicit graphs (word ladder, grid steps).
+2. **Weighted, all non-negative?** → **Dijkstra**. The greedy "finalize the closest unvisited node" works *because* non-negativity guarantees you never improve a finalized distance later.
+3. **Any negative edge?** → **Dijkstra breaks** (it may finalize a node before a cheaper negative-edge path is discovered). Use **Bellman-Ford**, which relaxes all edges `V−1` times and can also *detect* negative cycles (a `V`-th relaxation that still improves something).
+4. **Need every pair's distance and `V` is small?** → **Floyd-Warshall**, an `O(V³)` triple loop.
+5. **Single source-to-target with domain knowledge** (e.g. straight-line distance on a map)? → **A***, which is Dijkstra guided by an admissible heuristic and explores far fewer nodes.
+
+## The two classic traps
+
+- **0-1 weights** (edges weigh 0 or 1) → don't reach for full Dijkstra; **0-1 BFS** with a deque is O(V + E).
+- **"Cheapest within K stops"** → not plain Dijkstra; it's a *bounded* relaxation, naturally Bellman-Ford-style or BFS with a hop counter, because the state includes stops-used.
+
+<ProbeNote>The single discriminating cue is edge weights: unweighted → BFS, non-negative weighted → Dijkstra, negative → Bellman-Ford. The senior move is naming *why* Dijkstra fails on negative edges (it finalizes greedily and can't revise) and recognizing the K-stops variant needs a hop dimension in the state. Mention A* and 0-1 BFS as the specialized refinements.</ProbeNote>

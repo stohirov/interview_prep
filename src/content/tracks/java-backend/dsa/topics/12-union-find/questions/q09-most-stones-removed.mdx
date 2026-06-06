@@ -1,0 +1,35 @@
+**Problem.** Stones sit on a 2D plane at integer coordinates. A stone may be removed if **another stone shares its row or column**. Return the maximum number of stones that can be removed. The trick is reframing: stones sharing a row or column form a connected component, and from any component of `k` stones you can remove `k - 1` (leaving one). So the answer is **`total stones − number of components`**.
+
+## The insight
+
+Within a connected component you can always peel stones off one by one — each removed stone still has a same-row/column neighbor until just one remains. Across all components: `removed = Σ(kᵢ − 1) = total − componentCount`. The problem reduces to **counting connected components** under "shares a row or column."
+
+## Brute force — pairwise graph + DFS, O(stones²)
+
+Connect every pair sharing a row or column, then DFS to count components. Quadratic in the number of stones. Union-find with a coordinate trick avoids materializing all pairs.
+
+## Optimal — union-find on rows and columns, O(stones · α)
+
+Don't union stones to stones (O(stones²) edges). Instead, **union each stone's row with its column**. Treat row `r` and column `c` as distinct DSU nodes — offset columns by a constant (here `+10001`, beyond the coordinate range) so a row index and a column index never collide. Every stone links its row-node to its column-node; stones sharing a row or column therefore land in the same set.
+
+```java
+public int removeStones(int[][] stones) {
+    DSU dsu = new DSU(20002);                       // rows [0..10000], cols [10001..20001]
+    Set<Integer> seen = new HashSet<>();            // distinct DSU nodes actually used
+    for (int[] s : stones) {
+        int row = s[0], col = s[1] + 10001;         // offset column into its own range
+        dsu.union(row, col);
+        seen.add(row);
+        seen.add(col);
+    }
+    Set<Integer> roots = new HashSet<>();
+    for (int node : seen) roots.add(dsu.find(node));
+    return stones.length - roots.size();            // total - components
+}
+```
+
+(Uses the reusable `DSU` from the Number of Provinces answer.) Counting **distinct roots over the row/column nodes that actually appear** gives the component count; subtract from the stone count for the answer. The column offset is the load-bearing detail — without it, row 5 and column 5 would wrongly merge.
+
+<ProbeNote>
+Two leaps the interviewer is testing: (1) reframing "max removable" as `total − components` (each component leaves exactly one stone), and (2) unioning **row-node with column-node** instead of stone-with-stone to dodge O(stones²) edges. Stress the **column offset** so row and column indices occupy disjoint id ranges — forgetting it is the classic bug here.
+</ProbeNote>

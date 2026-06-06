@@ -1,0 +1,75 @@
+**Problem.** Design a search autocomplete system. Given historical sentences each with a usage frequency, the user types characters one at a time (with `#` ending a sentence). After each character, return the **top 3** historical sentences that start with the prefix typed so far, ranked by **frequency descending, then lexicographically ascending** as a tiebreak. When the user types `#`, persist the just-typed sentence (incrementing its count) and reset.
+
+## Approach — trie for prefix matching, heap for top-K ranking
+
+Two jobs: (1) find all sentences sharing the current prefix — that is exactly a trie's prefix walk; (2) rank those candidates and keep the best 3 — a bounded selection problem solved with a size-3 heap. Each trie leaf stores its sentence's frequency.
+
+```java
+class AutocompleteSystem {
+    private static class Node {
+        Map<Character, Node> children = new HashMap<>();
+        String sentence;            // non-null at a sentence's terminal node
+        int freq;                   // usage count for that sentence
+    }
+
+    private final Node root = new Node();
+    private Node cur;               // tracks the trie node for the prefix typed so far
+    private final StringBuilder typed = new StringBuilder();
+
+    public AutocompleteSystem(String[] sentences, int[] times) {
+        for (int i = 0; i < sentences.length; i++) add(sentences[i], times[i]);
+        cur = root;
+    }
+
+    private void add(String sentence, int count) {
+        Node node = root;
+        for (char c : sentence.toCharArray())
+            node = node.children.computeIfAbsent(c, k -> new Node());
+        node.sentence = sentence;
+        node.freq += count;
+    }
+
+    public List<String> input(char c) {
+        if (c == '#') {                          // commit the typed sentence, reset
+            add(typed.toString(), 1);
+            typed.setLength(0);
+            cur = root;
+            return new ArrayList<>();
+        }
+        typed.append(c);
+        if (cur != null) cur = cur.children.get(c);   // advance the prefix pointer
+        if (cur == null) return new ArrayList<>();     // no sentence has this prefix
+
+        return topThree(cur);
+    }
+
+    // collect all sentences under `node`, keep the best 3 by (freq desc, text asc)
+    private List<String> topThree(Node node) {
+        // min-heap of size 3: the WORST candidate sits on top, ready to be evicted
+        PriorityQueue<Node> heap = new PriorityQueue<>((a, b) ->
+            a.freq != b.freq ? a.freq - b.freq            // lower freq is "worse"
+                             : b.sentence.compareTo(a.sentence)); // later text is "worse"
+        collect(node, heap);
+
+        LinkedList<String> result = new LinkedList<>();
+        while (!heap.isEmpty()) result.addFirst(heap.poll().sentence); // reverse to best-first
+        return result;
+    }
+
+    private void collect(Node node, PriorityQueue<Node> heap) {
+        if (node.sentence != null) {
+            heap.offer(node);
+            if (heap.size() > 3) heap.poll();    // drop the current worst
+        }
+        for (Node child : node.children.values()) collect(child, heap);
+    }
+}
+```
+
+Why a **min-heap of size 3**: we want the top 3, so the heap holds the current best 3 with the *weakest* of them on top; each new candidate either displaces it or is rejected — O(log 3) = O(1) per candidate. Then we drain and reverse so the strongest comes out first. The comparator encodes the tiebreak directly: by frequency ascending and, on ties, text *descending*, so that after the final reversal the result is frequency-descending then text-ascending.
+
+## Complexity
+
+Advancing the prefix pointer is O(1) per typed character. On each keystroke, gathering candidates under the current node costs O(k) where `k` is the number of sentences sharing the prefix (a subtree DFS), and the size-3 heap adds only a constant factor — **O(k)** per `input` call. Memory is O(total characters across all sentences), as with any trie.
+
+<ProbeNote>The clean decomposition wins points: trie does prefix matching, a size-K heap does ranking. Be precise about the heap direction — a **min-heap of size 3** keeps the worst on top so you evict in O(1), then reverse on output. The fiddly part is the tiebreak comparator interacting with the final reversal; talk through frequency-desc-then-lexicographic-asc explicitly. Don't forget the stateful pointer: `cur` advances per keystroke (O(1)), and `#` commits the sentence and resets both `cur` and the buffer. If asked to scale, mention caching top-K per node or precomputing.</ProbeNote>

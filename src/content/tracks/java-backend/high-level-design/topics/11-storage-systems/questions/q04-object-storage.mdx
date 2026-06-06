@@ -1,0 +1,41 @@
+## Object vs block vs file storage, and tiered hot/warm/cold data
+
+These three are the fundamental ways to expose bytes to an application, and they are not interchangeable — each has a different access model, latency profile, and cost. Layered on top is the orthogonal idea of **storage tiers**, matching how often data is touched to how much you pay to keep it fast.
+
+### The three storage models
+
+<Diagram caption="Block, file, and object storage — three access models, different latency and scale">{`
+ MODEL    ACCESS UNIT          INTERFACE        LATENCY     SCALE / USE
+ ------   ------------------   --------------   ---------   ----------------------------
+ Block    fixed-size blocks    raw device       lowest      DB volumes, VM disks (EBS)
+ File     files + directories  POSIX / NFS      low         shared mounts, home dirs (EFS)
+ Object   immutable blobs+meta HTTP API by key  higher      media, backups, data lake (S3)
+`}</Diagram>
+
+- **Block storage** (AWS EBS, a raw SAN/NVMe volume) exposes raw, fixed-size **blocks** with no notion of files. A filesystem or a database lays its own structure on top. Lowest latency, highest IOPS — it's the substrate **underneath** databases and OS filesystems. Typically attached to **one** instance.
+- **File storage** (NFS, AWS EFS, a NAS) presents a **POSIX hierarchy** of files and directories, mountable and **shared** by many hosts. Convenient for shared application data and lift-and-shift workloads; the directory tree and locking semantics limit how far it scales.
+- **Object storage** (AWS S3, GCS, Azure Blob) stores **immutable blobs** with rich metadata, addressed by a flat key over an **HTTP API**. Effectively infinite capacity, very high durability (S3 targets 11 nines), cheap per GB, and globally accessible — but **higher latency** and no in-place edits (you replace the whole object) and no POSIX semantics. The default home for media, backups, logs, and **data lakes**.
+
+### Choosing between them
+
+- Need a disk for a **database or VM**, lowest latency → **block**.
+- Need a **shared POSIX filesystem** across hosts → **file**.
+- Need to store lots of **large, write-once-read-many** blobs cheaply and durably (images, video, backups, exports) → **object**.
+
+### Tiered storage: hot / warm / cold
+
+Within object storage especially, not all data deserves the same speed or price. Match the **tier to access frequency**:
+
+- **Hot** — accessed frequently, needs low latency. RAM/SSD, or S3 Standard. Most expensive per GB, cheapest per access.
+- **Warm** — accessed occasionally. Infrequent-access tiers (S3 Standard-IA): cheaper storage, a small per-retrieval fee.
+- **Cold / archival** — rarely accessed, kept for compliance or "just in case." Glacier / Deep Archive / tape: very cheap storage, but retrieval takes **minutes to hours** and costs more per fetch.
+
+**Lifecycle policies** move objects down the tiers automatically (e.g., logs → IA after 30 days → Glacier after 90 → delete after 7 years), trading retrieval latency for large, automatic cost savings.
+
+<Callout kind="tip" title="Tiering is a latency-for-cost trade">
+The cost lever isn't free: cold tiers are cheap to *store* but slow and pricey to *read*. Tier by honest access patterns — putting actively-served data in Glacier to save money produces angry users and surprise retrieval bills.
+</Callout>
+
+<ProbeNote>
+The interviewer wants the access-model distinction (block = raw device under a DB/VM; file = shared POSIX tree; object = HTTP-addressed immutable blobs, cheap/durable/infinite but higher latency) and the right use case for each. On tiering, the signal is matching hot/warm/cold to access frequency and naming **lifecycle policies** that automate the move — framing it explicitly as trading retrieval latency for cost.
+</ProbeNote>

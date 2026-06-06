@@ -1,0 +1,63 @@
+**Problem.** Given `height[]` representing an elevation map (bar widths of 1), compute how much rain water it traps. `[0,1,0,2,1,0,1,3,2,1,2,1]` traps `6` units.
+
+## The key insight
+
+Water above bar `i` is bounded by the **tallest wall on each side**: it can rise to `min(maxLeft[i], maxRight[i])`, minus the bar's own height. So per index, `water[i] = max(0, min(maxLeft[i], maxRight[i]) - height[i])`. Everything below is just *how cheaply* we compute those two maxima.
+
+## Brute force / prefix-max — O(n) time, O(n) space
+
+Precompute the running max from the left and from the right, then sum:
+
+```java
+int trapPrefix(int[] h) {
+    int n = h.length;
+    if (n == 0) return 0;
+    int[] left = new int[n], right = new int[n];
+    left[0] = h[0];
+    for (int i = 1; i < n; i++) left[i] = Math.max(left[i - 1], h[i]);
+    right[n - 1] = h[n - 1];
+    for (int i = n - 2; i >= 0; i--) right[i] = Math.max(right[i + 1], h[i]);
+    int total = 0;
+    for (int i = 0; i < n; i++) total += Math.min(left[i], right[i]) - h[i];
+    return total;
+}
+```
+
+O(n) time but two O(n) arrays. (The truly naive version rescans for each i — O(n²).)
+
+## Optimal — O(n) time, O(1) space (two pointers)
+
+Walk `left` and `right` inward, tracking `leftMax` and `rightMax`. The trick: **whichever side has the smaller running max is the binding constraint**, so we can safely settle that bar's water using only that side's max — the other side is guaranteed taller:
+
+```java
+public int trap(int[] h) {
+    int left = 0, right = h.length - 1;
+    int leftMax = 0, rightMax = 0, total = 0;
+    while (left < right) {
+        if (h[left] < h[right]) {            // left wall is the limiter
+            leftMax = Math.max(leftMax, h[left]);
+            total += leftMax - h[left];
+            left++;
+        } else {                             // right wall is the limiter
+            rightMax = Math.max(rightMax, h[right]);
+            total += rightMax - h[right];
+            right--;
+        }
+    }
+    return total;
+}
+```
+
+When `h[left] < h[right]`, we know `rightMax >= h[right] > h[left]`, so the left side's `leftMax` alone determines the water at `left` — we never need to know the exact right max. That's why one pass with two pointers suffices.
+
+<Diagram caption="min(leftMax, rightMax) - height fills the basins">{`        █
+    █ ~ █ █ ~ █
+  █ █ ~ █ █ █ █ █
+height: 0 1 0 2 1 0 1 3 2 1 2 1
+water:  0 0 1 0 1 2 1 0 0 1 0 0   -> total 6`}</Diagram>
+
+<Callout kind="info" title="Why advance the shorter side">
+The water at the current pointer depends on the *minimum* of the two maxes. Whichever bar is shorter caps that minimum regardless of the far side, so its contribution is fully determined now — advance it. This is the converging two-pointer pattern with a monotonicity argument.
+</Callout>
+
+<ProbeNote>This is a senior favorite. They want the progression: brute O(n²) → prefix-max O(n) space → two-pointer O(1) space, with a clear justification of *why* you advance the shorter side (its max is the binding constraint). A monotonic-stack solution also runs O(n) and is worth naming. Edge cases: empty array, monotonic ramps (no water).</ProbeNote>

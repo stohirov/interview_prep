@@ -1,0 +1,45 @@
+## Replication lag — handling read-your-writes consistency
+
+Asynchronous replication is what makes single-leader (and multi-leader) systems fast and available: the leader acknowledges a write without waiting for followers. The price is **replication lag** — the window during which a follower has not yet applied a write the leader already committed. Read from a lagging follower and you get **stale data**. Usually the lag is milliseconds; under load or during catch-up it can stretch to seconds or worse.
+
+### The three anomalies lag causes
+
+Lag produces three distinct, user-visible problems, each with a matching session guarantee that fixes it:
+
+<Diagram caption="Replication lag: a read routed to a lagging follower misses the just-committed write">{`
+  t0  Client writes X=1 to LEADER         (leader: X=1)
+  t1  Leader acks the client
+  t2  Client reads X from FOLLOWER ...     (follower still X=0  <- LAG)
+  t3  Follower applies the change          (follower: X=1)
+`}</Diagram>
+
+**1. Read-your-writes violation.** You submit a write, then immediately read and your own write is missing ("I updated my profile but it still shows the old name"). Fixes:
+
+- Route reads **that could reflect your own write to the leader** (or to a follower known to have caught up). E.g., always read a user's own profile from the leader for a short window after they edit it.
+- Track the **logical timestamp / log position** of the user's last write; route the read to a replica that has reached at least that position, or wait until it has.
+
+**2. Monotonic-reads violation.** Successive reads go *backward* in time — you refresh and a comment you just saw disappears, because the second read hit a more-lagging follower than the first. Fix: **pin a client to one replica** (e.g., hash the user ID to a follower) so it never sees a replica that's behind the one it read last.
+
+**3. Monotonic-writes / causal violations.** Two writes from one client get applied out of order on a follower, or a write that depends on a read you did is seen before the value it depends on (writes-follow-reads). Fixes: route a session's writes through the same path, or use causal-consistency tracking.
+
+### Practical mitigations, cheapest first
+
+| Technique | Fixes | Cost |
+|---|---|---|
+| Read from leader after own write (time-boxed) | Read-your-writes | Some leader read load |
+| Track last-write log position, read a caught-up replica | Read-your-writes | Need version tracking |
+| Pin client/session to one replica | Monotonic reads | Uneven load, hot replicas |
+| Synchronous / semi-sync replication | All of the above | Higher write latency, availability hit |
+| Monitor and bound lag, drop overloaded replicas | Limits worst case | Operational |
+
+<Callout kind="tip" title="Don't fix what users can't see">
+Most reads don't need read-your-writes. Apply the guarantee surgically — only to a user's *own* recently-written data (their profile, their just-posted comment), reading everything else from cheap followers. Going fully synchronous to eliminate lag everywhere throws away the availability and latency that async replication bought you.
+</Callout>
+
+### Why not just go synchronous?
+
+Synchronous replication eliminates lag-induced staleness but reintroduces the single-leader write-availability problem: a slow or down follower stalls writes, and you've traded the PACELC "EL" benefit for "EC" on every write. The standard answer is **async by default, with targeted session guarantees** for the specific reads where staleness is a bug.
+
+<ProbeNote>
+The interviewer wants the term "replication lag" and the three named anomalies — read-your-writes, monotonic reads, monotonic writes — each with its fix. The senior move is applying read-your-writes *selectively* (only to a user's own writes), rather than reaching for synchronous replication and giving up the benefits of async.
+</ProbeNote>

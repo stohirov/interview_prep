@@ -1,0 +1,21 @@
+A **linked list** stores each element in its own node holding a value plus a pointer to the next node. Unlike an array, the elements are not contiguous in memory, so there is no random access — reaching index `i` costs O(n) — but inserting or deleting at a known node is O(1) pointer surgery with no shifting.
+
+## The three shapes
+
+- **Singly linked** — each node points only to `next`. Minimal memory, but you can only walk forward, and deleting a node requires its predecessor.
+- **Doubly linked** — each node holds `next` and `prev`. O(1) deletion given just the node, and backward traversal, at the cost of an extra pointer per node. This is what an LRU cache and Java's `LinkedList` use internally.
+- **Circular** — the tail points back to the head (or a sentinel) instead of `null`. Useful for round-robin schedulers and ring buffers.
+
+## The patterns interviewers test
+
+**Floyd's tortoise and hare.** Two pointers, one moving twice as fast. If they ever meet, there is a cycle; if the fast pointer hits `null`, there is none. The same two-speed idea finds the middle in one pass. O(n) time, O(1) space.
+
+**Dummy head (sentinel).** Allocate a throwaway node in front of the real head so that inserting, deleting, or building a result list never special-cases "what if this is the first node?" You return `dummy.next` at the end. It removes the most common off-by-one bugs.
+
+**In-place reversal.** Walk the list rewiring `next` to point backward, juggling `prev`, `curr`, and a saved `next`. O(n) time, O(1) space, and the conceptual core of reverse-in-k-groups and palindrome checks.
+
+<Callout kind="tip" title="Java standard library mapping">
+`java.util.LinkedList` is a doubly linked list, but it is **rarely the right choice**: poor cache locality and 24+ bytes of pointer overhead per element make `ArrayList` faster even for the operations LinkedList is supposed to win. For queue/stack/deque needs, reach for **`ArrayDeque`** — array-backed, cache-friendly, and faster than `LinkedList` on every realistic benchmark. In interviews you almost always hand-roll a `ListNode` rather than use the library type.
+</Callout>
+
+The problems below are pointer-manipulation drills: master dummy heads and the two-pointer trick and most of them collapse into a few lines.

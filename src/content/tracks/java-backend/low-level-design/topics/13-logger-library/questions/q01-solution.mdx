@@ -1,0 +1,209 @@
+## 1. Functional requirements
+
+- Log a message at a **level**: `TRACE < DEBUG < INFO < WARN < ERROR < FATAL`.
+- Each logger has an **effective level**; messages below it are dropped cheaply.
+- Pluggable **appenders** (sinks): Console, File, Network, Database — a logger can have several.
+- Pluggable **formatters** (layouts): plain text, pattern (`%d %level %msg`), JSON.
+- **Filters** that accept/deny/neutral an event beyond the level check (e.g., by marker or thread).
+- **Hierarchical loggers** by package: `com.app.svc` inherits config from `com.app`, then root.
+- **Async** appending so the caller is not blocked on slow I/O.
+
+## 2. Non-functional requirements
+
+- **Low overhead** — a disabled level must cost almost nothing (no string formatting, no allocation).
+- **Thread-safe** — many threads log concurrently into shared appenders.
+- **Extensible** — new appender, formatter, or filter without touching the core (Open/Closed).
+- **Reliable shutdown** — async queues drain (flush) on JVM exit; no silent message loss.
+
+## 3. Core entities
+
+| Entity | Responsibility |
+| --- | --- |
+| `LoggerFactory` | Singleton registry; creates/caches loggers, owns config & hierarchy. |
+| `Logger` | Call site API (`info`, `error`…); resolves effective level, builds events. |
+| `LogLevel` | Ordered enum used for gating. |
+| `LogEvent` | Immutable value: level, message, timestamp, thread, logger name. |
+| `Filter` | Chain node returning ACCEPT/DENY/NEUTRAL. |
+| `Formatter` | Strategy: renders a `LogEvent` to a `String`. |
+| `Appender` | Strategy: writes a formatted event to a sink. |
+| `AsyncAppender` | Decorator: queues events, drains on a worker thread. |
+
+## 4. Class diagram
+
+<Mermaid caption="Logger library class model">{`classDiagram
+    class LoggerFactory {
+      -Map~String,Logger~ cache
+      +getLogger(String) Logger
+    }
+    class Logger {
+      -String name
+      -LogLevel level
+      -List~Appender~ appenders
+      -Filter filterChain
+      +log(LogLevel, String)
+      +info(String)
+    }
+    class LogEvent {
+      -LogLevel level
+      -String message
+      -Instant time
+      -String thread
+    }
+    class LogLevel {
+      <<enumeration>>
+    }
+    class Filter {
+      <<interface>>
+      +decide(LogEvent) Result
+    }
+    class Formatter {
+      <<interface>>
+      +format(LogEvent) String
+    }
+    class Appender {
+      <<interface>>
+      +append(LogEvent)
+    }
+    class AsyncAppender {
+      -BlockingQueue~LogEvent~ queue
+      -Appender delegate
+    }
+    LoggerFactory "1" o-- "*" Logger
+    Logger ..> LogEvent
+    Logger o-- Filter
+    Logger o-- Appender
+    Appender ..> Formatter
+    Appender <|.. ConsoleAppender
+    Appender <|.. FileAppender
+    Appender <|.. AsyncAppender
+    AsyncAppender o-- Appender`}</Mermaid>
+
+## 5. Key interfaces and classes
+
+```java
+enum LogLevel {
+    TRACE, DEBUG, INFO, WARN, ERROR, FATAL;
+    boolean isEnabledFor(LogLevel threshold) { return this.ordinal() >= threshold.ordinal(); }
+}
+
+final class LogEvent {                 // immutable -> safe to hand across threads
+    final LogLevel level; final String message; final Instant time;
+    final String thread; final String logger;
+    LogEvent(LogLevel level, String logger, String message) {
+        this.level = level; this.logger = logger; this.message = message;
+        this.time = Instant.now(); this.thread = Thread.currentThread().getName();
+    }
+}
+
+interface Formatter { String format(LogEvent e); }          // Strategy
+interface Appender  { void append(LogEvent e); void close(); } // Strategy
+
+interface Filter {                                            // Chain of Responsibility
+    enum Result { ACCEPT, DENY, NEUTRAL }
+    Result decide(LogEvent e);
+}
+```
+
+```java
+final class Logger {
+    private final String name;
+    private volatile LogLevel level;          // volatile -> runtime level change is visible
+    private final List<Appender> appenders;   // CopyOnWriteArrayList for concurrent reads
+    private final List<Filter> filters;
+
+    void log(LogLevel lvl, String msg) {
+        if (!lvl.isEnabledFor(level)) return;            // cheap gate: no event built
+        LogEvent e = new LogEvent(lvl, name, msg);
+        for (Filter f : filters) {
+            if (f.decide(e) == Filter.Result.DENY) return;
+        }
+        for (Appender a : appenders) a.append(e);        // fan-out to sinks
+    }
+    void info(String m)  { log(LogLevel.INFO, m); }
+    void error(String m) { log(LogLevel.ERROR, m); }
+}
+```
+
+```java
+final class ConsoleAppender implements Appender {
+    private final Formatter fmt;                          // pluggable Strategy
+    ConsoleAppender(Formatter fmt) { this.fmt = fmt; }
+    public synchronized void append(LogEvent e) {          // guard the shared stream
+        System.out.print(fmt.format(e));
+    }
+    public void close() {}
+}
+
+// Decorator: adds async behavior to ANY appender without changing it.
+final class AsyncAppender implements Appender {
+    private final Appender delegate;
+    private final BlockingQueue<LogEvent> queue = new ArrayBlockingQueue<>(8_192);
+    private final Thread worker;
+    private volatile boolean running = true;
+
+    AsyncAppender(Appender delegate) {
+        this.delegate = delegate;
+        this.worker = new Thread(this::drain, "async-log");
+        this.worker.setDaemon(true);
+        this.worker.start();
+    }
+    public void append(LogEvent e) {
+        if (!queue.offer(e)) delegate.append(e);   // bounded queue full -> caller writes (backpressure)
+    }
+    private void drain() {
+        while (running || !queue.isEmpty()) {
+            try { LogEvent e = queue.poll(200, TimeUnit.MILLISECONDS);
+                  if (e != null) delegate.append(e); }
+            catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+        }
+    }
+    public void close() { running = false; worker.interrupt(); delegate.close(); }
+}
+```
+
+```java
+public final class LoggerFactory {                 // Singleton registry
+    private static final LoggerFactory INSTANCE = new LoggerFactory();
+    public static LoggerFactory get() { return INSTANCE; }
+    private final ConcurrentMap<String, Logger> cache = new ConcurrentHashMap<>();
+    private LoggerFactory() {}
+
+    public Logger getLogger(String name) {
+        return cache.computeIfAbsent(name, this::build);   // hierarchy resolved here
+    }
+    private Logger build(String name) { /* inherit level/appenders from parent package */ }
+}
+```
+
+## 6. Design patterns used
+
+- **Strategy** — `Formatter` and `Appender` are interchangeable behaviors; you mix a JSON formatter into a file appender or a pattern formatter into the console with no core change.
+- **Chain of Responsibility** — the level gate plus the `Filter` list short-circuit an event before any formatting cost; each filter votes ACCEPT/DENY/NEUTRAL.
+- **Singleton** — `LoggerFactory` is the one registry that caches loggers and owns the hierarchy.
+- **Observer / producer-consumer** — `AsyncAppender` decouples the logging thread (producer) from the I/O thread (consumer) over a `BlockingQueue`.
+- **Decorator** — `AsyncAppender` (and a `BufferedAppender`, `FailoverAppender`) wrap any `Appender`, layering behavior transparently.
+
+The composition is the point: `new AsyncAppender(new FileAppender(new JsonFormatter()))` stacks Decorator → Strategy → Strategy in one expression.
+
+## 7. Trade-offs and alternatives
+
+- **Async queue full.** Three policies: **block** the caller (back-pressure, never lose a log), **drop** (protect latency, lose logs), or **fall back to sync** on the caller thread (shown above). Production frameworks expose this as a config knob; say so.
+- **`volatile level` vs reconfiguration object.** A volatile field gives lock-free runtime level changes for a single logger; Log4j2 swaps an immutable configuration object atomically so a whole reconfig is consistent.
+- **Per-appender lock vs lock-free.** `synchronized append` is simple and correct; high-throughput libraries use a lock-free ring buffer (LMAX Disruptor in Log4j2) to cut contention.
+- **String formatting cost.** Eagerly building `"x=" + obj` even when the level is disabled wastes CPU; that is why the level gate runs *before* event construction, and why APIs offer parameterized `info("x={}", obj)` / `Supplier<String>`.
+
+## 8. Common follow-up questions
+
+- **Async logging with a queue** — `AsyncAppender` + `BlockingQueue`; discuss bounded size and the full-queue policy.
+- **Log rotation** — `FileAppender` checks size/date on append and rolls to `app.1.log`; a `RollingPolicy` Strategy decides when, a `TriggeringPolicy` how.
+- **Thread-safety** — immutable `LogEvent`, `volatile` level, concurrent registry, per-appender synchronization or a ring buffer.
+- **Multiple appenders** — the `Logger` fans out; one slow sink shouldn't block others, so wrap each in its own `AsyncAppender`.
+- **Hierarchical loggers** — resolve effective level by walking parent packages up to root (additive vs non-additive appenders).
+- **Runtime level change** — flip the `volatile` field, or hot-reload config; no restart.
+- **Graceful shutdown** — register a JVM shutdown hook that calls `close()` so queues drain.
+
+## 9. What interviewers are really probing
+
+<ProbeNote>
+Whether you can make patterns *cooperate* rather than recite them. The strong candidate (1) splits logging into orthogonal axes and assigns one pattern per axis, (2) puts the level gate **before** event construction and can explain the CPU cost it saves, (3) reaches for an async Decorator over a bounded queue and immediately raises the queue-full policy, and (4) names a concrete thread-safety story (immutable events, volatile level, concurrent registry). Mentioning the LMAX Disruptor / lock-free ring buffer is the senior flourish.
+</ProbeNote>

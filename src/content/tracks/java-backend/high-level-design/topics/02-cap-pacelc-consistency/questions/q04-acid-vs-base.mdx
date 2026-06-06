@@ -1,0 +1,52 @@
+## ACID vs BASE — when each fits
+
+ACID and BASE are two database **philosophies** for the same underlying tension that CAP and PACELC describe: how much consistency are you willing to trade for availability and scale? ACID stores prioritize correctness and strong guarantees; BASE stores prioritize availability and horizontal scale, accepting temporary inconsistency.
+
+### ACID — the transactional guarantees
+
+ACID describes properties of a **transaction**:
+
+- **Atomicity** — all-or-nothing; a transaction either fully commits or fully rolls back. Partial writes never survive a crash.
+- **Consistency** — a transaction moves the database from one valid state to another, preserving all declared invariants (constraints, foreign keys). *(Note: this C is about application invariants — not CAP's linearizability.)*
+- **Isolation** — concurrent transactions don't interfere; the result is as if they ran serially (modulo the chosen isolation level — read-committed, repeatable-read, serializable).
+- **Durability** — once committed, data survives crashes (write-ahead log, replication).
+
+Classic ACID systems: PostgreSQL, MySQL/InnoDB, Oracle, SQL Server, and increasingly distributed-but-strong stores (Spanner, CockroachDB).
+
+### BASE — the availability-first alternative
+
+BASE is a deliberate backronym contrasting with ACID:
+
+- **Basically Available** — the system always responds, even if with stale or partial data.
+- **Soft state** — state may change over time without input, as replicas reconcile in the background.
+- **Eventually consistent** — given no new writes, replicas converge.
+
+Classic BASE systems: Cassandra, DynamoDB, Riak, Couchbase — the Dynamo-style family.
+
+### Side by side
+
+| | ACID | BASE |
+|---|---|---|
+| Priority | Correctness, strong guarantees | Availability, scale |
+| Consistency | Strong (immediate) | Eventual |
+| Typical topology | Single-leader / consensus | Leaderless, multi-replica |
+| Scaling | Vertical first; sharding is harder | Horizontal by design |
+| CAP lean | CP | AP |
+| Best for | Money, inventory, anything with invariants | Feeds, logs, sessions, caches, telemetry |
+
+### Choosing — by what's at stake
+
+<Callout kind="tip" title="Follow the invariant">
+Ask: "what goes wrong if two clients briefly see different values?" If the answer is *money is lost, inventory oversells, a constraint is violated* → ACID. If the answer is *a like count is momentarily off, a feed is slightly stale* → BASE is fine and buys you scale and availability.
+</Callout>
+
+- **ACID fits** financial ledgers, inventory/stock, bookings, anything with cross-row invariants or where a stale read is a correctness bug.
+- **BASE fits** high-volume, append-heavy, tolerant workloads: activity feeds, view counts, session stores, sensor/telemetry data, caches.
+
+### The pragmatic reality: polyglot persistence
+
+Real systems mix both. An e-commerce platform keeps **orders and payments in an ACID store** (Postgres) and the **product-catalog browse path and shopping-cart in a BASE store** (DynamoDB/Redis) for scale. Naming this split — strong store for the money, eventually-consistent store for the high-traffic-but-tolerant paths — is the senior answer. It also connects to PACELC: the ACID path is PC/EC, the BASE path is PA/EL.
+
+<ProbeNote>
+The interviewer wants to see that you choose by *what's at stake*, not by fashion. The strongest answer pairs the two: "ACID for the order/payment tables because a wrong balance is a bug; BASE for the catalog and feed because brief staleness is invisible and I need the horizontal scale." Watch out for conflating ACID's "C" with CAP's "C" — call out the difference.
+</ProbeNote>

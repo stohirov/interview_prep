@@ -1,0 +1,39 @@
+**Problem.** Two non-negative integers are stored as linked lists with the digits in **reverse order** (least-significant digit first), one digit per node. Add them and return the sum as a linked list in the same format. Example: `2→4→3` (342) + `5→6→4` (465) = `7→0→8` (807).
+
+## Approach — single pass with a carry + dummy head, O(max(n, m)) time
+
+Reverse-order storage is a gift: the heads are the ones digits, so we add left to right exactly like grade-school addition, propagating a **carry**. A dummy head anchors the result list so appending never special-cases the first digit.
+
+```java
+ListNode addTwoNumbers(ListNode l1, ListNode l2) {
+    ListNode dummy = new ListNode(0);
+    ListNode tail = dummy;
+    int carry = 0;
+
+    while (l1 != null || l2 != null || carry != 0) {
+        int sum = carry;
+        if (l1 != null) { sum += l1.val; l1 = l1.next; }
+        if (l2 != null) { sum += l2.val; l2 = l2.next; }
+        carry = sum / 10;                       // 0 or 1
+        tail.next = new ListNode(sum % 10);     // the digit
+        tail = tail.next;
+    }
+    return dummy.next;
+}
+```
+
+The single loop condition `l1 != null || l2 != null || carry != 0` handles three things at once: **unequal lengths** (one list runs out first), and a **final carry** that creates a new leading node (e.g., `5 + 5 = 10` → `0→1`). Each `sum` is at most `9 + 9 + 1 = 19`, so the carry is always 0 or 1.
+
+## Complexity
+
+<ComplexityTable rows={[
+  {op: "Add two numbers", best: "O(max(n,m))", average: "O(max(n,m))", worst: "O(max(n,m))", note: "+1 node if final carry; O(max(n,m)) output space"},
+]} />
+
+<Callout kind="info" title="If digits were stored most-significant first">
+The common follow-up flips the storage to forward order. Then you can't add head-to-head with a simple carry. Options: reverse both lists, add, reverse the result; or push both onto stacks and pop (LIFO gives you least-significant first). Mention the stack approach — it avoids mutating the inputs.
+</Callout>
+
+<ProbeNote>
+The elegant part is folding length mismatch and the final carry into one loop condition — candidates who special-case "if l1 longer..." write twice the code and twice the bugs. Edge cases: lists of different lengths, a carry out of the most significant digit (`9→9 + 1`), and one list being `0`. Confirm the digit order with the interviewer before coding.
+</ProbeNote>

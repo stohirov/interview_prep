@@ -1,0 +1,97 @@
+## 1. Functional requirements
+
+- Create a short code for a long URL (`POST /shorten`).
+- Redirect a short code to its long URL (`GET /{code}` → `301`).
+- Optional **custom alias** and **expiration** (TTL).
+- Optional **click analytics**.
+
+## 2. Non-functional requirements
+
+- **Scale:** 100M new URLs/day; **100:1** read/write ratio.
+- **Latency:** redirect p99 < 50 ms (it's on the user's critical path).
+- **Availability:** 99.9%+; reads must stay up even if writes degrade.
+- **Durability:** a created short URL must never be lost or remapped.
+
+## 3. Capacity estimation
+
+- Writes: 100M/day ≈ **~1,160 writes/s** (×~3 peak ≈ 3.5K/s).
+- Reads: 100× ≈ **~116K reads/s** → the system is read-dominated; cache aggressively.
+- Storage: 100M/day × 365 × 5 yr ≈ **~180B records**. At ~500 B each ≈ **~90 TB** → needs sharding.
+- Key space: base62 with **7 chars** = 62⁷ ≈ **3.5 trillion** codes — comfortably enough.
+
+## 4. High-level architecture
+
+<Mermaid caption="URL shortener — read path served from cache, writes go through the ID generator">{`graph LR
+    U[Client] --> LB[Load Balancer]
+    LB --> API[URL Service - Spring Boot]
+    API -->|read: GET /code| C[(Redis cache)]
+    C -->|miss| DB[(Sharded KV / Postgres)]
+    API -->|write: POST /shorten| IDG[ID Generator]
+    IDG --> DB
+    API -.click events.-> MQ[(Kafka)]
+    MQ --> AN[Analytics consumer]
+    API --> CDN[CDN / edge]`}</Mermaid>
+
+## 5. API design
+
+```
+POST /api/v1/shorten
+  Body:  { "url": "https://example.com/very/long", "alias": null, "ttlDays": 365 }
+  201:   { "code": "aZ3x9Qp", "shortUrl": "https://sho.rt/aZ3x9Qp" }
+
+GET /{code}
+  301 Location: https://example.com/very/long      (cache-first)
+  404 if unknown / 410 if expired
+```
+
+`POST` is **not** idempotent by default (same URL → new code each time); pass an idempotency key or dedupe on a hash of the long URL if "same URL → same code" is required.
+
+## 6. Data model
+
+```sql
+CREATE TABLE url (
+  code        VARCHAR(12) PRIMARY KEY,   -- base62 short code
+  long_url    TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at  TIMESTAMPTZ,
+  owner_id    BIGINT
+);
+-- Shard by hash(code). Analytics live in a separate columnar store (OLAP),
+-- never in the hot redirect path.
+```
+
+## 7. Detailed component design — ID generation
+
+The crux of the problem. Three viable strategies:
+
+- **Counter + base62.** A distributed counter (Redis `INCR`, or a Zookeeper/DB ticket server handing out *ranges* of 1,000 IDs per app instance) yields a unique number; encode it to base62. Short and collision-free, but IDs are sequential → enumerable (mitigate by encrypting/permuting the counter).
+- **Random / hash + base62.** Hash the long URL (e.g., MD5) or generate random 7 chars, then **check-and-set** in the DB to resolve the rare collision. Non-sequential, but needs a uniqueness check on write.
+- **Snowflake-style ID.** 64-bit ID = timestamp + machine + sequence; no coordination, time-sortable, but longer.
+
+For most answers: **range-based counter + base62** (FAANG/EU) or **hash + collision check** if non-enumerable codes are required.
+
+## 8. Scaling considerations
+
+- **Cache (the main lever).** Redis as a read-through/LRU cache absorbs ~99% of the 116K reads/s; only misses hit the DB. Use jittered TTLs to avoid stampedes.
+- **Sharding.** Shard the KV store by `hash(code)`; **consistent hashing** keeps resharding cheap.
+- **Replication.** Read replicas (or a leaderless KV store) scale reads further; writes go to the leader.
+- **CDN / edge.** Cache 301s at the edge for hot links.
+
+## 9. Trade-offs and alternatives
+
+- **Postgres vs a KV store (DynamoDB/Cassandra).** Postgres + Redis is operationally simple and correct to ~10⁹ rows (EU/regional answer). At 100s of TB, a wide-column / KV store with built-in sharding wins (FAANG answer).
+- **301 vs 302.** `301` (permanent) is cacheable by browsers/CDNs → fewer hits but no per-click analytics; `302` (temporary) forces every click through your service → accurate analytics, more load. State the trade-off.
+- **Counter vs hash IDs** — coordination cost vs collision-check cost; pick per requirement (enumerable acceptable?).
+
+## 10. Common follow-up questions
+
+- Custom aliases (reserve in the same table; reject collisions).
+- Expiration (TTL column + lazy/again-eviction; a sweeper job for storage reclaim).
+- Analytics without slowing redirects (fire-and-forget click events to Kafka → OLAP).
+- Preventing abuse (rate limiting — see the rate-limiting topic).
+
+## 11. What interviewers are really probing
+
+<ProbeNote>
+**All styles:** that you recognized the 100:1 read skew and made it a *caching* problem, and that you can reason about ID generation collisions vs coordination. **FAANG:** depth on consistent hashing, replication, and counter coordination. **EU/contracting:** a pragmatic Postgres+Redis stack with cost justification. **Regional:** a clean REST contract, schema, and a diagram you can defend. The classic failure is jumping to the database before doing capacity estimation and noticing the read skew.
+</ProbeNote>

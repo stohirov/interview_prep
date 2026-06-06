@@ -1,0 +1,24 @@
+**Arrays** are the most fundamental data structure: a contiguous block of memory with **O(1)** random access by index. Almost every other structure is built on top of one. The interview value isn't the array itself — it's the four patterns that let you turn a naive O(n²) scan into a single O(n) pass.
+
+## Static vs dynamic arrays
+
+A fixed array (`int[]`) has a size locked at allocation. A **dynamic array** (`ArrayList`) wraps one and grows by allocating a larger backing array and copying. Because it grows **geometrically** (Java's `ArrayList` grows by ~1.5×), the copies amortize to **O(1) per append** even though any single append can be O(n). That amortization argument is the most-asked array theory question.
+
+## The four patterns
+
+- **Two pointers** — two indices walking the array, either from both ends inward (palindromes, pair-sum on sorted data, trapping rain water) or as fast/slow on the same end (in-place filtering). Turns nested loops into one pass.
+- **Sliding window** — a contiguous range `[left, right]` that expands and contracts to maintain an invariant (sum ≤ k, no repeated chars). The optimal tool for "best/longest/shortest contiguous subarray" questions.
+- **Prefix sums** — precompute cumulative totals so any range sum is one subtraction: `sum(i..j) = pre[j+1] - pre[i]`. Trades O(n) space for O(1) range queries.
+- **In-place** — mutate the input to hit O(1) extra space (reverse, rotate, move-zeros). Interviewers love it because it forces precise index reasoning.
+
+## Java mapping
+
+<Callout kind="tip" title="Java standard library mapping">
+- **`int[]` / `T[]`** — fixed-size, fastest, primitives avoid boxing. Default for index-heavy algorithms.
+- **`ArrayList<T>`** — dynamic, amortized O(1) append, O(n) middle-insert. The everyday list.
+- **`Arrays`** — static helpers: `sort`, `binarySearch`, `fill`, `copyOf`, `asList`.
+- **`String`** — **immutable**; every concatenation builds a new object, so `+=` in a loop is O(n²).
+- **`StringBuilder`** — mutable char buffer; the correct way to build strings incrementally in O(n). `String` problems are array problems in disguise — use `toCharArray()` for in-place work.
+</Callout>
+
+The questions below — reverse, rotate, move-zeros, longest-substring, trapping rain water, Kadane — each crystallize one of these patterns. Recognizing *which* pattern a problem wants is the whole skill.

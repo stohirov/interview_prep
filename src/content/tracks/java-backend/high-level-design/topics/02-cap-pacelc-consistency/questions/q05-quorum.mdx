@@ -1,0 +1,50 @@
+## Quorum reads/writes — why W + R > N matters
+
+In a leaderless (Dynamo-style) store, each piece of data is replicated to **N** nodes, and there is no single leader to serialize reads and writes. **Quorums** are the mechanism that lets such a store provide tunable consistency without a leader: every write must be acknowledged by **W** replicas, and every read must collect responses from **R** replicas.
+
+### The overlap condition
+
+The key inequality:
+
+> **W + R > N**  ⟹  the write set and the read set are guaranteed to **overlap** in at least one node.
+
+That overlapping node has seen the latest write, so the read is guaranteed to include the freshest value (resolved by version/timestamp). This is the whole trick: forcing the read and write quorums to intersect means a read cannot entirely miss a completed write.
+
+<Diagram caption="N=3, W=2, R=2: write and read quorums must share at least one node">{`
+            Replicas:   [ A ]   [ B ]   [ C ]      (N = 3)
+
+  Write (W=2) ack from:  A       B                 <- write landed on A, B
+  Read  (R=2) reads from:        B       C         <- read hits B (and C)
+                                 ^
+                         overlap node B has the latest value
+       W + R = 4 > N = 3  ->  guaranteed intersection
+`}</Diagram>
+
+### Tuning the trade-off
+
+With N fixed, choosing W and R slides you along the consistency / latency / availability curve:
+
+| Config (N=3) | Property | Trade-off |
+|---|---|---|
+| W=3, R=1 | Fast reads, slow durable writes | Read-optimized; write must reach all replicas |
+| W=1, R=3 | Fast writes, slow reads | Write-optimized; read must contact all |
+| W=2, R=2 | Balanced (W+R>N) | Common default; tolerates 1 node down on each side |
+| W=1, R=1 | Fastest, **W+R ≤ N** | No overlap guarantee → eventual consistency only |
+
+A standard production choice is **N=3, W=2, R=2**: it satisfies W+R>N, survives one node being down on either the read or write path, and keeps latency reasonable (you wait for the 2nd-fastest of 3).
+
+### Why you might violate W + R > N on purpose
+
+Setting W+R ≤ N (e.g., W=1, R=1) gives you maximum availability and lowest latency but only **eventual consistency** — a read may miss a recent write. That's a legitimate choice for tolerant workloads, and it's exactly the PA/EL operating point from PACELC.
+
+<Callout kind="warn" title="Quorum overlap is necessary, not sufficient">
+W + R > N guarantees the read *set includes* a node with the latest write — but you still need correct conflict resolution and repair mechanisms. Edge cases break the clean guarantee: concurrent writes need version reconciliation (vector clocks / last-write-wins), and a "sloppy quorum" with hinted handoff (writing to substitute nodes during a partition) means the W nodes may not be the *home* nodes, weakening the guarantee. Background **read repair** and **anti-entropy** are what actually drive replicas to converge.
+</Callout>
+
+### Where this shows up
+
+Cassandra and DynamoDB expose W and R directly as per-request consistency levels (ONE, QUORUM, ALL), so you can pick strong consistency for a critical read (QUORUM/QUORUM) and cheap eventual consistency elsewhere (ONE/ONE) — on the same store. This per-request tunability is the practical payoff and connects straight back to PACELC's "E" branch. The mechanism is described in **DDIA Chapter 9** alongside the original Dynamo paper.
+
+<ProbeNote>
+The interviewer wants the inequality and *why it works* — that W+R>N forces the read and write quorums to share a node, so the read sees the latest write. Strong follow-up signal: noting that overlap alone isn't enough (concurrent-write conflict resolution, read repair, anti-entropy, sloppy quorums), and that tuning W/R lets a single store move between strong and eventual consistency per request.
+</ProbeNote>

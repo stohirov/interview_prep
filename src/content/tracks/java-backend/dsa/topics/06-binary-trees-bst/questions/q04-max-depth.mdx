@@ -1,0 +1,57 @@
+**Problem.** Given the root of a binary tree, return its **maximum depth** — the number of nodes along the longest path from the root down to the farthest leaf.
+
+## Brute force? There isn't one
+
+Unlike array problems, there is no naive-versus-clever split here: you must look at every node to know the deepest one, so any correct solution is **O(n)**. The interest is in expressing it cleanly.
+
+## Optimal — recursion, O(n) time, O(h) space
+
+The depth of a tree is one more than the deeper of its two subtrees. That single sentence *is* the recurrence:
+
+```
+depth(node) = 0                                  if node is null
+            = 1 + max(depth(left), depth(right)) otherwise
+```
+
+Translated directly:
+
+```java
+int maxDepth(TreeNode root) {
+    if (root == null) return 0;                 // empty subtree contributes 0
+    int left  = maxDepth(root.left);
+    int right = maxDepth(root.right);
+    return 1 + Math.max(left, right);           // +1 for the current node
+}
+```
+
+We visit each node exactly once — **O(n) time**. The call stack goes as deep as the tree's height — **O(h) space**, which is O(log n) when balanced but O(n) for a degenerate tree.
+
+## Iterative — BFS level counting
+
+If you want to avoid recursion (e.g., to dodge stack overflow on a pathologically deep tree), do a level-order traversal and count the levels. Each full sweep of the queue is one level of depth.
+
+```java
+int maxDepthIter(TreeNode root) {
+    if (root == null) return 0;
+    Queue<TreeNode> q = new ArrayDeque<>();
+    q.offer(root);
+    int depth = 0;
+    while (!q.isEmpty()) {
+        int levelSize = q.size();               // nodes on this level
+        for (int i = 0; i < levelSize; i++) {
+            TreeNode n = q.poll();
+            if (n.left  != null) q.offer(n.left);
+            if (n.right != null) q.offer(n.right);
+        }
+        depth++;                                // finished a full level
+    }
+    return depth;
+}
+```
+
+<ComplexityTable rows={[
+  {op: "Recursive (DFS)", best: "O(n)", average: "O(n)", worst: "O(n)", note: "O(h) call-stack space"},
+  {op: "Iterative (BFS)", best: "O(n)", average: "O(n)", worst: "O(n)", note: "O(w) queue space"},
+]} />
+
+<ProbeNote>This is the warm-up that establishes the post-order "compute children, combine, return up" template behind harder problems (balanced check, diameter, LCA). Clarify the convention: "max depth" here counts *nodes* (a single node is depth 1), whereas tree *height* is usually counted in *edges* (a single node has height 0) — interviewers sometimes test whether you pin down the definition.</ProbeNote>

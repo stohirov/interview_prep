@@ -1,0 +1,14 @@
+A **notification system** delivers a message to a user over one of several channels — Email, SMS, Push, In-App — and is a favorite at Amazon because it is deceptively simple. The naive version is a `switch (channel)` ladder; the senior version is a clean set of patterns that lets you add a channel, a template, or a retry rule without editing existing code. This is the **LLD counterpart** of the HLD notification topic: here we model classes, channels, and retries; the HLD round handles fan-out at scale, queues, and provider sharding.
+
+## What the interviewer is testing
+
+- Do you abstract the **channel** so the service code never branches on type? (Factory to create, Strategy to deliver.)
+- Do you share the common send pipeline — render template, validate recipient, deliver, record — while letting each channel fill in only the channel-specific step? (Template Method.)
+- Do you handle the real world: a channel can fail, providers throttle you, and users have preferences and quiet hours? The strong answer has a **RetryPolicy** with exponential backoff, per-channel **rate limiting**, and **channel fallback** (push → email → SMS).
+- Do you separate *content* (Template) from *transport* (Channel) from *routing* (preferences/fallback)?
+
+## How to frame it
+
+Drive the flow: `notify(user, event)` → look up the user's **preferred channels** and **template** for that event → a `NotificationFactory` builds the channel-specific `Notification` → a delivery **Strategy** sends it through the provider → on failure, a **RetryPolicy** retries with backoff, and if the channel is exhausted, a **Chain of Responsibility** falls back to the next channel.
+
+Call out the orthogonal axes early — *what* to send (Template + content), *how* to send (Channel/Strategy), *whether/when* (preferences, rate limit, quiet hours), and *what if it fails* (retry + fallback + DLQ). The worked solution shows Factory, Strategy, Template Method, Observer, and Chain of Responsibility working together, then covers the follow-ups: rate limiting, batching, exponential backoff, dead-letter queues, and delivery analytics.

@@ -1,0 +1,34 @@
+A **left-left (LL)** imbalance happens when a node becomes left-heavy because a key was inserted into the **left subtree of its left child**. It is fixed with a single **right rotation** about the unbalanced node. Walk through it concretely.
+
+## Setup: insert 30, 20, 10
+
+Insert `30`, then `20` (goes left), then `10` (goes left of 20). Now `30` has balance factor `-2` (left subtree height 2, right subtree height 0) — the AVL invariant is violated, and the inserted key lies in 30's left child's *left* subtree. That is the LL case.
+
+<Diagram caption="LL violation at node 30 after inserting 30, 20, 10.">{`        30  (bf = -2)   <- unbalanced
+       /
+     20   (bf = -1)
+    /
+  10`}</Diagram>
+
+## The fix: one right rotation about 30
+
+In a right rotation, the left child (`20`) becomes the new subtree root; the old root (`30`) becomes `20`'s right child. The general rule, for pivot `P` with left child `L`:
+
+- `L` moves up to take `P`'s position.
+- `P` becomes `L`'s right child.
+- **`L`'s old right subtree** (call it `T`) — the only orphaned link — reattaches as **`P`'s new left child**. (Here `T` is empty.)
+
+This preserves BST ordering: every key in `L`'s left subtree < `L` < `T` < `P` < `P`'s right subtree, which is exactly the order the rotated shape encodes.
+
+<Diagram caption="After the right rotation about 30 — height drops from 3 to 2, all balance factors back to 0.">{`        20   (bf = 0)
+       /  \\
+     10    30
+   (bf=0) (bf=0)`}</Diagram>
+
+## Why it works and what it costs
+
+The rotation is **O(1)** — three pointer rewires (`20.right = 30`, `30.left = T`, fix the parent link) plus updating two stored heights. It lowers the subtree's height from 3 back to 2, which restores balance not just at `20` but, because the height shrank back to its pre-insert value, at every ancestor above it too. That is why an AVL **insertion** needs only this one rotation and can stop climbing.
+
+The mirror image — inserting into the right child's right subtree — is the **RR** case, fixed by a single left rotation. The two "outside" cases (LL, RR) need one rotation; the two "inside" cases (LR, RL) need a double rotation because a single rotation would just move the imbalance to the other side.
+
+<ProbeNote>Draw it. Show the bf going to -2 at 30, name it as LL ("inserted into the left child's left subtree"), then do the single right rotation and re-verify every node is back to bf 0. The detail that trips people: the left child's *right* subtree reattaches as the old root's *left* child — that reattachment is the only non-obvious pointer, and forgetting it breaks BST order. Note it is O(1) and that insertion needs just one rotation.</ProbeNote>

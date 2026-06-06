@@ -1,0 +1,34 @@
+Databases index with **B-trees** and **B+ trees**, not binary trees, because the bottleneck on disk is not comparisons — it is the **number of I/O operations**. A B-tree is shaped to minimize disk reads, where a balanced binary tree is shaped to minimize comparisons.
+
+## The disk-page reality
+
+Disk and SSD are read in fixed-size **pages** (commonly 4 KB, 8 KB, or 16 KB). Reading 1 byte costs the same as reading a whole page — and a random page fetch is ~10,000× slower than a memory access. So the right metric is "how many pages must I touch to find a key?"
+
+A balanced binary tree has fan-out 2: each node holds one key and two children. With one node per page, finding a key in a billion-row table takes `log₂(10⁹) ≈ 30` page reads — 30 random I/Os per lookup. That is catastrophic.
+
+## High fan-out → shallow tree
+
+A B-tree node is sized to **one page** and packs hundreds of keys, so it has hundreds of children — high **fan-out**. Each page read eliminates a far larger fraction of the search space.
+
+<Diagram caption="One page = one node holding many keys. Fan-out collapses tree height.">{`  binary tree           B-tree (order ~256)
+  fan-out 2             fan-out ~256, one node = one disk page
+
+  height ~ log2(n)      height ~ log256(n)
+  n=10^9 -> ~30 reads   n=10^9 -> ~4 reads
+                        [ k1 | k2 | ... | k255 ]   <- one 8KB page
+                         /    |          \\`}</Diagram>
+
+With fan-out 256, `log₂₅₆(10⁹) ≈ 4`. Four page reads instead of thirty — and the top levels stay cached in RAM, so most lookups touch one or two pages of disk.
+
+## Why B+ trees specifically
+
+Most databases use **B+ trees**, a refinement:
+
+- **All values live in the leaves**; internal nodes hold only keys as a routing index. This packs more keys per internal page, raising fan-out further and shrinking the tree.
+- **Leaves are linked** in a sorted doubly linked list. A range query (`WHERE age BETWEEN 30 AND 40`, `ORDER BY`) descends once to the start leaf, then walks the leaf chain sequentially — sequential I/O, no re-traversal from the root.
+
+## The general principle
+
+B-trees match the access cost model of the medium: when the unit of work is a page fetch, you want the fattest, shallowest tree possible. The same logic applies to filesystems (ext4, NTFS, XFS, APFS) and is why nearly every persistent index is a B+ tree.
+
+<ProbeNote>Lead with "I/O count, not comparison count, is what matters on disk." Then connect node size to page size, page size to fan-out, fan-out to a height of ~3-4 for billions of rows. Bonus points: B+ trees keep values in linked leaves for cheap range scans and ordered traversal — exactly what SQL `BETWEEN`/`ORDER BY` need.</ProbeNote>

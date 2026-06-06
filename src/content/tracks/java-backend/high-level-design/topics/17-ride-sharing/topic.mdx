@@ -1,0 +1,27 @@
+**Design a ride-sharing system** (Uber, Lyft) is the canonical **real-time geospatial matching** interview. With **100M riders and 5M drivers**, the hard part is not the booking CRUD — it's continuously ingesting millions of moving driver locations, answering "which drivers are near *this* rider *right now*?" in milliseconds, matching them, and coordinating the trip lifecycle through to payment.
+
+## The shape of the problem
+
+Two streams dominate: **drivers streaming GPS updates** (every few seconds) and **riders requesting matches**. The system must index a moving population by location and run a proximity query under tight latency. Core pieces:
+
+- **Geospatial indexing** — the whole game. You cannot scan 5M drivers per request; you bucket the world into cells (**geohash**, Google **S2**, or Uber **H3** hexagons) so a "nearby" query touches only a handful of cells.
+- **Location ingestion** — millions of writes/second of `(driverId, lat, lng)`; an in-memory/Redis location store, not a relational table on the hot path.
+- **Matching** — pick a driver for a request (nearest, ETA-weighted, supply/demand aware) and handle the race when two riders want the same driver.
+- **Surge pricing** — per-cell demand/supply ratio drives a multiplier.
+- **Trip lifecycle + payments** — request → matched → en route → in progress → completed → charged, as a state machine with a payment step.
+
+## What the interviewer is probing, by style
+
+- **FAANG** — the geospatial index (geohash vs S2 vs H3 trade-offs), how nearby queries handle cell boundaries, location write throughput, matching consistency (no double-assignment), and surge computation per cell.
+- **EU / remote contracting** — pragmatism: Redis Geo or PostGIS for the index, a clear trip state machine, idempotent payment integration; justify choices on cost and ops.
+- **Regional (EPAM / Uzum)** — a clean Spring service, a sane data model, a defensible matching flow. This is a strong topic to make concrete with real **electric-taxi / dispatch** experience — talk about actual driver-location streaming and dispatch you've operated.
+
+## The key decisions
+
+1. **Geospatial index** — geohash / S2 / H3 cells; query the rider's cell plus neighbors.
+2. **Location store** — hot, in-memory (Redis), updated continuously; durable history streamed to a log.
+3. **Matching** — proximity query → candidate set → offer → atomic claim to prevent double-assignment.
+4. **Surge** — demand/supply per cell, recomputed on a short interval.
+5. **Trip + payments** — a state machine; idempotent, retry-safe payment authorization and capture.
+
+The worked solution applies the full 11-section structure and shows all three style angles where they diverge.

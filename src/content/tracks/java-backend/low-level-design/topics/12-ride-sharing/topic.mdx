@@ -1,0 +1,18 @@
+The **ride-sharing system** (Uber, Ola, Lyft) is a deliberately **hybrid LLD/HLD problem**, and the first senior move is to *say so* and carve out the LLD slice. The class-level design — riders, drivers, the ride lifecycle, pricing and matching strategies, location updates — is what an interviewer expects in a 45-minute machine-coding round. The distributed concerns (geo-sharding driver locations, a quadtree/geohash index over millions of drivers, surge computation at scale) belong to the HLD module and should be explicitly deferred.
+
+<Callout kind="info" title="Scope this as LLD, defer scaling to HLD">
+State up front: "I'll design the class model for matching, pricing, and the ride state machine in memory. The geospatial index, real-time location streaming, and surge at scale are HLD concerns I'll flag but not build here." This framing alone signals seniority.
+</Callout>
+
+## What the interviewer is testing
+
+- Do you model the **ride state machine** correctly — requested → accepted → en-route → in-trip → completed, with cancellation possible from several states?
+- Can you put **matching** (nearest-driver, highest-rated, lowest-ETA) and **pricing** (base fare, per-km/min, surge multiplier) behind Strategy interfaces so they vary independently?
+- Do you separate the **rider-facing** concerns (request, track driver, pay) from the **dispatcher** that owns matching and the active-ride registry?
+- Do you use **Observer** to push driver-location updates to the rider, instead of polling?
+
+## How to frame it
+
+Clarify scope: a `User` is either a `Rider` or a `Driver`; a rider requests a `Ride` from A to B; a central `MatchingService`/dispatcher finds a nearby available driver; on acceptance the ride becomes a `Trip`; pricing applies a strategy with optional surge; on completion, payment settles and both parties rate each other.
+
+Then drive the flow: **rider requests → dispatcher matches an available driver via a Strategy → driver accepts (State: accepted) → driver drives to pickup (en-route, location streamed to rider via Observer) → trip starts (in-trip) → trip ends → PricingStrategy computes fare → PaymentService charges → ratings exchanged.** The worked solution below follows the full 9-section structure; the Strategy + State + Observer trio is the reusable core.

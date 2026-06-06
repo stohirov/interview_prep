@@ -1,0 +1,75 @@
+## Capacity estimation: DAU → QPS → storage → bandwidth
+
+Capacity estimation is the step that turns vague scale into the numbers that *decide the architecture*. It tells you whether one database suffices or you must shard, how large the cache must be, whether reads dominate, and whether bandwidth needs a CDN. The goal is an answer correct to an **order of magnitude**, computed in a couple of minutes — not precision.
+
+### The method
+
+Four moves, always in this order:
+
+1. **DAU → QPS** — convert daily active users into requests per second.
+2. **QPS → peak QPS** — multiply by a peak factor (2–5×).
+3. **Storage** — records/day × bytes/record × retention.
+4. **Bandwidth** — QPS × payload size, for read and write paths.
+
+Two numbers to memorize: a day is **~86,400 seconds (~10⁵)**, and a year is **~3.15 × 10⁷ seconds**.
+
+### Worked example — a social feed
+
+Assume the interviewer gives you: **100M DAU**, each user makes **20 reads** and **2 writes** (posts) per day, average post is **1 KB** of text plus metadata, retention is **5 years**.
+
+**Step 1 — DAU → QPS.**
+
+- Reads/day = 100M × 20 = **2 × 10⁹**. Divide by ~10⁵ s/day → **~20,000 read QPS** (average).
+- Writes/day = 100M × 2 = **2 × 10⁸**. Divide by ~10⁵ → **~2,000 write QPS** (average).
+- Read/write ratio ≈ **10:1** → read-heavy → cache aggressively.
+
+**Step 2 — peak QPS.** Apply a 3× peak factor:
+
+- Peak reads ≈ **60,000 QPS**, peak writes ≈ **6,000 QPS**.
+
+**Step 3 — storage.**
+
+- Writes/day = 2 × 10⁸ records × 1 KB = **200 GB/day**.
+- Over 5 years: 200 GB × 365 × 5 ≈ **365 TB**.
+- One node won't hold this → **sharding required**. (Add replication factor 3 → ~1 PB raw.)
+
+**Step 4 — bandwidth.**
+
+- Write ingress = 6,000 QPS × 1 KB ≈ **6 MB/s**.
+- Read egress = 60,000 QPS × 1 KB ≈ **60 MB/s** (≈ 480 Mbps) before fan-out; with feed pages of ~20 posts each, multiply accordingly → strong case for a CDN/edge cache and a read cache.
+
+<Diagram caption="The estimation pipeline and what each output decides">{`
+ 100M DAU
+   |  x reads/user/day  /  86,400 s
+   v
+ ~20K read QPS  --x3 peak-->  ~60K QPS   ==> cache + read replicas
+ ~2K  write QPS --x3 peak-->  ~6K  QPS   ==> write path / queue sizing
+   |
+   |  records/day x bytes x retention
+   v
+ ~365 TB (x3 replication ~= 1 PB)        ==> MUST SHARD
+   |
+   |  QPS x payload
+   v
+ ~60 MB/s read egress                    ==> CDN / edge cache
+`}</Diagram>
+
+### What the numbers tell you
+
+- **10:1 read skew** → the design is a caching problem; put Redis/CDN in front of the store.
+- **365 TB** → a single Postgres instance is out; you need sharding or a distributed store.
+- **60K peak read QPS** → read replicas or a leaderless store plus a cache to absorb most of it.
+
+<Callout kind="tip" title="Round aggressively, state assumptions">
+Use powers of ten (86,400 s ≈ 10⁵). State every assumption out loud ("I'll assume a 3× peak factor"). The interviewer scores the *method and the implications*, not the third significant figure.
+</Callout>
+
+### Style differences
+
+- **FAANG** — they will push the numbers ("now it's 1B DAU") to force sharding and consistency trade-offs. Be fast and fluent with the arithmetic.
+- **EU / contracting** — they care that the estimate justifies a *cost-appropriate* design; don't shard 365 GB.
+- **Regional (EPAM / Uzum)** — a clear estimate that maps to concrete capacity (this many nodes, this much storage) lands well.
+
+<ProbeNote>
+The interviewer wants to see you derive architecture *from* numbers rather than asserting "we'll need Kafka" with no justification. Naming the read/write skew and the storage total, then stating what each one forces (cache, shard), is the whole point of this step.
+</ProbeNote>

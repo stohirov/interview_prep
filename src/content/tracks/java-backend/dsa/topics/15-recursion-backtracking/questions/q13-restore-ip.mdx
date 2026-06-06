@@ -1,0 +1,42 @@
+**Problem.** Given a string of digits, return all valid IPv4 addresses formed by inserting three dots. A valid address is four octets, each `0–255`, with **no leading zeros** (so `"0"` is fine but `"01"` is not). For `"25525511135"`: `"255.255.11.135"` and `"255.255.111.35"`.
+
+## Brute force
+
+Try all `C(n-1, 3)` ways to place three dots among the digits, then validate the four resulting octets. For a length-12 string that's a few hundred candidates — small, but it validates entire splits after the fact instead of pruning early.
+
+## Optimal — backtracking, prune per octet
+
+Build the address one octet at a time. At each of the four segments, try taking 1, 2, or 3 digits, validating each candidate octet *immediately* so invalid prefixes die early. We track how many segments remain and the current position.
+
+```java
+List<String> restoreIpAddresses(String s) {
+    List<String> result = new ArrayList<>();
+    if (s.length() < 4 || s.length() > 12) return result;   // can't fit 4 octets
+    backtrack(s, 0, 0, new ArrayList<>(), result);
+    return result;
+}
+
+void backtrack(String s, int start, int segment, List<String> octets, List<String> result) {
+    if (segment == 4) {                                  // placed 4 octets
+        if (start == s.length())                         // ...and consumed all digits
+            result.add(String.join(".", octets));
+        return;
+    }
+    for (int len = 1; len <= 3 && start + len <= s.length(); len++) {
+        String octet = s.substring(start, start + len);
+        if (!isValid(octet)) continue;                   // prune bad octet
+        octets.add(octet);                               // choose
+        backtrack(s, start + len, segment + 1, octets, result);  // explore
+        octets.remove(octets.size() - 1);                // unchoose
+    }
+}
+
+boolean isValid(String octet) {
+    if (octet.length() > 1 && octet.charAt(0) == '0') return false;  // leading zero
+    return Integer.parseInt(octet) <= 255;                           // 0..255
+}
+```
+
+Two completion conditions must *both* hold: exactly 4 segments **and** all digits consumed (`start == s.length()`). Checking only the segment count would accept `"1.1.1.1"` from a longer string. The `s.length()` bounds check and the per-octet `isValid` are the prunes that keep the tree tiny — at most `3⁴ = 81` leaf candidates, so it's effectively **O(1)** for fixed IPv4 (constant depth and branching).
+
+<ProbeNote>The two rules interviewers verify: leading-zero rejection (`"01"` invalid, `"0"` valid) and the dual base-case test (4 segments AND all characters used). Mention the length prune (`4 ≤ n ≤ 12`) up front and note the search is bounded by `3⁴`, making it constant-time despite being backtracking.</ProbeNote>

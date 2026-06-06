@@ -1,0 +1,130 @@
+## 1. Functional requirements
+
+- Register a **job**: one-shot (run at time `T`) or **recurring** (cron expression + timezone).
+- Reliably **trigger** each due job by invoking a handler (HTTP webhook, message on a queue, or in-process task).
+- **Retry** failed jobs with a backoff policy and a max-attempts cap; route exhausted jobs to a dead-letter queue (DLQ).
+- **At-least-once** execution guaranteed; **idempotency** support so handlers can dedupe.
+- Query job status/history; **pause/resume/cancel** a job.
+- Explicit **missed-run policy** per job (skip, fire-once-on-recovery, or backfill).
+- **Monitoring & alerting** on failure, on missed SLA (job didn't run within its window), and on stuck/long-running jobs.
+
+## 2. Non-functional requirements
+
+- **Scale:** 10M registered jobs; **100K job triggers/minute** at peak (≈ 1,600/s).
+- **Timing accuracy:** a job fires within **a few seconds** of its scheduled time (p99 < 5 s) — this is a scheduler, not a hard-real-time system.
+- **Durability:** a registered job must never be lost; a fired job must never be silently dropped.
+- **Availability:** 99.95%; the scheduler surviving a node failure is the whole point.
+- **No duplicate side-effects** for idempotent handlers; bounded duplicates otherwise.
+
+## 3. Capacity estimation
+
+- Triggers: 100K/min ≈ **~1,600/s** (×3 burst ≈ 5K/s) — modest; the hard part is correctness, not raw QPS.
+- Scan load: with a 1-second tick and a B-tree index on `next_run_at`, each tick reads only the **due slice** (jobs where `next_run_at <= now`), typically a few thousand rows — an index range scan, not a full scan.
+- Storage: 10M jobs × ~1 KB definition ≈ **~10 GB** (fits one node, replicated). Execution history at 100K/min × 60 × 24 ≈ **144M rows/day** × ~300 B ≈ **~43 GB/day** → history goes to a partitioned/TTL'd table or columnar store, never the hot path.
+- Workers: if a job averages 200 ms, then 5K/s ÷ (1/0.2) = **~1,000 concurrent slots**; size the worker pool and queue accordingly.
+
+## 4. High-level architecture
+
+<Mermaid caption="Distributed job scheduler — leader-elected schedulers enqueue due jobs to a queue drained by a stateless worker pool">{`graph LR
+    API[Scheduler API - Spring Boot] --> DB[(Job Store - Postgres)]
+    ZK[Zookeeper / etcd] -->|leader election| SCH[Scheduler nodes]
+    SCH -->|scan due index| DB
+    SCH -->|enqueue due jobs| MQ[(Kafka / SQS)]
+    MQ --> W[Worker pool - stateless]
+    W -->|invoke| H[Handler webhook / queue]
+    W -->|attempts and results| DB
+    W -->|exhausted| DLQ[(Dead-letter queue)]
+    W -->|metrics| MON[Prometheus / Alertmanager]
+    DB -->|missed SLA watchdog| MON`}</Mermaid>
+
+## 5. API design
+
+```
+POST /api/v1/jobs
+  Body: { "name":"daily-report", "schedule":"0 2 * * *", "timezone":"UTC",
+          "target":{"type":"http","url":"https://svc/run","method":"POST"},
+          "retry":{"maxAttempts":5,"backoff":"exponential","baseMs":1000},
+          "missedRunPolicy":"fire_once" }
+  201:  { "jobId":"job_abc", "nextRunAt":"2026-06-08T02:00:00Z" }
+
+GET    /api/v1/jobs/{jobId}            -> definition + nextRunAt + status
+GET    /api/v1/jobs/{jobId}/runs      -> execution history (paginated)
+POST   /api/v1/jobs/{jobId}/pause     -> stop scheduling future runs
+POST   /api/v1/jobs/{jobId}/resume
+DELETE /api/v1/jobs/{jobId}
+POST   /api/v1/jobs/{jobId}/trigger   -> manual ad-hoc run (idempotency-key header)
+```
+
+Handler invocations carry a unique `runId` used by the handler as the **idempotency key**.
+
+## 6. Data model
+
+```sql
+CREATE TABLE job (
+  job_id          UUID PRIMARY KEY,
+  name            TEXT NOT NULL,
+  cron_expr       TEXT,                 -- null for one-shot
+  timezone        TEXT NOT NULL DEFAULT 'UTC',
+  target          JSONB NOT NULL,       -- http/queue handler spec
+  retry_policy    JSONB NOT NULL,
+  missed_policy   TEXT NOT NULL,        -- skip | fire_once | backfill
+  status          TEXT NOT NULL,        -- active | paused | cancelled
+  next_run_at     TIMESTAMPTZ NOT NULL,
+  version         BIGINT NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_due ON job (next_run_at) WHERE status = 'active';  -- the due-index
+
+CREATE TABLE job_run (
+  run_id          UUID PRIMARY KEY,     -- == idempotency key for the handler
+  job_id          UUID NOT NULL REFERENCES job(job_id),
+  scheduled_for   TIMESTAMPTZ NOT NULL,
+  attempt         INT NOT NULL,
+  state           TEXT NOT NULL,        -- claimed | running | succeeded | failed | dead
+  worker_id       TEXT,
+  lease_until     TIMESTAMPTZ,          -- fencing: reclaim if exceeded
+  finished_at     TIMESTAMPTZ
+);
+-- job_run is range-partitioned by scheduled_for and TTL'd; archive to OLAP.
+```
+
+## 7. Detailed component design
+
+**Claiming due jobs.** Two designs:
+
+- **Leader + partitions (FAANG answer).** Schedulers register in Zookeeper/etcd; a leader (or a consistent-hash assignment) owns a subset of the job-id space so two nodes never claim the same job. Each owner ticks every second, range-scans its slice of `idx_due`, and enqueues due jobs. Leader election (Raft/ZAB) plus heartbeats handle node death; on a lease expiry the partition is reassigned.
+- **Leaderless `SKIP LOCKED` (EU/regional answer).** No leader at all: every scheduler runs `SELECT ... FROM job WHERE next_run_at <= now() AND status='active' FOR UPDATE SKIP LOCKED LIMIT N`, claims disjoint rows atomically, enqueues them, and advances `next_run_at` to the next cron occurrence in the same transaction. The DB *is* the distributed lock. Simple, correct, scales to thousands/s.
+
+**Execution & leases.** Workers pull a `job_run` from the queue, set `state='running'` with a **lease** (`lease_until = now + timeout`), invoke the handler, and on success mark `succeeded`. A reaper scans for `running` rows whose `lease_until` has passed (worker died) and re-queues them — this is the recovery mechanism, and the reason handlers must be idempotent.
+
+**Idempotency / exactly-once.** True exactly-once is impossible end-to-end; we deliver **at-least-once** and make effects idempotent: the handler stores processed `runId`s (or uses a unique constraint) and no-ops on replay. A **fencing token** (monotonic `attempt`/lease epoch) lets a downstream system reject a write from a stale, presumed-dead worker that came back to life.
+
+**Missed-run handling.** Computed from `scheduled_for` vs now when a scheduler recovers: `skip` advances `next_run_at` past the gap; `fire_once` runs the most recent missed occurrence once; `backfill` enqueues every missed tick (dangerous for frequent jobs — cap it).
+
+## 8. Scaling considerations
+
+- **Partition the job space** by hash(job_id) across N schedulers; each owns a shard, so scan work and lock contention scale horizontally.
+- **Decouple scan from execution** via the queue — bursty fire times are absorbed by Kafka/SQS; workers autoscale on queue depth independently of the scheduler.
+- **Time-bucketing** for huge job counts: maintain per-minute (or per-second) buckets / a hashed timing wheel so a tick reads only the current bucket instead of scanning a global index.
+- **History offload** to partitioned/TTL'd tables or an OLAP store keeps the hot `job`/`job_run` tables small.
+
+## 9. Trade-offs and alternatives
+
+- **At-least-once vs exactly-once.** At-least-once + idempotent handlers is the pragmatic, correct default; chasing exactly-once delivery is a rabbit hole — push uniqueness to the handler instead.
+- **Leaderless `SKIP LOCKED` vs leader election.** `SKIP LOCKED` is dead simple and needs no Zookeeper, but couples you to one DB and its write throughput; leader+partitions scales further and survives DB sharding but adds ZK/etcd operational weight.
+- **Build vs buy.** Quartz (clustered, JDBC job store) or a managed/workflow engine (**Temporal**, AWS EventBridge Scheduler, Airflow for DAGs) covers most needs. Say so — a strong answer is knowing when *not* to build a scheduler.
+- **DB poll vs timing wheel.** Polling a due-index is simple and good to thousands/s; a hierarchical timing wheel gives O(1) insert/expire for very high job counts at the cost of in-memory complexity and durability care.
+
+## 10. Common follow-up questions
+
+- "The scheduler was down for 10 minutes — what runs?" → driven by `missedRunPolicy`; show skip vs fire-once vs backfill.
+- "A worker hangs forever." → lease + reaper re-queues after `lease_until`; cap attempts → DLQ.
+- "How do you guarantee a payment job runs exactly once?" → at-least-once delivery + idempotency key in the payment service; fencing token rejects stale retries.
+- "Two schedulers fired the same job." → `SKIP LOCKED`/partition ownership prevents double-claim; even so, idempotency makes it safe.
+- "How do you alert that a job *didn't* run?" → a watchdog comparing `next_run_at`/`scheduled_for` against now, emitting a missed-SLA metric to Alertmanager.
+- "Cron across DST / timezones?" → store timezone per job; compute next occurrence with a TZ-aware library; document fold/gap behaviour.
+
+## 11. What interviewers are really probing
+
+<ProbeNote>
+**All styles:** that you treated this as a *correctness-under-failure* problem (missed runs, duplicate runs, dead workers) rather than a QPS problem, and that you reached for at-least-once + idempotency instead of hand-waving "exactly-once." **FAANG:** depth on leader election (ZK/etcd/Raft), partitioning the job space, leases/fencing tokens, and the dead-worker recovery path. **EU/contracting:** pragmatism — `SKIP LOCKED` or Quartz/Temporal, and knowing when to buy rather than build. **Regional:** a clean Spring service with a real claiming query, retry/backoff, schema, and a diagram you can defend. The classic failure mode is asserting "exactly-once" without explaining how, then having no answer when the interviewer kills a worker mid-job.
+</ProbeNote>

@@ -1,0 +1,37 @@
+**Problem.** Given `n` cities, a list of `flights[i] = {from, to, price}`, a `src`, a `dst`, and an integer `k`, return the cheapest price from `src` to `dst` using **at most `k` stops** (at most `k + 1` edges), or `-1` if none exists. The hop limit is the twist: plain Dijkstra optimizes pure cost and can lock in a cheap-but-too-long path, so the standard tool is **Bellman-Ford bounded to `k + 1` rounds**.
+
+## Why plain Dijkstra is wrong here
+
+Dijkstra settles a node by minimum *cost* and never reopens it — but a costlier path that uses **fewer stops** might be the only one within the limit. Adding stops as a tie-breaker turns it into a multi-state search; the clean answer is to bound the number of relaxation rounds instead.
+
+## Optimal — Bellman-Ford, k + 1 rounds, O(k·E) time, O(n) space
+
+Each Bellman-Ford round lets cost propagate **one more edge**. Running exactly `k + 1` rounds caps paths at `k + 1` edges = `k` stops. The critical detail: relax from a **snapshot** of distances taken at the start of each round, so prices cannot ripple through multiple edges *within a single round* (which would undercount stops).
+
+```java
+public int findCheapestPrice(int n, int[][] flights, int src, int dst, int k) {
+    int[] dist = new int[n];
+    Arrays.fill(dist, Integer.MAX_VALUE);
+    dist[src] = 0;
+
+    for (int i = 0; i <= k; i++) {                 // k+1 rounds = up to k stops
+        int[] snapshot = dist.clone();             // freeze last round's results
+        for (int[] f : flights) {                  // {from, to, price}
+            if (snapshot[f[0]] == Integer.MAX_VALUE) continue;
+            int cand = snapshot[f[0]] + f[2];
+            if (cand < dist[f[1]]) dist[f[1]] = cand;
+        }
+    }
+    return dist[dst] == Integer.MAX_VALUE ? -1 : dist[dst];
+}
+```
+
+The `snapshot` clone is the whole game: relaxing against live `dist` would let a single round chain two or more flights, blowing the stop budget.
+
+## Alternative — BFS by levels
+
+A level-by-level BFS expands exactly one stop per level for `k + 1` levels, tracking the best cost seen per node. Same **O(k·E)** complexity; pick whichever framing reads more clearly to you. Either way, prune a node when a cheaper cost already reached it at the same or fewer stops.
+
+<ProbeNote>
+The single most common bug is relaxing against the live array instead of a per-round snapshot — it silently lets one round span multiple flights and accepts paths exceeding `k` stops. Be explicit that "`k` stops" means "`k + 1` edges," hence `k + 1` rounds. Note this is *not* a place for unmodified Dijkstra and explain why.
+</ProbeNote>

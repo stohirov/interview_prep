@@ -1,0 +1,38 @@
+**Problem.** Given a string `s`, partition it into as many parts as possible so that **each letter appears in at most one part**. Return the list of part sizes.
+
+## Greedy idea — extend the partition to the last occurrence
+
+A part must contain *all* occurrences of every letter it includes. So as you scan, the current part can't end before the **last occurrence** of any letter seen so far. Track the farthest last-occurrence index; when the scan index reaches it, the part is complete — every letter inside is fully contained.
+
+## Two-pass solution — O(n) time, O(1) space
+
+```java
+List<Integer> partitionLabels(String s) {
+    int[] last = new int[26];                 // last index of each letter
+    for (int i = 0; i < s.length(); i++)
+        last[s.charAt(i) - 'a'] = i;
+
+    List<Integer> sizes = new ArrayList<>();
+    int start = 0, end = 0;                    // current part is [start, end]
+    for (int i = 0; i < s.length(); i++) {
+        end = Math.max(end, last[s.charAt(i) - 'a']);   // must stretch to cover this letter
+        if (i == end) {                        // every letter in [start, i] ends by i
+            sizes.add(end - start + 1);
+            start = i + 1;                     // begin next part
+        }
+    }
+    return sizes;
+}
+```
+
+## Why this is optimal (and greedy)
+
+We cut the moment we *can* — at the earliest index where the running part is self-contained. Cutting earlier is impossible (a letter would span two parts); cutting later would merge two valid parts and reduce the count. So the earliest valid cut maximizes the number of parts. The `int[26]` last-occurrence table makes it O(1) extra space.
+
+The structure resembles interval merging: each letter defines an interval `[first, last]`, and a part is a maximal union of overlapping intervals. The single-pass `end = max(end, last[c])` is exactly merging those intervals on the fly.
+
+<ComplexityTable rows={[
+  {op: "Two-pass scan", best: "O(n)", average: "O(n)", worst: "O(n)", note: "O(1) space — fixed 26-entry table"},
+]} />
+
+<ProbeNote>The key insight to verbalize: "the current part can't close before the last occurrence of any letter it contains." Connecting it to interval merging (each letter is an interval `[first, last]`) shows pattern fluency. The off-by-one in `end - start + 1` and resetting `start = i + 1` are the usual slips.</ProbeNote>

@@ -1,0 +1,55 @@
+**Problem.** Convert between Excel column titles and column numbers:
+- **Title → Number:** `"A" → 1`, `"Z" → 26`, `"AA" → 27`, `"AB" → 28`.
+- **Number → Title:** the inverse.
+
+This is **base-26 conversion**, but with a twist: it's **1-indexed** ("A" = 1, not 0), so there's no digit for zero.
+
+## Title to number — straight base-26 evaluation
+
+Treat the title as a base-26 number where `A..Z` map to `1..26`. Horner-style accumulate:
+
+```java
+int titleToNumber(String s) {
+    int result = 0;
+    for (int i = 0; i < s.length(); i++) {
+        int digit = s.charAt(i) - 'A' + 1;   // 'A' -> 1 ... 'Z' -> 26
+        result = result * 26 + digit;        // shift left one base-26 place, add digit
+    }
+    return result;
+}
+```
+
+`"AB"` = `1 * 26 + 2 = 28`. This direction is the easy one — ordinary positional evaluation.
+
+## Number to title — the bijective-base-26 trick
+
+Normal base conversion has digits `0..25`. Here digits are `1..26` with **no zero**, so before each `% 26` you must **subtract 1** to shift into `0..25`, then map back by adding `'A'`:
+
+```java
+String convertToTitle(int n) {
+    StringBuilder sb = new StringBuilder();
+    while (n > 0) {
+        n--;                                  // shift to 0-indexed: critical step
+        sb.append((char) ('A' + n % 26));     // current least-significant "digit"
+        n /= 26;
+    }
+    return sb.reverse().toString();
+}
+```
+
+The `n--` is the whole problem. Without it, `26` would map to `"A0"`-style garbage; with it, `26 → "Z"` and `27 → "AA"` come out right. This is sometimes called **bijective base-26** — every positive integer maps to a unique non-empty string and vice versa, with no leading-zero ambiguity.
+
+## Walkthrough — 28 → "AB"
+
+```
+n = 28: n-- -> 27; 27 % 26 = 1 -> 'B'; n = 27/26 = 1
+n = 1 : n-- -> 0;   0 % 26 = 0 -> 'A'; n = 0/26 = 0
+reverse("BA") -> "AB"   ✓
+```
+
+<ComplexityTable rows={[
+  {op: "Title -> number", best: "O(L)", average: "O(L)", worst: "O(L)", note: "L = title length"},
+  {op: "Number -> title", best: "O(log₂₆ n)", average: "O(log₂₆ n)", worst: "O(log₂₆ n)", note: "one digit per division"},
+]} />
+
+<ProbeNote>The entire difficulty is the **`n--` before `% 26`** in the number→title direction — it's bijective base-26 (digits 1–26, no zero), not ordinary base-26. Be ready to explain *why* the off-by-one exists (no zero digit) and trace `26 → "Z"` vs the naive `"A0"` bug. The title→number direction is plain positional evaluation and should be quick.</ProbeNote>
