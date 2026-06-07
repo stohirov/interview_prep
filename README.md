@@ -1,4 +1,4 @@
-# Java Interview Prep
+# Cracked Java
 
 A web app for senior Java backend interview preparation. Structured topics with answers
 written for FAANG- and EPAM-style questions, every claim linked back to the JDK 25

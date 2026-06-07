@@ -57,7 +57,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           J<span className="opacity-60">/</span>
         </span>
         <span className="font-display text-[15.5px] font-semibold leading-[1.1] -tracking-[0.01em]">
-          Java Prep
+          Cracked Java
           <small className="mt-0.5 block font-mono text-[10px] font-normal tracking-[0.08em] text-faint">
             CONSOLE
           </small>
