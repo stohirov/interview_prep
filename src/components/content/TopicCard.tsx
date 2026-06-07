@@ -1,45 +1,57 @@
 import { Link } from 'react-router-dom';
 import type { Topic } from '@/content/types';
 import { DifficultyBadge } from './DifficultyBadge';
-import { ProgressRing } from './ProgressRing';
+import { ConicRing } from './ConicRing';
 import { useProgressStore } from '@/features/progress/store';
 
-export function TopicCard({
-  topic,
-  to,
-  index,
-}: {
-  topic: Topic;
-  to: string;
-  index: number;
-}) {
+type TopicState = 'done' | 'prog' | 'new';
+
+function stateOf(pct: number): TopicState {
+  if (pct >= 100) return 'done';
+  if (pct > 0) return 'prog';
+  return 'new';
+}
+
+const STATE = {
+  done: { ring: 'var(--green)', text: 'text-green', label: 'Completed', go: 'Review →' },
+  prog: { ring: 'var(--amber)', text: 'text-amber', label: 'In progress', go: 'Continue →' },
+  new: { ring: 'var(--border-2)', text: 'text-faint', label: 'Not started', go: 'Start →' },
+} as const;
+
+export function TopicCard({ topic, to, index }: { topic: Topic; to: string; index: number }) {
   const entries = useProgressStore((s) => s.entries);
-  const completed = topic.questions.filter((q) => {
+  const total = topic.questions.length;
+  const reviewed = topic.questions.filter((q) => {
     const status = entries[q.id]?.status;
-    return status === 'got-it' || status === 'review';
+    return status && status !== 'unseen';
   }).length;
-  const ratio = topic.questions.length === 0 ? 0 : completed / topic.questions.length;
+  const pct = total === 0 ? 0 : Math.round((reviewed / total) * 100);
+  const state = stateOf(pct);
+  const s = STATE[state];
 
   return (
     <Link
       to={to}
-      className="group block rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 hover:border-brand-500/60 hover:shadow-md transition-all"
+      className="flex flex-col rounded-[13px] border border-border-default bg-panel px-5 py-[18px] transition-[border-color,transform] duration-150 hover:-translate-y-0.5 hover:border-accent"
     >
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-xs font-mono text-slate-400 dark:text-slate-500 tabular-nums">
-              {String(index).padStart(2, '0')}
-            </span>
-            <DifficultyBadge difficulty={topic.difficulty} />
-            <span className="text-xs text-slate-500 dark:text-slate-400">{topic.questions.length} questions</span>
-          </div>
-          <h3 className="font-semibold text-lg text-slate-900 dark:text-slate-100 group-hover:text-brand-700 dark:group-hover:text-brand-100">
-            {topic.title}
-          </h3>
-          <p className="mt-2 text-sm text-slate-600 dark:text-slate-400 line-clamp-3">{topic.summary}</p>
-        </div>
-        <ProgressRing value={ratio} />
+      <div className="mb-3 flex items-center gap-2.5">
+        <span className="font-mono text-[12px] font-semibold text-faint">
+          {String(index).padStart(2, '0')}
+        </span>
+        <DifficultyBadge difficulty={topic.difficulty} />
+        <span className="font-mono text-[11.5px] text-muted">{total} Q</span>
+        <ConicRing pct={pct} size={38} inner={28} color={s.ring} className="ml-auto">
+          <span className={`text-[9.5px] ${state === 'new' ? 'text-muted' : s.text}`}>{pct}</span>
+        </ConicRing>
+      </div>
+      <h3 className="mb-[7px] font-display text-[17px] font-semibold -tracking-[0.01em]">{topic.title}</h3>
+      <p className="flex-1 text-[13px] leading-[1.45] text-muted">{topic.summary}</p>
+      <div className="mt-3.5 flex items-center gap-2 border-t border-border-default pt-[13px]">
+        <span className={`inline-flex items-center gap-1.5 text-[11.5px] font-semibold ${s.text}`}>
+          <span className="h-1.5 w-1.5 rounded-full bg-current" />
+          {s.label}
+        </span>
+        <span className="ml-auto font-mono text-[11px] font-medium text-accent">{s.go}</span>
       </div>
     </Link>
   );

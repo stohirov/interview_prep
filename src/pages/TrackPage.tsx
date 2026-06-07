@@ -1,51 +1,80 @@
 import { Link, useParams } from 'react-router-dom';
 import { getTrack } from '@/content/loader';
-import { Breadcrumbs } from '@/components/layout/Breadcrumbs';
+import { useProgressStore } from '@/features/progress/store';
+import { moduleProgress, trackProgress } from '@/features/progress/selectors';
+import { moduleMeta } from '@/features/ui/moduleMeta';
 
 export function TrackPage() {
   const { trackId } = useParams();
+  const entries = useProgressStore((s) => s.entries);
   const track = getTrack(trackId!);
   if (!track) return <NotFound />;
 
-  return (
-    <div className="max-w-5xl mx-auto px-4 lg:px-8 py-8">
-      <Breadcrumbs items={[{ label: 'Home', to: '/' }, { label: track.title }]} />
-      <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-50">{track.title}</h1>
-      <p className="mt-2 text-slate-600 dark:text-slate-400">{track.description}</p>
+  const overall = trackProgress(track.id, entries);
+  const totalHours = track.modules.reduce((a, m) => a + m.estimatedHours, 0);
 
-      <section className="mt-8 space-y-4">
-        {track.modules.map((m) => (
-          <Link
-            key={m.id}
-            to={`/track/${track.id}/module/${m.id}`}
-            className="block rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 hover:border-brand-500/60 transition-all"
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-50">{m.title}</h3>
-                <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">{m.description}</p>
+  return (
+    <div className="mx-auto w-full max-w-[1120px] px-7 pb-[72px] pt-[38px] lg:px-12">
+      <div className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-accent">
+        // Track · {overall.total} questions · {track.modules.length} modules · ~{totalHours}h
+      </div>
+      <h1 className="mt-2.5 font-display text-[34px] font-semibold leading-[1.08] -tracking-[0.02em]">
+        {track.title}
+      </h1>
+      <p className="mt-3 max-w-[680px] text-[15.5px] text-muted">{track.description}</p>
+
+      <div className="mt-7 grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+        {track.modules.map((mod) => {
+          const meta = moduleMeta(mod.id);
+          const mp = moduleProgress(track.id, mod.id, entries);
+          const questions = mod.topics.reduce((a, t) => a + t.questions.length, 0);
+          return (
+            <Link
+              key={mod.id}
+              to={`/track/${track.id}/module/${mod.id}`}
+              className="rounded-[13px] border border-border-default bg-panel px-[19px] py-[18px] transition-[border-color,transform] duration-150 hover:-translate-y-0.5 hover:border-accent"
+            >
+              <div className="mb-[13px] flex items-center gap-[11px]">
+                <div
+                  className="grid h-9 w-9 place-items-center rounded-[9px] font-mono text-[13px] font-semibold text-white"
+                  style={{ background: meta.gradient }}
+                >
+                  {meta.glyph}
+                </div>
+                <div className="min-w-0">
+                  <h3 className="truncate font-display text-[16px] font-semibold -tracking-[0.01em]">{mod.title}</h3>
+                  <div className="mt-px font-mono text-[12px] text-faint">
+                    {mod.topics.length} topics · {questions} Q · ~{mod.estimatedHours}h
+                  </div>
+                </div>
+                <span className="ml-auto font-mono text-[12px] font-semibold text-muted">{mp.pct}%</span>
               </div>
-              <span className="shrink-0 text-xs font-medium px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                ~{m.estimatedHours}h
-              </span>
-            </div>
-            <div className="mt-4 flex flex-wrap gap-3 text-xs text-slate-500 dark:text-slate-400">
-              <span>{m.topics.length} topics</span>
-              <span>•</span>
-              <span>{m.topics.reduce((a, t) => a + t.questions.length, 0)} questions</span>
-            </div>
-          </Link>
-        ))}
-      </section>
+              <p className="min-h-[36px] text-[13px] leading-[1.45] text-muted">{mod.description}</p>
+              <div className="mt-3.5 h-[5px] overflow-hidden rounded-[3px] bg-border-strong">
+                <i
+                  className="block h-full rounded-[3px]"
+                  style={{ width: `${mp.pct}%`, background: meta.gradient }}
+                />
+              </div>
+              <div className="mt-3 flex items-center gap-3.5 font-mono text-[11px] text-faint">
+                <span>{meta.level}</span>
+                <span>
+                  {mp.reviewed}/{mp.total} reviewed
+                </span>
+              </div>
+            </Link>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
 function NotFound() {
   return (
-    <div className="max-w-3xl mx-auto px-4 py-12">
-      <h1 className="text-2xl font-semibold">Track not found</h1>
-      <Link to="/" className="mt-3 inline-block text-brand-600 dark:text-brand-100 underline">
+    <div className="mx-auto max-w-3xl px-7 py-16">
+      <h1 className="font-display text-2xl font-semibold">Track not found</h1>
+      <Link to="/" className="mt-3 inline-block text-accent underline">
         Go home
       </Link>
     </div>

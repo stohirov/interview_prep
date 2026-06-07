@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
 import { allSources, SOURCE_TYPE_LABELS } from '@/content/loader';
 import type { SourceType } from '@/content/types';
-import { Breadcrumbs } from '@/components/layout/Breadcrumbs';
 import { SourceItem } from '@/components/content/SourceList';
+
+const selectClass =
+  'h-9 rounded-[9px] border border-border-default bg-panel px-3 text-[13px] text-text focus:border-accent focus:outline-none';
 
 export function SourcesPage() {
   const sources = useMemo(() => allSources(), []);
@@ -21,7 +23,11 @@ export function SourcesPage() {
     if (topicFilter !== 'all' && s.topicId !== topicFilter) return false;
     if (query.trim()) {
       const q = query.toLowerCase();
-      if (!s.source.title.toLowerCase().includes(q) && !s.source.url.toLowerCase().includes(q) && !(s.source.description ?? '').toLowerCase().includes(q)) {
+      if (
+        !s.source.title.toLowerCase().includes(q) &&
+        !s.source.url.toLowerCase().includes(q) &&
+        !(s.source.description ?? '').toLowerCase().includes(q)
+      ) {
         return false;
       }
     }
@@ -29,27 +35,27 @@ export function SourcesPage() {
   });
 
   return (
-    <div className="max-w-5xl mx-auto px-4 lg:px-8 py-8">
-      <Breadcrumbs items={[{ label: 'Home', to: '/' }, { label: 'Sources' }]} />
-      <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-50">Authoritative sources</h1>
-      <p className="mt-2 text-slate-600 dark:text-slate-400">
-        Every source used across all topics. Filter by type, topic, or text. Anything with the shield icon is canonical
-        (Javadoc / JLS / JEP / OpenJDK source).
+    <div className="mx-auto w-full max-w-[1120px] px-7 pb-[72px] pt-[38px] lg:px-12">
+      <div className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-accent">
+        // Sources · {sources.length} references
+      </div>
+      <h1 className="mt-2.5 font-display text-[34px] font-semibold leading-[1.08] -tracking-[0.02em]">
+        Authoritative sources
+      </h1>
+      <p className="mt-3 max-w-[680px] text-[15.5px] text-muted">
+        Every source used across all topics. Filter by type, topic, or text — anything with the green dot is canonical
+        (Javadoc / JLS / JEP / OpenJDK).
       </p>
 
-      <div className="mt-6 grid sm:grid-cols-3 gap-3">
+      <div className="mt-6 flex flex-wrap gap-2.5">
         <input
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Filter sources..."
-          className="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm"
+          placeholder="Filter sources…"
+          className="h-9 min-w-[200px] flex-1 rounded-[9px] border border-border-default bg-panel px-3.5 text-[13px] text-text placeholder:text-faint focus:border-accent focus:outline-none"
         />
-        <select
-          value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value as SourceType | 'all')}
-          className="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm"
-        >
+        <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as SourceType | 'all')} className={selectClass}>
           <option value="all">All types</option>
           {(Object.keys(SOURCE_TYPE_LABELS) as SourceType[]).map((t) => (
             <option key={t} value={t}>
@@ -57,11 +63,7 @@ export function SourcesPage() {
             </option>
           ))}
         </select>
-        <select
-          value={topicFilter}
-          onChange={(e) => setTopicFilter(e.target.value)}
-          className="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm"
-        >
+        <select value={topicFilter} onChange={(e) => setTopicFilter(e.target.value)} className={selectClass}>
           <option value="all">All topics</option>
           {topicOptions.map((t) => (
             <option key={t.id} value={t.id}>
@@ -71,15 +73,21 @@ export function SourcesPage() {
         </select>
       </div>
 
-      <p className="mt-4 text-xs text-slate-500 dark:text-slate-400">
+      <p className="mt-4 font-mono text-[12px] text-faint">
         Showing {filtered.length} of {sources.length}
       </p>
 
-      <div className="mt-3 grid md:grid-cols-2 gap-3">
-        {filtered.map((s) => (
-          <SourceItem key={`${s.topicId}::${s.source.url}`} source={s.source} />
-        ))}
-      </div>
+      {filtered.length === 0 ? (
+        <p className="mt-3 rounded-[13px] border border-dashed border-border-default px-5 py-10 text-center text-[14px] text-muted">
+          No sources match these filters.
+        </p>
+      ) : (
+        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+          {filtered.map((s) => (
+            <SourceItem key={`${s.topicId}::${s.source.url}`} source={s.source} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,53 +1,106 @@
 import { Link } from 'react-router-dom';
 import { useMemo, useState } from 'react';
 import { search } from '@/features/search';
-import { Breadcrumbs } from '@/components/layout/Breadcrumbs';
 import { DifficultyBadge } from '@/components/content/DifficultyBadge';
+
+const SUGGESTIONS = [
+  'HashMap resize',
+  'virtual threads',
+  'fail-fast',
+  'transaction isolation',
+  'index B-tree',
+  'volatile',
+];
+
+function SearchIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-[18px] w-[18px] text-faint">
+      <circle cx="11" cy="11" r="7" />
+      <path d="m21 21-4.3-4.3" />
+    </svg>
+  );
+}
 
 export function SearchPage() {
   const [query, setQuery] = useState('');
   const results = useMemo(() => search(query), [query]);
 
-  return (
-    <div className="max-w-4xl mx-auto px-4 lg:px-8 py-8">
-      <Breadcrumbs items={[{ label: 'Home', to: '/' }, { label: 'Search' }]} />
-      <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-50">Search</h1>
-      <input
-        type="search"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        autoFocus
-        placeholder="e.g. HashMap resize, treeify, fail-fast, virtual threads..."
-        className="mt-4 w-full px-4 py-3 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500"
-      />
+  const topics = results.filter((r) => r.kind === 'topic');
+  const questions = results.filter((r) => r.kind === 'question');
+  const groups = [
+    { label: 'Topics', items: topics },
+    { label: 'Questions', items: questions },
+  ].filter((g) => g.items.length > 0);
 
-      <div className="mt-6 space-y-2">
-        {query.trim() && results.length === 0 && (
-          <p className="text-sm text-slate-500 italic">No matches.</p>
-        )}
-        {results.map((r) => {
-          const base = `/track/${r.trackId}/module/${r.moduleId}/topic/${r.topicId}`;
-          const url = r.question ? `${base}/question/${r.question.id}` : base;
-          return (
-            <Link
-              key={`${r.kind}-${r.question?.id ?? r.topicId}`}
-              to={url}
-              className="block rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 hover:border-brand-500/60"
-            >
-              <div className="flex items-center gap-2 flex-wrap mb-1">
-                <span className="text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                  {r.kind}
-                </span>
-                {r.question && <DifficultyBadge difficulty={r.question.difficulty} />}
-                <span className="text-xs text-slate-500 dark:text-slate-400">{r.topic.title}</span>
-              </div>
-              <p className="text-slate-900 dark:text-slate-100">{r.question?.prompt ?? r.topic.title}</p>
-              {!r.question && (
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{r.topic.summary}</p>
-              )}
-            </Link>
-          );
-        })}
+  return (
+    <div className="mx-auto w-full max-w-[1120px] px-7 pb-[72px] pt-[38px] lg:px-12">
+      <div className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-accent">// Search</div>
+      <h1 className="mt-2.5 font-display text-[34px] font-semibold leading-[1.08] -tracking-[0.02em]">
+        Search everything
+      </h1>
+
+      <div className="relative mt-6 max-w-[680px]">
+        <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2">
+          <SearchIcon />
+        </span>
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          autoFocus
+          placeholder="Topics, questions, tags…"
+          className="h-[52px] w-full rounded-[12px] border border-border-default bg-panel pl-12 pr-4 text-[15.5px] text-text placeholder:text-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-[color:var(--accent-line)]"
+        />
+      </div>
+
+      <div className="mt-3.5 flex flex-wrap gap-2">
+        {SUGGESTIONS.map((s) => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => setQuery(s)}
+            className="rounded-full border border-border-default bg-panel px-3.5 py-1.5 font-mono text-[12px] text-muted transition-colors hover:border-accent hover:text-text"
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+
+      {query.trim() && results.length === 0 && (
+        <p className="mt-9 rounded-[13px] border border-dashed border-border-default px-5 py-10 text-center text-[14px] text-muted">
+          No matches for “{query}”.
+        </p>
+      )}
+
+      <div className="mt-8 flex flex-col gap-8">
+        {groups.map((group) => (
+          <section key={group.label}>
+            <div className="mb-3 flex items-baseline gap-2.5">
+              <h2 className="font-mono text-[11px] uppercase tracking-[0.1em] text-faint">{group.label}</h2>
+              <span className="font-mono text-[11px] text-muted">{group.items.length}</span>
+            </div>
+            <div className="flex flex-col gap-[9px]">
+              {group.items.map((r) => {
+                const base = `/track/${r.trackId}/module/${r.moduleId}/topic/${r.topicId}`;
+                const url = r.question ? `${base}/question/${r.question.id}` : base;
+                return (
+                  <Link
+                    key={`${r.kind}-${r.question?.id ?? r.topicId}`}
+                    to={url}
+                    className="block rounded-xl border border-border-default bg-panel px-[18px] py-4 transition-colors hover:border-accent"
+                  >
+                    <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                      {r.question && <DifficultyBadge difficulty={r.question.difficulty} />}
+                      <span className="font-mono text-[11px] text-faint">{r.topic.title}</span>
+                    </div>
+                    <p className="text-[14.5px] font-medium text-text">{r.question?.prompt ?? r.topic.title}</p>
+                    {!r.question && <p className="mt-1 text-[13px] leading-[1.45] text-muted">{r.topic.summary}</p>}
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+        ))}
       </div>
     </div>
   );

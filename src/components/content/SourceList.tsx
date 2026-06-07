@@ -1,15 +1,15 @@
 import type { Source, SourceType } from '@/content/types';
 import { groupSourcesByType, SOURCE_TYPE_LABELS } from '@/content/loader';
 
-const typeStyles: Record<SourceType, string> = {
-  javadoc: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200',
-  spec: 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-200',
-  jep: 'bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-200',
-  tutorial: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200',
-  'official-docs': 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-200',
-  book: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200',
-  article: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
-  video: 'bg-pink-100 text-pink-800 dark:bg-pink-900/40 dark:text-pink-200',
+const typeBadge: Record<SourceType, string> = {
+  javadoc: 'bg-accent-soft text-accent',
+  spec: 'bg-accent-soft text-accent',
+  jep: 'bg-rose-soft text-rose',
+  tutorial: 'bg-green-soft text-green',
+  'official-docs': 'bg-panel-3 text-muted',
+  book: 'bg-amber-soft text-amber',
+  article: 'bg-panel-3 text-muted',
+  video: 'bg-rose-soft text-rose',
 };
 
 function hostOf(url: string): string {
@@ -22,18 +22,8 @@ function hostOf(url: string): string {
 
 function ExternalIcon() {
   return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="inline-block opacity-60">
-      <path d="M14 3h7v7" />
-      <path d="M10 14L21 3" />
-      <path d="M21 14v7H3V3h7" />
-    </svg>
-  );
-}
-
-function ShieldIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" className="inline-block text-emerald-600 dark:text-emerald-400" aria-label="authoritative source">
-      <path d="M12 1l9 4v6c0 5.5-3.8 10.7-9 12-5.2-1.3-9-6.5-9-12V5l9-4z" />
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-3 w-3 text-faint">
+      <path d="M7 17 17 7M9 7h8v8" />
     </svg>
   );
 }
@@ -44,43 +34,41 @@ export function SourceItem({ source }: { source: Source }) {
       href={source.url}
       target="_blank"
       rel="noopener noreferrer"
-      className="group block rounded-lg border border-slate-200 dark:border-slate-800 p-3 hover:border-brand-500/60 dark:hover:border-brand-400/60 hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors"
+      className="block rounded-[10px] border border-border-default bg-panel px-3.5 py-[13px] transition-colors hover:border-[color:var(--accent-line)]"
     >
-      <div className="flex items-start gap-2">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className={`text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded ${typeStyles[source.type]}`}>
-              {SOURCE_TYPE_LABELS[source.type]}
-            </span>
-            {source.authoritative && <ShieldIcon />}
-            <span className="text-xs text-slate-500 dark:text-slate-400 truncate">{hostOf(source.url)}</span>
-          </div>
-          <div className="mt-1 text-sm font-medium text-slate-900 dark:text-slate-100 group-hover:text-brand-700 dark:group-hover:text-brand-100 flex items-center gap-1.5">
-            <span className="break-words">{source.title}</span>
-            <ExternalIcon />
-          </div>
-          {source.description && (
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{source.description}</p>
-          )}
-        </div>
+      <div className="mb-[7px] flex items-center gap-2">
+        <span
+          className={`inline-flex items-center rounded-[5px] px-[7px] py-[3px] font-mono text-[9.5px] font-semibold uppercase tracking-[0.06em] ${typeBadge[source.type]}`}
+        >
+          {SOURCE_TYPE_LABELS[source.type]}
+        </span>
+        <span className="ml-auto flex items-center gap-[5px] text-[11px] text-muted">
+          {source.authoritative && <span className="h-[7px] w-[7px] rounded-full bg-green" />}
+          {hostOf(source.url)}
+        </span>
       </div>
+      <h4 className="flex items-center gap-1.5 text-[13.5px] font-semibold text-text">
+        <span className="break-words">{source.title}</span>
+        <ExternalIcon />
+      </h4>
+      {source.description && <p className="mt-1 text-[12px] leading-[1.4] text-muted">{source.description}</p>}
     </a>
   );
 }
 
-export function SourceList({ sources, dense }: { sources: Source[]; dense?: boolean }) {
+export function SourceList({ sources }: { sources: Source[]; dense?: boolean }) {
   if (!sources.length) {
-    return <p className="text-sm text-slate-500 dark:text-slate-400 italic">No sources yet.</p>;
+    return <p className="text-[13px] italic text-muted">No sources yet.</p>;
   }
   const groups = groupSourcesByType(sources);
   return (
-    <div className={dense ? 'space-y-4' : 'space-y-6'}>
+    <div>
       {groups.map((g) => (
         <div key={g.type}>
-          <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
+          <div className="mb-2 mt-[18px] font-mono text-[10px] uppercase tracking-[0.1em] text-faint first:mt-0">
             {SOURCE_TYPE_LABELS[g.type]}
-          </h4>
-          <div className="space-y-2">
+          </div>
+          <div className="flex flex-col gap-[9px]">
             {g.items.map((s) => (
               <SourceItem key={s.url} source={s} />
             ))}
