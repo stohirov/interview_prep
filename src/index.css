@@ -214,8 +214,27 @@
   }
 }
 
+/* Answer reveal — progressive enhancement.
+   The answer is always in the DOM (so crawlers and no-JS visitors get the full
+   content). Only when JS is enabled (html.js, set pre-paint in index.html) do we
+   collapse it behind a fade until the visitor clicks "Reveal answer". */
+html.js .answer-reveal[data-revealed='false'] .answer-body {
+  max-height: 9rem;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 35%, transparent);
+  mask-image: linear-gradient(to bottom, #000 35%, transparent);
+  pointer-events: none;
+  user-select: none;
+}
+/* Without JS the reveal button does nothing, so hide it (answer is already shown). */
+html:not(.js) .answer-reveal-btn {
+  display: none;
+}
+
 @media print {
   .no-print { display: none !important; }
+  /* never collapse answers when printing */
+  .answer-reveal .answer-body { max-height: none !important; mask-image: none !important; -webkit-mask-image: none !important; }
   body { background: white !important; color: black !important; }
   .shiki { border: 1px solid #ccc !important; }
   a { color: black !important; text-decoration: underline !important; }

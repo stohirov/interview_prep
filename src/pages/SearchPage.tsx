@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { useMemo, useState } from 'react';
 import { search } from '@/features/search';
 import { DifficultyBadge } from '@/components/content/DifficultyBadge';
+import { Seo } from '@/components/seo/Seo';
 
 const SUGGESTIONS = [
   'HashMap resize',
@@ -34,6 +35,11 @@ export function SearchPage() {
 
   return (
     <div className="mx-auto w-full max-w-[1120px] px-7 pb-[72px] pt-[38px] lg:px-12">
+      <Seo
+        title="Search Java Interview Questions — Cracked Java"
+        description="Search hundreds of Java backend interview questions and answers across Collections, OOP, Spring, PostgreSQL, algorithms, and system design."
+        canonicalPath="/search"
+      />
       <div className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-accent">// Search</div>
       <h1 className="mt-2.5 font-display text-[34px] font-semibold leading-[1.08] -tracking-[0.02em]">
         Search everything

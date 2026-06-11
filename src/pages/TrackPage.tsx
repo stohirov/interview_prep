@@ -3,6 +3,8 @@ import { getTrack } from '@/content/loader';
 import { useProgressStore } from '@/features/progress/store';
 import { moduleProgress, trackProgress } from '@/features/progress/selectors';
 import { moduleMeta } from '@/features/ui/moduleMeta';
+import { Seo } from '@/components/seo/Seo';
+import { breadcrumbList, course } from '@/components/seo/jsonld';
 
 export function TrackPage() {
   const { trackId } = useParams();
@@ -12,9 +14,22 @@ export function TrackPage() {
 
   const overall = trackProgress(track.id, entries);
   const totalHours = track.modules.reduce((a, m) => a + m.estimatedHours, 0);
+  const canonicalPath = `/track/${track.id}`;
 
   return (
     <div className="mx-auto w-full max-w-[1120px] px-7 pb-[72px] pt-[38px] lg:px-12">
+      <Seo
+        title={`${track.title} — Cracked Java`}
+        description={track.description}
+        canonicalPath={canonicalPath}
+        jsonLd={[
+          breadcrumbList([
+            { name: 'Cracked Java', path: '/' },
+            { name: track.title, path: canonicalPath },
+          ]),
+          course(track),
+        ]}
+      />
       <div className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-accent">
         // Track · {overall.total} questions · {track.modules.length} modules · ~{totalHours}h
       </div>

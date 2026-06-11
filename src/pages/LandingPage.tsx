@@ -8,6 +8,8 @@ import {
   trackProgress,
 } from '@/features/progress/selectors';
 import { moduleMeta } from '@/features/ui/moduleMeta';
+import { Seo } from '@/components/seo/Seo';
+import { moduleItemList, webSite } from '@/components/seo/jsonld';
 
 const TRACK_ID = 'java-backend';
 
@@ -79,6 +81,12 @@ export function LandingPage() {
 
   return (
     <div className="mx-auto w-full max-w-[1120px] px-7 pb-[72px] pt-[38px] lg:px-12">
+      <Seo
+        title="Cracked Java — Java Backend Interview Questions & Answers"
+        description={`Free Java backend interview prep: ${overall.total}+ questions with detailed answers across ${track.modules.length} modules — Collections, OOP, PostgreSQL, Spring, data structures & algorithms, and system design.`}
+        canonicalPath="/"
+        jsonLd={[webSite(), moduleItemList(TRACK_ID, track.modules)]}
+      />
       <div className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-accent">
         // {overall.total} questions · {track.modules.length} modules · ~{totalHours}h
       </div>
@@ -89,7 +97,9 @@ export function LandingPage() {
         backend interview.
       </h1>
       <p className="mt-4 max-w-[560px] text-[17px] text-muted">
-        Structured topics and answers, every claim grounded in the JDK 25 Javadoc, the JLS and JEPs.
+        Free, structured Java backend interview questions and answers — covering Collections, OOP,
+        PostgreSQL, Spring, data structures &amp; algorithms, and system design. Every claim grounded
+        in the JDK 25 Javadoc, the JLS and JEPs.
       </p>
 
       <div className="mt-[26px] flex flex-wrap gap-3">

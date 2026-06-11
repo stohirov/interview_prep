@@ -10,8 +10,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
     <title>Cracked Java</title>
     <script>
-      // Apply theme before paint to avoid flash
+      // Mark JS-enabled (collapses answers behind reveal) + apply theme before paint.
       (function () {
+        document.documentElement.classList.add('js');
         try {
           var stored = localStorage.getItem('jip-theme');
           var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;

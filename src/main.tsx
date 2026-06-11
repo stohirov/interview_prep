@@ -1,13 +1,8 @@
-import { StrictMode } from 'react';
-import { createRoot } from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
+import { ViteReactSSG } from 'vite-react-ssg';
+import { routes } from './routes';
 import './index.css';
-import App from './App.tsx';
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
-  </StrictMode>,
-);
+// ViteReactSSG provides the Router (no BrowserRouter needed) and handles both
+// server-side prerendering (renderToString) and client hydration. StrictMode is
+// applied on the client only, avoiding double-render during prerender.
+export const createRoot = ViteReactSSG({ routes });

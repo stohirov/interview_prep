@@ -1,5 +1,8 @@
+import { useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
 import { useUiStore } from '@/features/ui/store';
+import { useProgressStore } from '@/features/progress/store';
+import { useThemeStore } from '@/features/theme/store';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
 import { CommandPalette } from './CommandPalette';
@@ -8,6 +11,15 @@ import { CommandPalette } from './CommandPalette';
 export function AppShell() {
   const sidebarOpen = useUiStore((s) => s.sidebarOpen);
   const closeSidebar = useUiStore((s) => s.closeSidebar);
+  const hydrateProgress = useProgressStore((s) => s.hydrate);
+  const hydrateTheme = useThemeStore((s) => s.hydrate);
+
+  // Client-only: localStorage-backed stores hydrate after mount, never during
+  // server-side prerender (renderToString does not run effects).
+  useEffect(() => {
+    hydrateProgress();
+    hydrateTheme();
+  }, [hydrateProgress, hydrateTheme]);
 
   return (
     <div className="flex min-h-screen">

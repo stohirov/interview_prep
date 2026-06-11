@@ -4,6 +4,7 @@ import { allQuestions } from '@/content/loader';
 import { DifficultyBadge } from '@/components/content/DifficultyBadge';
 import { TagPill } from '@/components/content/TagPill';
 import { StatusBadge } from '@/components/content/StatusBadge';
+import { Seo } from '@/components/seo/Seo';
 
 function StarIcon() {
   return (
@@ -21,6 +22,12 @@ export function BookmarksPage() {
 
   return (
     <div className="mx-auto w-full max-w-[1120px] px-7 pb-[72px] pt-[38px] lg:px-12">
+      <Seo
+        title="Bookmarks — Cracked Java"
+        description="Your starred Java interview questions."
+        canonicalPath="/bookmarks"
+        robots="noindex,follow"
+      />
       <div className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-accent">
         // Bookmarks · {items.length} starred
       </div>

@@ -6,6 +6,8 @@ import { TagPill, AskedAtPill } from '@/components/content/TagPill';
 import { StatusBadge } from '@/components/content/StatusBadge';
 import { SourceList } from '@/components/content/SourceList';
 import { MdxRenderer } from '@/components/mdx/MdxRenderer';
+import { Seo } from '@/components/seo/Seo';
+import { breadcrumbList, qaPage } from '@/components/seo/jsonld';
 import { useProgressStore } from '@/features/progress/store';
 import type { ProgressStatus } from '@/content/types';
 
@@ -63,6 +65,7 @@ export function QuestionPage() {
   if (!track || !mod || !found) {
     return (
       <div className="mx-auto max-w-3xl px-7 py-16">
+        <Seo title="Question not found — Cracked Java" description="" canonicalPath="/" robots="noindex,follow" />
         <h1 className="font-display text-2xl font-semibold">Question not found</h1>
         <Link to="/" className="mt-3 inline-block text-accent underline">
           Go home
@@ -75,9 +78,28 @@ export function QuestionPage() {
   const Answer = loadAnswerComponent(question.answerPath);
   const sources = question.sources?.length ? question.sources : topic.sources;
   const topicHref = `/track/${track.id}/module/${mod.id}/topic/${topic.id}`;
+  const canonicalPath = `/track/${track.id}/module/${mod.id}/topic/${topic.id}/question/${question.id}`;
+  const metaTitle =
+    question.prompt.length > 60 ? `${question.prompt.slice(0, 57).trimEnd()}…` : question.prompt;
 
   return (
     <div className="mx-auto w-full max-w-[1120px] px-7 pb-[72px] pt-[38px] lg:px-12">
+      <Seo
+        title={`${metaTitle} — Cracked Java`}
+        description={`${question.prompt} — ${topic.summary}`}
+        canonicalPath={canonicalPath}
+        ogType="article"
+        jsonLd={[
+          breadcrumbList([
+            { name: 'Cracked Java', path: '/' },
+            { name: track.title, path: `/track/${track.id}` },
+            { name: mod.title, path: `/track/${track.id}/module/${mod.id}` },
+            { name: topic.title, path: topicHref },
+            { name: metaTitle, path: canonicalPath },
+          ]),
+          qaPage(question, topic, canonicalPath),
+        ]}
+      />
       <div className="grid items-start gap-10 lg:grid-cols-[1fr_332px]">
         <div className="min-w-0">
           {/* meta row */}
@@ -116,21 +138,22 @@ export function QuestionPage() {
             </button>
           </div>
 
-          {/* reveal answer */}
-          <section className="mt-7">
-            {!revealed ? (
+          {/* reveal answer — the answer is always rendered into the DOM so it is
+              present in the prerendered HTML (crawlers & no-JS see full content).
+              With JS it is collapsed until revealed (see .answer-reveal in index.css). */}
+          <section className="answer-reveal mt-7" data-revealed={revealed}>
+            {!revealed && (
               <button
                 type="button"
                 onClick={() => setRevealed(true)}
-                className="no-print inline-flex h-11 items-center gap-2.5 rounded-[10px] bg-gradient-to-br from-accent to-[#8b7af7] px-5 text-[14.5px] font-semibold text-white shadow-[0_6px_20px_-8px_var(--accent)] transition-[filter] hover:brightness-[1.06]"
+                className="answer-reveal-btn no-print mb-5 inline-flex h-11 items-center gap-2.5 rounded-[10px] bg-gradient-to-br from-accent to-[#8b7af7] px-5 text-[14.5px] font-semibold text-white shadow-[0_6px_20px_-8px_var(--accent)] transition-[filter] hover:brightness-[1.06]"
               >
                 Reveal answer ↓
               </button>
-            ) : (
-              <article className="rounded-[14px] border border-border-default bg-panel p-6 sm:p-7">
-                <MdxRenderer Component={Answer} />
-              </article>
             )}
+            <article className="answer-body rounded-[14px] border border-border-default bg-panel p-6 sm:p-7">
+              <MdxRenderer Component={Answer} />
+            </article>
           </section>
 
           {/* status buttons */}

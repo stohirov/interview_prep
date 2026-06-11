@@ -5,6 +5,8 @@ import { getModule, getTrack } from '@/content/loader';
 import { useProgressStore } from '@/features/progress/store';
 import { moduleProgress } from '@/features/progress/selectors';
 import { TopicCard } from '@/components/content/TopicCard';
+import { Seo } from '@/components/seo/Seo';
+import { breadcrumbList, topicItemList } from '@/components/seo/jsonld';
 
 type LevelFilter = 'all' | Difficulty;
 type StatusFilter = 'all' | 'prog' | 'new';
@@ -93,8 +95,23 @@ export function ModulePage() {
     return true;
   });
 
+  const canonicalPath = `/track/${track.id}/module/${mod.id}`;
+
   return (
     <div className="mx-auto w-full max-w-[1120px] px-7 pb-[72px] pt-[38px] lg:px-12">
+      <Seo
+        title={`${mod.title} Interview Questions & Answers — Cracked Java`}
+        description={`${mod.description} ${totalQuestions} interview questions with detailed answers across ${mod.topics.length} topics.`}
+        canonicalPath={canonicalPath}
+        jsonLd={[
+          breadcrumbList([
+            { name: 'Cracked Java', path: '/' },
+            { name: track.title, path: `/track/${track.id}` },
+            { name: mod.title, path: canonicalPath },
+          ]),
+          topicItemList(track.id, mod.id, mod.topics),
+        ]}
+      />
       <div className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-accent">
         // Module · {mod.topics.length} topics · {totalQuestions} questions
       </div>

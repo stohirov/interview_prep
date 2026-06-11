@@ -4,6 +4,7 @@ import { useProgressStore } from '@/features/progress/store';
 import { gotItCount, moduleProgress, trackProgress } from '@/features/progress/selectors';
 import { moduleMeta } from '@/features/ui/moduleMeta';
 import { ConicRing } from '@/components/content/ConicRing';
+import { Seo } from '@/components/seo/Seo';
 
 const TRACK_ID = 'java-backend';
 
@@ -45,6 +46,12 @@ export function ProgressPage() {
 
   return (
     <div className="mx-auto w-full max-w-[1120px] px-7 pb-[72px] pt-[38px] lg:px-12">
+      <Seo
+        title="Your Progress — Cracked Java"
+        description="Track your Java interview preparation progress."
+        canonicalPath="/progress"
+        robots="noindex,follow"
+      />
       <div className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-accent">
         // Progress · {overall.pct}% complete
       </div>

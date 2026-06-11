@@ -4,6 +4,8 @@ import { QuestionCard } from '@/components/content/QuestionCard';
 import { SourceList } from '@/components/content/SourceList';
 import { DifficultyBadge } from '@/components/content/DifficultyBadge';
 import { MdxRenderer } from '@/components/mdx/MdxRenderer';
+import { Seo } from '@/components/seo/Seo';
+import { breadcrumbList } from '@/components/seo/jsonld';
 
 export function TopicPage() {
   const { trackId, moduleId, topicId } = useParams();
@@ -14,6 +16,7 @@ export function TopicPage() {
   if (!track || !mod || !topic) {
     return (
       <div className="mx-auto max-w-3xl px-7 py-16">
+        <Seo title="Topic not found — Cracked Java" description="" canonicalPath="/" robots="noindex,follow" />
         <h1 className="font-display text-2xl font-semibold">Topic not found</h1>
         <Link to="/" className="mt-3 inline-block text-accent underline">
           Go home
@@ -23,9 +26,22 @@ export function TopicPage() {
   }
 
   const TopicMdx = loadTopicComponent(topic.contentPath);
+  const canonicalPath = `/track/${track.id}/module/${mod.id}/topic/${topic.id}`;
 
   return (
     <div className="mx-auto w-full max-w-[1120px] px-7 pb-[72px] pt-[38px] lg:px-12">
+      <Seo
+        title={`${topic.title} — Java Interview Guide | Cracked Java`}
+        description={topic.summary}
+        canonicalPath={canonicalPath}
+        ogType="article"
+        jsonLd={breadcrumbList([
+          { name: 'Cracked Java', path: '/' },
+          { name: track.title, path: `/track/${track.id}` },
+          { name: mod.title, path: `/track/${track.id}/module/${mod.id}` },
+          { name: topic.title, path: canonicalPath },
+        ])}
+      />
       <div className="grid items-start gap-10 lg:grid-cols-[1fr_332px]">
         <div className="min-w-0">
           {/* lesson header */}

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { allSources, SOURCE_TYPE_LABELS } from '@/content/loader';
 import type { SourceType } from '@/content/types';
 import { SourceItem } from '@/components/content/SourceList';
+import { Seo } from '@/components/seo/Seo';
 
 const selectClass =
   'h-9 rounded-[9px] border border-border-default bg-panel px-3 text-[13px] text-text focus:border-accent focus:outline-none';
@@ -36,6 +37,11 @@ export function SourcesPage() {
 
   return (
     <div className="mx-auto w-full max-w-[1120px] px-7 pb-[72px] pt-[38px] lg:px-12">
+      <Seo
+        title="Authoritative Java Sources — Cracked Java"
+        description="A curated index of authoritative Java sources — JDK Javadoc, the Java Language Specification, JEPs, Spring and PostgreSQL docs — backing every interview answer."
+        canonicalPath="/sources"
+      />
       <div className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-accent">
         // Sources · {sources.length} references
       </div>
